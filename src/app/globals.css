@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+/*
+  Design tokens.
+
+  Two families, deliberately kept apart:
+
+  — Product tokens (surface, ink, line, brand) approximate Oolio Insights so the
+    POC reads as part of the product rather than as a separate tool.
+  — Chart tokens are a validated data-visualisation palette. They are not the
+    product's brand colours, because brand colours are chosen to look like a
+    company and chart colours have to be told apart by someone who cannot see
+    red. Both light and dark steps were run through the palette validator.
+*/
+:root {
+  color-scheme: light;
+
+  --surface:        #ffffff;
+  --surface-sunken: #f7f7f8;
+  --surface-raised: #ffffff;
+  --surface-hover:  #f4f4f5;
+
+  --ink:            #16181d;
+  --ink-secondary:  #5b6070;
+  --ink-muted:      #8b90a0;
+
+  --line:           #e6e7eb;
+  --line-strong:    #d2d4da;
+
+  --brand:          #ee3d2e;
+  --accent:         #6c4ef2;
+  --accent-soft:    #efecff;
+
+  /* Identity tiers. Ordinal by certainty, not by brand. */
+  --tier-member:       #2a78d6;
+  --tier-card:         #eb6834;
+  --tier-unattributed: #c9ccd4;
+
+  /* Guest flow. Gains share one blue ramp; losses take the diverging red arm. */
+  --gain-returning:    #1c5cab;
+  --gain-new:          #2a78d6;
+  --gain-reactivated:  #86b6ef;
+  --loss:              #e34948;
+
+  --good:     #1baf7a;
+  --warning:  #eda100;
+  --critical: #d63b30;
+
+  --grid:     #eef0f3;
+}
+
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    color-scheme: dark;
+    --surface:        #17171a;
+    --surface-sunken: #101012;
+    --surface-raised: #1f1f23;
+    --surface-hover:  #26262b;
+    --ink:            #f2f2f4;
+    --ink-secondary:  #a8acb8;
+    --ink-muted:      #767b88;
+    --line:           #2c2d33;
+    --line-strong:    #3a3c44;
+    --accent-soft:    #262046;
+    --tier-member:       #3987e5;
+    --tier-card:         #d95926;
+    --tier-unattributed: #4a4c55;
+    --gain-returning:    #256abf;
+    --gain-new:          #3987e5;
+    --gain-reactivated:  #9ec5f4;
+    --loss:              #e66767;
+    --good:     #199e70;
+    --warning:  #c98500;
+    --critical: #e05a50;
+    --grid:     #26262b;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface:        #17171a;
+  --surface-sunken: #101012;
+  --surface-raised: #1f1f23;
+  --surface-hover:  #26262b;
+  --ink:            #f2f2f4;
+  --ink-secondary:  #a8acb8;
+  --ink-muted:      #767b88;
+  --line:           #2c2d33;
+  --line-strong:    #3a3c44;
+  --accent-soft:    #262046;
+  --tier-member:       #3987e5;
+  --tier-card:         #d95926;
+  --tier-unattributed: #4a4c55;
+  --gain-returning:    #256abf;
+  --gain-new:          #3987e5;
+  --gain-reactivated:  #9ec5f4;
+  --loss:              #e66767;
+  --good:     #199e70;
+  --warning:  #c98500;
+  --critical: #e05a50;
+  --grid:     #26262b;
+}
+
+@theme inline {
+  --color-surface:        var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover:  var(--surface-hover);
+  --color-ink:            var(--ink);
+  --color-ink-secondary:  var(--ink-secondary);
+  --color-ink-muted:      var(--ink-muted);
+  --color-line:           var(--line);
+  --color-line-strong:    var(--line-strong);
+  --color-brand:          var(--brand);
+  --color-accent:         var(--accent);
+  --color-accent-soft:    var(--accent-soft);
+  --color-good:           var(--good);
+  --color-warning:        var(--warning);
+  --color-critical:       var(--critical);
+  --color-member:         var(--tier-member);
+  --color-card-tier:      var(--tier-card);
+  --color-unattributed:   var(--tier-unattributed);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+html, body { height: 100%; }
+
+body {
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05" 1, "ss01" 1;
+}
+
+/* Tabular figures everywhere a number can change, so columns do not jitter. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; border: 3px solid var(--surface); }
+::-webkit-scrollbar-track { background: transparent; }
