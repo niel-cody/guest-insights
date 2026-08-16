@@ -21,7 +21,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyView } from "../src/app/[org]/guests/GuestGrid";
+import { applyView } from "../src/app/[org]/[period]/guests/GuestGrid";
 import { DEFAULT_VIEW, parseView, toQuery, type View } from "../src/lib/url-state";
 import type { Guest, Guests, Org } from "../src/lib/types";
 
@@ -53,12 +53,19 @@ function coldLoad(query: string): View {
 
 async function main() {
   for (const slug of SLUGS) {
+    // Every selectable period is exercised, not only the default — a filter that
+    // works on the current window and drops on a historical one is the same
+    // defect wearing a different date.
+    const index = JSON.parse(
+      await readFile(join(DATA, slug, "periods.json"), "utf8"),
+    ) as { periods: { id: string }[] };
+    for (const period of index.periods.map((p) => p.id)) {
     const [guests, org] = await Promise.all([
-      readFile(join(DATA, slug, "guests.json"), "utf8").then((t) => JSON.parse(t) as Guests),
-      readFile(join(DATA, slug, "org.json"), "utf8").then((t) => JSON.parse(t) as Org),
+      readFile(join(DATA, slug, period, "guests.json"), "utf8").then((t) => JSON.parse(t) as Guests),
+      readFile(join(DATA, slug, period, "org.json"), "utf8").then((t) => JSON.parse(t) as Org),
     ]);
     const rows = guests.rows;
-    console.log(`\n${slug}`);
+    console.log(`\n${slug} · ${period}`);
 
     const all = applyView(rows, DEFAULT_VIEW);
     check("default view renders the whole working set", all.length === rows.length,
@@ -174,6 +181,7 @@ async function main() {
     check("page 2 is written to the URL", toQuery({ ...DEFAULT_VIEW, page: 2 }).includes("page=2"));
     check("multiple venues round-trip as repeated parameters",
       coldLoad(toQuery({ ...DEFAULT_VIEW, venue: ["a", "b"] })).venue.join() === "a,b");
+    }
   }
 
   console.log(`\n${passes} passed, ${failures} failed.`);

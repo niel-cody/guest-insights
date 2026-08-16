@@ -26,9 +26,16 @@ const SLUGS = ["coffee-guru", "meat-flour-wine"];
 type Fixture = { snap: Snapshot; guests: Guests };
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-async function load(slug: string): Promise<Fixture> {
+async function periodsOf(slug: string): Promise<string[]> {
+  const index = JSON.parse(await readFile(join(DATA, slug, "periods.json"), "utf8")) as {
+    periods: { id: string }[];
+  };
+  return index.periods.map((p) => p.id);
+}
+
+async function load(slug: string, period: string): Promise<Fixture> {
   const read = async <T,>(name: string) =>
-    JSON.parse(await readFile(join(DATA, slug, `${name}.json`), "utf8")) as T;
+    JSON.parse(await readFile(join(DATA, slug, period, `${name}.json`), "utf8")) as T;
   const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, guests] =
     await Promise.all([
       read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
@@ -259,9 +266,14 @@ async function main() {
     console.log("    population, a collapsed feed and the placeholder era — and passes a healthy month");
   }
 
+  // Every selectable period, not only the one the product opens on. A check
+  // that passes on the current window and fails on a historical one is a check
+  // that has not been run — and the historical windows are now reachable from a
+  // control in the header, so an operator can get to them.
   for (const slug of SLUGS) {
-    const fixture = await load(slug);
-    console.log(`\n${slug}`);
+    for (const period of await periodsOf(slug)) {
+    const fixture = await load(slug, period);
+    console.log(`\n${slug} · ${period}`);
 
     const live = runChecks(fixture.snap, fixture.guests);
 
@@ -306,6 +318,7 @@ async function main() {
     if (unproven.length) {
       failures++;
       console.log(`  ✗ unproven, excluded from the badge: ${unproven.join(", ")}`);
+    }
     }
   }
 

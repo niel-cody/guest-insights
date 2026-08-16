@@ -18,13 +18,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { query, disconnect } from "../snowflake";
 import {
-  analysisWindow, discoveryWindow, CANONICAL_LAPSE_DAYS, DAYPARTS, ORGS, type OrgConfig,
+  discoveryWindow, CANONICAL_LAPSE_DAYS, DAYPARTS, ORGS, type OrgConfig,
 } from "./orgs";
 import {
   storeMapQuery, parQualityQuery, orderStatusQuery, monthlyOrdersQuery, type StorePair,
 } from "./sql";
 import * as Q from "./queries";
-import { claimLevel, gradeMonth, longestRun } from "../grade";
+import { allRuns, claimLevel, gradeMonth, longestRun, monthsBetween } from "../grade";
 import {
   detectionCorrect, fitDistanceDecay, kaplanMeier, paired, standardise, wilson,
   type Episode, type PairObservation, type Stratum,
@@ -83,12 +83,25 @@ const day = (v: unknown): string | null =>
 const r2 = (n: number) => Number(n.toFixed(2));
 const r4 = (n: number) => Number(n.toFixed(4));
 
-function write(slug: string, name: string, value: unknown) {
-  const dir = join(DATA, slug);
+/**
+ * One directory per selectable period.
+ *
+ * The snapshot used to hold a single window because a single window was all the
+ * product offered. It now holds one per unbroken run of trustworthy months, so
+ * the period control has something real to select between — and so the runs the
+ * product is *not* reporting on stop being invisible.
+ */
+function write(slug: string, period: string, name: string, value: unknown) {
+  const dir = join(DATA, slug, period);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${name}.json`), JSON.stringify(value));
   const kb = (Buffer.byteLength(JSON.stringify(value)) / 1024).toFixed(0);
-  console.log(`    ${name}.json  ${kb} KB`);
+  console.log(`      ${name}.json  ${kb} KB`);
+}
+
+/** `2026-05_2026-07`. Stable, sortable, and readable in a URL. */
+function periodId(w: { start: string; end: string }): string {
+  return `${w.start.slice(0, 7)}_${w.end.slice(0, 7)}`;
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
@@ -162,11 +175,84 @@ async function extractOrg(org: OrgConfig) {
   console.log(`    card capture usable in ${allCardMonths.length} of ${graded.length} months`);
   for (const e of graded.filter((q) => !q.ok)) console.log(`      ✗ ${e.month}  ${e.reason}`);
 
-  // 3. Open the honest window: the most recent unbroken run of usable months,
-  //    complete months only. Nothing in the product renders outside it.
-  const w = analysisWindow(allCardMonths);
+  // 3. Enumerate every unbroken run of usable months, not only the latest.
+  //
+  //    The product used to open one window — the most recent run — and the six
+  //    other usable Coffee Guru months simply did not exist as far as an
+  //    operator was concerned. Each run is now a selectable period, and the
+  //    stretches between them are published with the reason each is missing.
+  const complete = graded.filter((m) => m.month < currentMonth);
+  const runs = allRuns(complete);
+  if (!runs.length) throw new Error(`No trustworthy card months for ${org.name}`);
+
+  // The gaps, described the way an operator would need to escalate them: a
+  // contiguous stretch of failing months collapsed to one entry with its reason,
+  // rather than fifteen rows saying "no card capture".
+  const gaps: { start: string; end: string; months: number; reason: string }[] = [];
+  for (const m of complete.filter((x) => !x.ok)) {
+    const last = gaps.at(-1);
+    const contiguous = last && monthsBetween(last.end, m.month) === 2 && last.reason === m.reason;
+    if (contiguous) {
+      last.end = m.month;
+      last.months = monthsBetween(last.start, last.end);
+    } else {
+      gaps.push({ start: m.month, end: m.month, months: 1, reason: m.reason ?? "unavailable" });
+    }
+  }
+
+  console.log(
+    `  ${runs.length} selectable period${runs.length === 1 ? "" : "s"}: ` +
+      runs.map((r) => `${r.start.slice(0, 7)}→${r.end.slice(0, 7)} (${r.months}m)`).join(", "),
+  );
+
+  mkdirSync(join(DATA, org.slug), { recursive: true });
+  writeFileSync(
+    join(DATA, org.slug, "periods.json"),
+    JSON.stringify({
+      slug: org.slug,
+      name: org.name,
+      /** Most recent first. The first entry is the default the product opens on. */
+      periods: runs.map((r) => ({
+        id: periodId({ start: r.start, end: monthEnd(r.end) }),
+        start: r.start,
+        end: monthEnd(r.end),
+        months: r.months,
+        claim: claimLevel(r.months),
+      })),
+      /** Why the rest of the calendar is not offered. */
+      gaps,
+      monthsTested: complete.length,
+      monthsUsable: complete.filter((m) => m.ok).length,
+      gradedAt: new Date().toISOString(),
+    }),
+  );
+
+  for (const run of runs) {
+    await extractPeriod(org, { start: run.start, end: monthEnd(run.end), months: run.months },
+      allCardMonths, graded, pairs, mappedStores, discovery);
+  }
+}
+
+/** Last day of the month a run ends in. A run is named by months, measured by days. */
+function monthEnd(month: string): string {
+  const d = new Date(`${month}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+}
+
+async function extractPeriod(
+  org: OrgConfig,
+  w: { start: string; end: string; months: number },
+  allCardMonths: string[],
+  graded: ReturnType<typeof gradeMonth>[],
+  pairs: StorePair[],
+  mappedStores: Set<string>,
+  discovery: { start: string; end: string },
+) {
+  const period = periodId(w);
   const cardMonths = allCardMonths.filter((m) => m >= w.start && m <= w.end);
-  console.log(`  analysis window ${w.start} → ${w.end}  (${w.months} complete months)`);
+  console.log(`\n  period ${period}  (${w.months} complete months)`);
 
   const base = { orgId: org.id, w, pairs, cardMonths };
   const args = { ...base, lapseDays: CANONICAL_LAPSE_DAYS, slippingDays: 0 };
@@ -467,7 +553,7 @@ async function extractOrg(org: OrgConfig) {
       }
     : null;
 
-  write(org.slug, "members", {
+  write(org.slug, period, "members", {
     window: { ...w, days: windowDays },
     crossSection: {
       member, nonMember,
@@ -599,7 +685,7 @@ async function extractOrg(org: OrgConfig) {
       (decay.refusal ? "decay refused" : `decay slope ${decay.slope.toFixed(2)} r2 ${decay.r2.toFixed(2)}`),
   );
 
-  write(org.slug, "network", {
+  write(org.slug, period, "network", {
     window: { ...w, days: windowDays },
     nodes,
     edges,
@@ -624,7 +710,7 @@ async function extractOrg(org: OrgConfig) {
     },
   });
 
-  write(org.slug, "dayparts", {
+  write(org.slug, period, "dayparts", {
     window: { ...w, days: windowDays },
     periods: byDaypart,
     weekendBaseline: (() => {
@@ -666,7 +752,7 @@ async function extractOrg(org: OrgConfig) {
     };
   });
 
-  write(org.slug, "org", {
+  write(org.slug, period, "org", {
     ...org, window: { ...w, days: windowDays }, discoveryWindow: discovery,
     extractedAt: new Date().toISOString(),
     venues: venueList, calibration: calibrated,
@@ -714,7 +800,7 @@ async function extractOrg(org: OrgConfig) {
     dayparts: DAYPARTS.map((d) => ({ ...d })),
   });
 
-  write(org.slug, "coverage", {
+  write(org.slug, period, "coverage", {
     totals, byVenue: cov,
     monthly: coverageTrend.map((r) => ({
       month: day(r.MONTH), orders: num(r.ORDERS), revenue: num(r.REVENUE),
@@ -724,25 +810,25 @@ async function extractOrg(org: OrgConfig) {
     })),
   });
 
-  write(org.slug, "lifecycle", lifecycle.map((r) => ({
+  write(org.slug, period, "lifecycle", lifecycle.map((r) => ({
     month: day(r.MONTH), tier: String(r.TIER), new: num(r.NEW), returning: num(r.RETURNING),
     reactivated: num(r.REACTIVATED), active: num(r.ACTIVE), lapsed: num(r.LAPSED),
     revenue: num(r.REVENUE), visits: num(r.VISITS),
   })));
 
-  write(org.slug, "decomposition", decomposition.map((r) => ({
+  write(org.slug, period, "decomposition", decomposition.map((r) => ({
     month: day(r.MONTH), guests: num(r.GUESTS), visits: num(r.VISITS), revenue: num(r.REVENUE),
     items: num(r.ITEMS), visitsPerGuest: r4(num(r.VISITS_PER_GUEST)),
     spendPerVisit: r4(num(r.SPEND_PER_VISIT)), itemsPerVisit: r4(num(r.ITEMS_PER_VISIT)),
     pricePerItem: r4(num(r.PRICE_PER_ITEM)),
   })));
 
-  write(org.slug, "segments", {
+  write(org.slug, period, "segments", {
     population: truePopulation, rows: segmentRows,
     gapHistogram: gapHist.map((r) => ({ days: num(r.DAYS), n: num(r.N) })),
   });
 
-  write(org.slug, "venueMonthly", venueMonthly.map((r) => ({
+  write(org.slug, period, "venueMonthly", venueMonthly.map((r) => ({
     month: day(r.MONTH), storeId: String(r.STORE_ID), storeName: String(r.STORE_NAME),
     orders: num(r.ORDERS), revenue: num(r.REVENUE), memberOrders: num(r.MEMBER_ORDERS),
     memberRevenue: num(r.MEMBER_REVENUE), cardOrders: num(r.CARD_ORDERS),
@@ -750,7 +836,7 @@ async function extractOrg(org: OrgConfig) {
     tradingDays: num(r.TRADING_DAYS), discount: num(r.DISCOUNT),
   })));
 
-  write(org.slug, "guests", { sampled: guests.length, population: truePopulation, rows: guests });
+  write(org.slug, period, "guests", { sampled: guests.length, population: truePopulation, rows: guests });
 
   console.log(
     `  ✓ ${totals.orders.toLocaleString()} orders · ` +

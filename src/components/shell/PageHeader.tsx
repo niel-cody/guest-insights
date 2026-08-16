@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { CoverageChip } from "@/components/ui/CoverageChip";
+import { PeriodPicker } from "@/components/ui/PeriodPicker";
+import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
 import { dayLabel } from "@/lib/metrics";
 import type { Org } from "@/lib/types";
@@ -16,7 +18,7 @@ import { IconChevron } from "./Icons";
  * believes a number that is not the number they asked for.
  */
 export function PageHeader({
-  org, orgs, title, coverage, controls, actions,
+  org, orgs, title, coverage, controls, actions, periods, period,
 }: {
   org: Org;
   orgs: { slug: string; name: string }[];
@@ -24,6 +26,8 @@ export function PageHeader({
   coverage?: CoverageState;
   controls?: ReactNode;
   actions?: ReactNode;
+  periods: Periods;
+  period: Period;
 }) {
   const router = useRouter();
 
@@ -45,7 +49,7 @@ export function PageHeader({
           <span className="text-ink-muted">Organisation</span>
           <select
             value={org.slug}
-            onChange={(e) => router.push(`/${e.target.value}/overview`)}
+            onChange={(e) => router.push(`/${e.target.value}`)}
             className="cursor-pointer appearance-none bg-transparent pr-5 font-medium text-ink outline-none"
           >
             {orgs.map((o) => (
@@ -55,15 +59,14 @@ export function PageHeader({
           <IconChevron className="pointer-events-none absolute right-2 h-4 w-4 text-ink-muted" />
         </label>
 
-        {/* Scope, not controls. These were bordered boxes styled exactly like the
-            organisation <select> beside them, so they read as filters that did
-            nothing. They are facts about the window, and now look like facts. */}
+        {/* The period is now a control, because there is now more than one to
+            choose between. It is still not a date picker — see PeriodPicker. */}
+        <PeriodPicker all={periods} current={period} orgSlug={org.slug} />
+
         <p className="flex items-center gap-2 text-[13px] text-ink-secondary">
-          <span className="tnum font-medium text-ink">
+          <span className="tnum">
             {dayLabel(org.window.start)} – {dayLabel(org.window.end)}
           </span>
-          <span className="text-ink-muted">·</span>
-          <span>{org.window.months} complete months</span>
           <span className="text-ink-muted">·</span>
           <span>
             {org.venues.length} {org.venues.length === 1 ? "venue" : "venues"}

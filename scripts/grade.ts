@@ -223,6 +223,55 @@ export function longestRun(months: MonthRow[]): { start: string; end: string; mo
   return best;
 }
 
+/**
+ * **Every** unbroken run of trustworthy months, most recent first — not just the
+ * latest one.
+ *
+ * The product reported on the latest run because that is the one that describes
+ * trade today. But Coffee Guru holds nine usable months in three separate runs,
+ * and reporting on three of them while silently discarding six is the same class
+ * of omission this build exists to prevent: the operator cannot ask a question
+ * about a period they are not told exists.
+ *
+ * Each run becomes a selectable period. The gaps between them become the list of
+ * periods that are *not* selectable, each with the reason — which is the more
+ * useful half, because a merchant who can see "May–Dec 2025: no card capture"
+ * has something to escalate.
+ */
+export function allRuns(months: MonthRow[]): { start: string; end: string; months: number }[] {
+  const sorted = [...months].sort((a, b) => a.month.localeCompare(b.month));
+  const next = (m: string) => {
+    const d = new Date(`${m}T00:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const runs: { start: string; end: string; months: number }[] = [];
+  let start: string | null = null;
+  let prev: string | null = null;
+
+  const close = () => {
+    if (start && prev) runs.push({ start, end: prev, months: monthsBetween(start, prev) });
+    start = null;
+    prev = null;
+  };
+
+  for (const m of sorted) {
+    if (!m.ok) {
+      close();
+      continue;
+    }
+    if (start === null || prev === null || m.month !== next(prev)) {
+      close();
+      start = m.month;
+    }
+    prev = m.month;
+  }
+  close();
+
+  return runs.reverse();
+}
+
 /** Inclusive month count. Thirteen months is one year-on-year comparison, not twelve. */
 export function monthsBetween(start: string, end: string): number {
   const a = new Date(`${start}T00:00:00Z`);

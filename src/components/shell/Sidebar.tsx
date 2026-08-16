@@ -57,7 +57,7 @@ const GROUPS = [
   { label: "Admin", items: [] },
 ];
 
-export function Sidebar({ orgSlug }: { orgSlug: string }) {
+export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }) {
   const pathname = usePathname();
   const [open, setOpen] = useState<Record<string, boolean>>({ Customers: true });
 
@@ -118,7 +118,7 @@ export function Sidebar({ orgSlug }: { orgSlug: string }) {
                 </button>
                 {isOpen &&
                   group.items.map((item) => {
-                    const href = `/${orgSlug}/${item.href}`;
+                    const href = `/${orgSlug}/${period}/${item.href}`;
                     const active = pathname === href;
                     return (
                       <Link
