@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, CheckBadge, EmptyState, Facts, Tile } from "@/components/ui/Primitives";
 import { IconArrow, IconInfo } from "@/components/shell/Icons";
 import { VenueNetwork } from "@/components/charts/VenueNetwork";
+import { VenueLeague } from "@/components/ui/VenueLeague";
 import { getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
 import { count, coverageState, delta, money, pct, windowShort, pairArithmetic} from "@/lib/metrics";
@@ -86,6 +88,19 @@ export default async function VenuesPage({ params }: { params: Promise<{ org: st
               footnote={`from ${pct(cv.multiShareOfPeople, 1)} of the people`}
             />
           </div>
+
+          {/* Phase 1, item 2. The league table leaves Coverage and opens Venues,
+              above the map. It was the single most-wanted artefact for a
+              multi-site owner and it was at the bottom of the diagnostics page. */}
+          <Card
+            title="Your venues, ranked"
+            subtitle="Sort on the question you came with. Selecting a venue scopes this surface to it and writes the scope to the address bar."
+            padded={false}
+          >
+            <Suspense fallback={null}>
+              <VenueLeague org={org} coverage={snap.coverage} />
+            </Suspense>
+          </Card>
 
           {network.decay.refusal ? (
             <Card title="The venue network" subtitle={`${org.name}, ${windowShort(w)}.`}>

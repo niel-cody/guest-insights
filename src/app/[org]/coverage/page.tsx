@@ -55,7 +55,6 @@ export default async function CoveragePage({ params }: { params: Promise<{ org: 
   const passed = checks.filter((c) => c.ok).length;
   const dead = org.cardTier.quality.filter((q) => q.reason === "no card capture");
   const notTrading = org.cardTier.quality.filter((q) => q.reason === "not trading");
-  const renamed = org.venues.filter((v) => v.formerNames.length > 0);
 
   const sevTone: Record<string, "critical" | "warning" | "neutral"> = {
     blocking: "critical", material: "warning", minor: "neutral",
@@ -284,65 +283,10 @@ export default async function CoveragePage({ params }: { params: Promise<{ org: 
           </Card>
 
           {/* ── venues ────────────────────────────────────────────────────── */}
-          <Card
-            title="Venues"
-            subtitle="Identity is the store id. The name is an attribute, and it changes."
-            padded={false}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-[13px]">
-                <thead>
-                  <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
-                    <th className="px-5 py-2.5 text-left font-medium">Venue</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Orders</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Revenue</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Attributed</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Members</th>
-                    <th className="px-5 py-2.5 text-right font-medium">First traded</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coverage.byVenue.map((v) => {
-                    const venue = org.venues.find((x) => x.id === v.storeId);
-                    return (
-                      <tr key={v.storeId} className="border-b border-line last:border-b-0">
-                        <th scope="row" className="px-5 py-2.5 text-left font-medium text-ink">
-                          {v.storeName}
-                          {venue && venue.formerNames.length > 0 && (
-                            <span className="block text-[12px] font-normal text-ink-muted">
-                              previously {venue.formerNames.join(", ")}
-                            </span>
-                          )}
-                        </th>
-                        <td className="tnum px-3 py-2.5 text-right text-ink-secondary">{count(v.orders)}</td>
-                        <td className="tnum px-3 py-2.5 text-right text-ink-secondary">{money(v.revenue)}</td>
-                        <td className="tnum px-3 py-2.5 text-right text-ink">
-                          {pct((v.memberRevenue + v.cardRevenue) / Math.max(v.revenue, 1), 1)}
-                        </td>
-                        <td className="tnum px-3 py-2.5 text-right text-ink-secondary">
-                          {pct(v.memberRevenue / Math.max(v.revenue, 1), 1)}
-                        </td>
-                        <td className="tnum px-5 py-2.5 text-right text-ink-secondary">
-                          {venue?.firstDay ? dayLabel(venue.firstDay) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {renamed.length > 0 && (
-              <div className="border-t border-line px-5 py-3.5">
-                <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
-                  {renamed.length} {renamed.length === 1 ? "venue has" : "venues have"} traded under an earlier
-                  name. Grouping trade by name rather than by id invents venues that never existed — at Meat
-                  Flour Wine it produced a phantom third site with 6,799 orders, and dated Braeside&apos;s opening
-                  to the day it was renamed rather than the day it opened. Every figure here resolves on the id
-                  and displays the current name across all history.
-                </p>
-              </div>
-            )}
-          </Card>
+          {/* Phase 1, item 2. The venue league table has gone to Venues, above
+              the map, and neither Assurance nor Evidence carries it. Left as a
+              pointer rather than silently: an operator who knew where it was
+              needs to be told where it went. */}
 
           {/* ── the window ────────────────────────────────────────────────── */}
           <Card title="Why the window is this short" subtitle="And what that costs you.">

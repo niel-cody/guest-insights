@@ -16,7 +16,9 @@ import { track } from "@/lib/instrument";
  */
 export function Instrumentation() {
   const pathname = usePathname();
-  const enteredAt = useRef(Date.now());
+  // Seeded in the effect, not at render: a clock read during render is impure
+  // and produces a dwell that changes whenever React happens to re-render.
+  const enteredAt = useRef(0);
   const deepest = useRef(0);
 
   // The surface, not the URL. A URL carries filter values and a guest id, and a
