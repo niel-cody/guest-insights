@@ -90,6 +90,11 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
       ?? f.snap.segments.rows[0];
     target.spend = total;
   },
+  // A card rendered as though the business knows who it belongs to.
+  "identity.nameImpliesEnrolment": (f) => {
+    const g = f.guests.rows.find((x) => x.tier !== "member");
+    if (g) g.name = "Casey Lindqvist D696";
+  },
   // The governance breach: a lifecycle verdict on a card row.
   "segment.tierPermission": (f) => {
     const g = f.guests.rows.find((x) => x.tier !== "member");

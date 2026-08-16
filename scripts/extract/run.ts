@@ -47,11 +47,26 @@ function pseudonymise(personId: string): string {
 /** A stable, obviously-synthetic label so the grid reads like people, not hashes. */
 const FIRST = "Alex Sam Jordan Riley Casey Morgan Taylor Jamie Avery Quinn Rowan Harper Emerson Finley Kai Noor Priya Wei Mateo Zara Elif Luca Nina Omar Sofia Theo Iris Dev Mila Arun".split(" ");
 const LAST = "Reed Hart Vance Cole Doyle Marsh Blake Foss Nash Quill Rivera Okafor Sandhu Tanaka Novak Duarte Lindqvist Haddad Osei Petrov Kaur Mbeki Ferreira Yilmaz Larsen Cruz Aoki Bishop Falk Gerrard".split(" ");
+
 /**
- * The display name carries the hash suffix. Thirty firsts by thirty lasts is 900
- * combinations against tens of thousands of guests, so v1 rendered `Arun Rivera`
- * three times inside one visible page and the grid read as if it held duplicates.
- * The suffix makes two rows with the same name visibly different people.
+ * A name is only ever generated for someone who enrolled.
+ *
+ * This is a correctness rule, not a cosmetic one. **A name is a claim to know who
+ * somebody is, and for a card-recognised guest we do not.** All we have is a
+ * payment reference that has turned up more than once. Giving that a first and
+ * last name makes it indistinguishable on screen from a member whose name the
+ * business genuinely holds, and an operator reading the grid reasonably concludes
+ * we have contact details for both. We have them for one.
+ *
+ * Card-tier people therefore carry `name: null` and the surface renders a
+ * reference instead. In production the member's name comes from the CRM record
+ * they created when they enrolled; here it is synthesised from the salted hash so
+ * that nothing real leaves the warehouse, but the *shape* is the same and the
+ * card side is empty in both.
+ *
+ * The hash suffix stays on the member name because thirty firsts by thirty lasts
+ * is 900 combinations against tens of thousands of guests — without it the grid
+ * reads as though it holds duplicates.
  */
 function displayName(hash: string): string {
   const a = parseInt(hash.slice(0, 4), 16) % FIRST.length;
@@ -505,9 +520,12 @@ async function extractOrg(org: OrgConfig) {
 
   const guests = guestRows.map((g) => {
     const hash = pseudonymise(String(g.PERSON_ID));
+    const tier = String(g.TIER) as "member" | "card";
     return {
-      id: hash, name: displayName(hash),
-      tier: String(g.TIER) as "member" | "card",
+      id: hash,
+      // Null for anyone who has not enrolled. See displayName().
+      name: tier === "member" ? displayName(hash) : null,
+      tier,
       segment: g.SEGMENT == null ? null : String(g.SEGMENT),
       valueBand: num(g.VALUE_BAND), visits: num(g.VISITS), venues: num(g.VENUES),
       spend: r2(num(g.SPEND)), orders: num(g.ORDERS), items: num(g.ITEMS),

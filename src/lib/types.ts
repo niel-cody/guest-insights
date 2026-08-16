@@ -158,7 +158,12 @@ export type Segments = {
 
 export type Guest = {
   id: string;
-  name: string;
+  /**
+   * Null for anyone who has not enrolled. A name is a claim to know who somebody
+   * is, and a recognised payment card is not one — the surface renders a
+   * reference for those rows rather than inventing a person.
+   */
+  name: string | null;
   tier: "member" | "card";
   segment: Segment | null;
   valueBand: number;

@@ -274,6 +274,8 @@ Daypart Specialist — far more concentrated than the Premium Dining archetype's
   shown beside its operands is computed from the operands as displayed.
 - A personal cadence is never filled in from the org median. If a guest has no
   cadence, the surface says nothing.
+- **Only enrolled people have a name.** A card-recognised guest is shown as a
+  reference, because "recognised" and "identified" are different claims.
 - Names are **masked by default**; the reveal is role-gated and audit-logged, and
   exports carry the same control.
 - Every control on screen is wired or absent. There is no third option.
@@ -314,12 +316,26 @@ npm run verify
 ### Privacy
 
 No customer name, email, phone or raw Payment Account Reference leaves the
-warehouse. Identities are salted-hashed at extract time and given a stable,
-obviously synthetic display name carrying a hash suffix — 30 firsts by 30 lasts is
-900 combinations against tens of thousands of guests, and without the suffix the
-grid reads as if it holds duplicates. The salt lives in `.extract-salt` and is
-gitignored, so a hash cannot be replayed against the warehouse. This matters
-because the artefact gets deployed and shown around.
+warehouse. Identities are salted-hashed at extract time. The salt lives in
+`.extract-salt` and is gitignored, so a hash cannot be replayed against the
+warehouse. This matters because the artefact gets deployed and shown around.
+
+**A name is only generated for someone who enrolled.** This is a correctness rule,
+not a cosmetic one: a name is a claim to know who somebody is, and for a
+card-recognised guest we do not. All we have is a payment reference that has turned
+up more than once. Rendering that as `Casey Lindqvist` makes it indistinguishable
+from a member whose name and email the business actually holds, and an operator
+scanning the grid reasonably concludes they can contact both. Card rows therefore
+carry no name at all and the grid shows a reference — `Card ·D696` — with the
+tooltip saying plainly that the reference is ours and is not the card's number.
+A check, `identity.nameImpliesEnrolment`, fails the build if a name ever appears
+on a non-member row.
+
+Member names here are synthesised from the hash, carrying a suffix because 30
+firsts by 30 lasts is 900 combinations against tens of thousands of guests and
+without it the grid reads as if it holds duplicates. In production that name comes
+from the CRM record the guest created when they enrolled. The *shape* is the same
+in both: a name on one side of the line, nothing on the other.
 
 The synthetic names are a reason the demo is safe to show. They are **not** a
 reason the pattern is safe to ship, so the surface behaves the way the real one

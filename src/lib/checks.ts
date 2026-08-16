@@ -224,6 +224,19 @@ export function runChecks(snap: Snapshot, guests: Guests | null): Check[] {
   // split this way rather than "any label needs three visits", which would leave
   // a guest last seen six months ago permanently described as New.
   const INFERRED = new Set(["slipping", "regular", "established"]);
+  // A name is a claim to know who somebody is. We hold one for people who
+  // enrolled and not for people we only recognise by their card, so a card row
+  // carrying a name asserts contact details that do not exist.
+  const namedCards = guests?.rows.filter((g) => g.tier !== "member" && g.name !== null) ?? [];
+  const unnamedMembers = guests?.rows.filter((g) => g.tier === "member" && !g.name) ?? [];
+  checks.push(ok(
+    "identity.nameImpliesEnrolment",
+    "Only enrolled people carry a name. A card-recognised guest carries a reference.",
+    "A card row rendered as `Casey Lindqvist`, indistinguishable on screen from a member whose name and email the business actually holds.",
+    namedCards.length === 0 && unnamedMembers.length === 0,
+    `${namedCards.length} card rows carrying a name · ${unnamedMembers.length} members missing one`,
+  ));
+
   const shortVerdicts = guests?.rows.filter((g) => g.segment && INFERRED.has(g.segment) && g.visits < 3) ?? [];
   checks.push(ok(
     "segment.minimumObservations",

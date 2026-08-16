@@ -28,6 +28,36 @@ function mask(name: string): string {
     .join(" ");
 }
 
+const CARD_TITLE =
+  "A payment card seen more than once. Oolio holds no name, email or phone for this person — " +
+  "the reference is ours, generated from the card, and is not the card's number.";
+
+/**
+ * How a person is labelled.
+ *
+ * Members get a name because the business has one. **Card-recognised guests get a
+ * reference, because it does not.** Rendering a first and last name against a card
+ * makes the two rows read as the same kind of object, and an operator scanning the
+ * grid concludes they can contact both. They can contact one.
+ */
+function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
+  if (g.tier === "member" && g.name) {
+    return (
+      <>
+        <span className="font-medium text-ink">{unmasked ? g.name : mask(g.name)}</span>
+        <code className="ml-2 text-[11px] text-ink-muted">{g.id.slice(0, 8)}</code>
+      </>
+    );
+  }
+  return (
+    <span className="inline-flex items-baseline gap-1.5" title={CARD_TITLE}>
+      <span className="text-[12px] text-ink-muted">Card</span>
+      <code className="font-medium text-ink-secondary">·{g.id.slice(0, 4).toUpperCase()}</code>
+      <code className="text-[11px] text-ink-muted">{g.id.slice(0, 8)}</code>
+    </span>
+  );
+}
+
 /**
  * The guest grid and drawer.
  *
@@ -62,7 +92,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
         (daypart === "all" || g.homeDaypart === daypart) &&
         (venue === "all" || g.homeStoreId === venue) &&
         g.visits >= minVisits &&
-        (!needle || g.name.toLowerCase().includes(needle) || g.id.includes(needle)),
+        (!needle || (g.name ?? "").toLowerCase().includes(needle) || g.id.includes(needle)),
     );
     return rows.sort((a, b) => {
       if (sort === "firstSeen") return (a.firstSeen ?? "").localeCompare(b.firstSeen ?? "");
@@ -176,8 +206,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
                     className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-hover"
                   >
                     <td className="px-5 py-2">
-                      <span className="font-medium text-ink">{unmasked ? g.name : mask(g.name)}</span>
-                      <code className="ml-2 text-[11px] text-ink-muted">{g.id.slice(0, 8)}</code>
+                      <Identity g={g} unmasked={unmasked} />
                     </td>
                     <td className="px-3 py-2">
                       <Pill tone={g.tier === "member" ? "member" : "card"}>
@@ -309,7 +338,16 @@ function Drawer({
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-[17px] font-semibold text-ink">{unmasked ? g.name : mask(g.name)}</h2>
+              <h2 className="text-[17px] font-semibold text-ink">
+                {g.tier === "member" && g.name ? (
+                  unmasked ? g.name : mask(g.name)
+                ) : (
+                  <span title={CARD_TITLE}>
+                    <span className="text-ink-secondary">Card </span>
+                    <code>·{g.id.slice(0, 4).toUpperCase()}</code>
+                  </span>
+                )}
+              </h2>
               <Pill tone={g.tier === "member" ? "member" : "card"}>
                 {g.tier === "member" ? "Member" : "Card"}
               </Pill>
@@ -397,9 +435,11 @@ function Drawer({
             <div className="rounded-lg border border-line bg-surface-sunken p-3">
               <p className="text-[13px] font-medium text-ink">Recognised, not identified</p>
               <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-                Recognised by the card they pay with. There is no name, email or phone — and no lifecycle
-                verdict, because a reissued card looks exactly like a customer who stopped coming. What you can
-                do is recognise them at the counter and ask them to join.
+                This is a payment card that has been seen more than once, not a person the business knows.
+                There is <strong>no name, email or phone</strong> — which is why this row carries a reference
+                rather than a name, and no lifecycle verdict, because a reissued card looks exactly like a
+                customer who stopped coming. What you can do is recognise them at the counter and ask them to
+                join. That is the whole enrolment opportunity, one guest at a time.
               </p>
             </div>
           )}
