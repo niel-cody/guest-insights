@@ -24,6 +24,7 @@ import {
   storeMapQuery, parQualityQuery, orderStatusQuery, monthlyOrdersQuery, type StorePair,
 } from "./sql";
 import * as Q from "./queries";
+import { claimLevel, gradeMonth, longestRun } from "../grade";
 import {
   detectionCorrect, fitDistanceDecay, kaplanMeier, paired, standardise, wilson,
   type Episode, type PairObservation, type Stratum,
@@ -91,6 +92,9 @@ function write(slug: string, name: string, value: unknown) {
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
+/** The month in progress. Nothing partial is ever counted as a usable month. */
+const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
+
 async function extractOrg(org: OrgConfig) {
   const discovery = discoveryWindow();
   console.log(`\n${org.name}  (discovery ${discovery.start} → ${discovery.end})`);
@@ -126,48 +130,34 @@ async function extractOrg(org: OrgConfig) {
   // distinct failures in this data: the reference is constant; the reference is
   // technically varied but one token still dominates; or the payment rows are
   // missing altogether.
+  //
+  // The grading itself lives in `scripts/grade.ts` and is the same code the
+  // tenant selection runs (`npm run partner`). Selecting a partner on one rule
+  // and loading it on another is how you pick a merchant the load then rejects.
   console.log("  testing card capture…");
   const [parRows, orderMonths] = await Promise.all([
     query<Row>(parQualityQuery(discovery, pairs.map((p) => p.payStore))),
     query<Row>(monthlyOrdersQuery(org.id, discovery)),
   ]);
   const ordersByMonth = new Map(orderMonths.map((r) => [day(r.MONTH)!, num(r.ORDERS)]));
-  const MIN_RATIO = 0.1;
-  // Calibrated against the observed separation rather than picked. Across both
-  // merchants the healthy months top out at 3.6% on their most frequent
-  // reference and the broken ones start at 50.8%, so anything in between
-  // separates them; 10% is chosen because no genuine single card plausibly
-  // accounts for a tenth of a venue's monthly card volume. The review's 1% is
-  // right for estate-wide volumes and wrong for a two-venue merchant, where one
-  // twice-weekly regular clears it.
-  const MAX_TOKEN_SHARE = 0.1;
+
   // The volume test compares a month against the months the business was
   // actually open, not against every month in the discovery window.
   const trading = parRows.filter((r) => (ordersByMonth.get(day(r.MONTH)!) ?? 0) > 0);
   const volumes = trading.map((r) => num(r.TXNS)).sort((a, b) => a - b);
   const medianTxns = volumes[Math.floor(volumes.length / 2)] ?? 0;
 
-  const graded = parRows.map((r) => {
-    const month = day(r.MONTH)!;
-    const txns = num(r.TXNS);
-    const orders = ordersByMonth.get(month) ?? 0;
-    const ratio = txns ? r4(num(r.DISTINCT_PAR) / txns) : 0;
-    const maxTokenShare = r4(num(r.MAX_TOKEN_SHARE));
-    const reason =
-      orders === 0
-        ? "not trading"
-        : txns < medianTxns * 0.3
-          ? "payments incomplete"
-          : maxTokenShare >= MAX_TOKEN_SHARE
-            ? num(r.DISTINCT_PAR) <= 3 ? "no card capture" : "one token dominates"
-            : ratio < MIN_RATIO
-              ? "degraded card capture"
-              : null;
-    return {
-      month, txns, orders, distinctPar: num(r.DISTINCT_PAR), withPar: num(r.WITH_PAR),
-      ratio, maxTokenShare, ok: reason === null, reason,
-    };
-  });
+  const graded = parRows.map((r) =>
+    gradeMonth({
+      month: day(r.MONTH)!,
+      txns: num(r.TXNS),
+      distinctPar: num(r.DISTINCT_PAR),
+      withPar: num(r.WITH_PAR),
+      maxTokenShare: r4(num(r.MAX_TOKEN_SHARE)),
+      orders: ordersByMonth.get(day(r.MONTH)!) ?? 0,
+      medianTxns,
+    }),
+  );
   const allCardMonths = graded.filter((q) => q.ok).map((q) => q.month);
   console.log(`    card capture usable in ${allCardMonths.length} of ${graded.length} months`);
   for (const e of graded.filter((q) => !q.ok)) console.log(`      ✗ ${e.month}  ${e.reason}`);
@@ -681,7 +671,42 @@ async function extractOrg(org: OrgConfig) {
     extractedAt: new Date().toISOString(),
     venues: venueList, calibration: calibrated,
     storeMap: { terminals: pairs.length, venuesResolved: mappedStores.size },
-    cardTier: { months: cardMonths, allUsableMonths: allCardMonths, quality: graded },
+    cardTier: {
+      months: cardMonths,
+      allUsableMonths: allCardMonths,
+      quality: graded,
+      /**
+       * C1. **Complete months only.**
+       *
+       * The shipped tile read "card capture usable 4 of 25" for Meat Flour Wine,
+       * and the fourth was a partial August — sixteen days of trade counted as a
+       * month. The honest figure is 3 of 25. A partial month cannot be usable
+       * because usability is a property of a whole month's grading, and the tile
+       * that flattered the number sat on the page whose entire purpose is not
+       * flattering Oolio.
+       *
+       * `monthsTested` is every month graded. `monthsUsable` is the complete
+       * months that passed. Neither is the window: the window is the unbroken
+       * run that reaches the present, which for Coffee Guru is 3 of 9 usable.
+       */
+      monthsTested: graded.filter((m) => m.month < currentMonth).length,
+      monthsUsable: graded.filter((m) => m.ok && m.month < currentMonth).length,
+      partialMonthExcluded: graded.some((m) => m.ok && m.month >= currentMonth)
+        ? currentMonth
+        : null,
+      /**
+       * The longest clean run anywhere in the discovery window, which is not
+       * always the run the product reports on. Where the two differ, the
+       * difference is itself the finding — a merchant can hold a long clean
+       * history that a later outage has severed from the present.
+       */
+      longestRun: longestRun(graded.filter((m) => m.month < currentMonth)),
+      /**
+       * R-205. What the loaded window entitles the surface to claim, decided
+       * from the months actually admitted rather than from the months requested.
+       */
+      claim: claimLevel(w.months),
+    },
     orderStatuses: statuses.map((s) => ({
       status: String(s.ORDER_STATUS), training: String(s.TRAINING).toLowerCase() === "true",
       orders: num(s.ORDERS), revenue: num(s.REVENUE), zeroValue: num(s.ZERO_VALUE),

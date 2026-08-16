@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runChecks } from "../src/lib/checks";
 import type { Guests, Snapshot } from "../src/lib/types";
+import { claimLevel, gradeMonth, longestRun } from "./grade";
 
 const DATA = join(import.meta.dirname, "..", "data");
 const SLUGS = ["coffee-guru", "meat-flour-wine"];
@@ -149,10 +150,114 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
     f.snap.members.coverBasis.member.coverage = 0.38;
     f.snap.members.coverBasis.nonMember.coverage = 0.97;
   },
+  // A pair count that does not reconcile against the venues on the map.
+  "venue.pairArithmetic": (f) => {
+    f.snap.network.pairsSuppressed += 7;
+  },
+  // A growth claim outliving the window it was built on. The months shrink and
+  // the claim is carried forward from the longer extract.
+  "window.claimMatchesMonths": (f) => {
+    f.snap.org.cardTier.claim = "growth";
+  },
+  // The placeholder wearing a card's clothes: a month whose references are
+  // almost all the literal string 'N/A', which every non-null count scores at
+  // 100% and which resolves a twentieth of the trade onto one phantom person.
+  "card.coverageIsReal": (f) => {
+    const m = f.snap.org.cardTier.months[0];
+    const q = f.snap.org.cardTier.quality.find((x) => x.month === m)!;
+    q.coverage = 0.04;
+    q.withPar = Math.round(q.txns * 0.04);
+  },
 };
+
+/**
+ * H1's acceptance criterion, and it is about the load rather than the surface.
+ *
+ * "Corrupt a fixture month to 100% on one token and confirm the load rejects
+ * it." A grading that has never rejected anything is a row count wearing a
+ * grading's clothes, so the grading is exercised directly here — including the
+ * two cases a naive test gets wrong in opposite directions.
+ */
+function verifyGrading(): string[] {
+  const errors: string[] = [];
+  const base = { month: "2026-05-01", txns: 100_000, medianTxns: 100_000, orders: 80_000 };
+
+  const cases: { name: string; input: Parameters<typeof gradeMonth>[0]; expect: string | null }[] = [
+    {
+      name: "a healthy month passes",
+      input: { ...base, distinctPar: 30_000, withPar: 90_000, maxTokenShare: 0.003 },
+      expect: null,
+    },
+    {
+      name: "one token on 100% is rejected",
+      input: { ...base, distinctPar: 1, withPar: 90_000, maxTokenShare: 1 },
+      expect: "no card capture",
+    },
+    {
+      name: "a dominant token beside a real population is rejected",
+      input: { ...base, distinctPar: 25_000, withPar: 90_000, maxTokenShare: 0.51 },
+      expect: "one token dominates",
+    },
+    {
+      name: "a venue that had not opened is not called a feed failure",
+      input: { ...base, orders: 0, distinctPar: 0, withPar: 0, maxTokenShare: 1 },
+      expect: "not trading",
+    },
+    {
+      name: "the placeholder era is rejected on coverage, not on quality",
+      input: { ...base, distinctPar: 3_000, withPar: 5_000, maxTokenShare: 0.004 },
+      expect: "card capture partial",
+    },
+    {
+      name: "a collapsed payment feed is rejected on volume",
+      input: { ...base, txns: 3_000, distinctPar: 900, withPar: 2_800, maxTokenShare: 0.004 },
+      expect: "payments incomplete",
+    },
+  ];
+
+  for (const c of cases) {
+    const got = gradeMonth(c.input).reason;
+    if (got !== c.expect) {
+      errors.push(`grading: ${c.name} — expected ${c.expect ?? "pass"}, got ${got ?? "pass"}`);
+    }
+  }
+
+  // The run must be contiguous in calendar time, not merely consecutive in the
+  // array. A clean January and a clean March is two runs of one.
+  const row = (month: string, ok: boolean) =>
+    gradeMonth({ ...base, month, orders: ok ? 80_000 : 0, distinctPar: 30_000, withPar: 90_000, maxTokenShare: 0.003 });
+  const gapped = longestRun([row("2026-01-01", true), row("2026-02-01", false), row("2026-03-01", true)]);
+  if (gapped?.months !== 1) {
+    errors.push(`grading: a gapped run reported ${gapped?.months} months where the longest is 1`);
+  }
+  const solid = longestRun([row("2026-01-01", true), row("2026-02-01", true), row("2026-03-01", true)]);
+  if (solid?.months !== 3) {
+    errors.push(`grading: a contiguous three-month run reported ${solid?.months}`);
+  }
+
+  // Thirteen, not twelve. Twelve months yields zero year-on-year comparisons.
+  if (claimLevel(12) !== "none") errors.push("grading: 12 months must not license a growth claim");
+  if (claimLevel(13) !== "growth") errors.push("grading: 13 months must license a growth claim");
+  if (claimLevel(23) !== "growth") errors.push("grading: 23 months must not license a trend claim");
+  if (claimLevel(24) !== "trend") errors.push("grading: 24 months must license a trend claim");
+
+  return errors;
+}
 
 async function main() {
   let failures = 0;
+
+  // The grading is verified before the snapshot is read, because everything in
+  // the snapshot is downstream of it.
+  const gradingErrors = verifyGrading();
+  console.log("\ncard-capture grading");
+  if (gradingErrors.length) {
+    failures += gradingErrors.length;
+    for (const e of gradingErrors) console.log(`  ✗ ${e}`);
+  } else {
+    console.log("  ✓ rejects a month collapsed onto one token, a dominant token beside a real");
+    console.log("    population, a collapsed feed and the placeholder era — and passes a healthy month");
+  }
 
   for (const slug of SLUGS) {
     const fixture = await load(slug);

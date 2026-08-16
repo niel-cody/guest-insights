@@ -91,7 +91,19 @@ export default async function TradePage({ params }: { params: Promise<{ org: str
                 value={pct(identity.confidence, 0)}
                 hint="How much of the shape the classification actually accounts for, discounted when two periods are near-equal."
                 accent={identity.confidence > 0.6 ? "var(--good)" : "var(--warning)"}
-                footnote={`${identity.primary.length} primary period${identity.primary.length === 1 ? "" : "s"}`}
+                footnote={
+                  <>
+                    {identity.primary.length} primary period
+                    {identity.primary.length === 1 ? "" : "s"} of {identity.tradingPeriods} that carry trade
+                    {identity.emptyPeriods.length > 0 && (
+                      <span className="mt-1 block text-ink-muted">
+                        Was {pct(identity.confidenceAgainstAllPeriods, 0)} when measured against all{" "}
+                        {identity.emptyPeriods.length + identity.tradingPeriods} periods, including{" "}
+                        {identity.emptyPeriods.length} this business does not trade in
+                      </span>
+                    )}
+                  </>
+                }
               />
               <Tile
                 label="Weekend share of trade"

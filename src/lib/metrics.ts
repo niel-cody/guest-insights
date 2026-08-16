@@ -10,7 +10,7 @@
  */
 import type {
   AnalysisWindow, Coverage, DaypartRow, Dayparts, DecompositionRow, Guest, LifecycleRow,
-  Members, Org, SegmentRow, Segments,
+  Members, Network, Org, SegmentRow, Segments,
 } from "./types";
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -69,6 +69,34 @@ export type CoverageState = {
   asOf: string;
 };
 
+/**
+ * C2. One figure, one precision, everywhere.
+ *
+ * The shipped build rendered attribution three ways on a single screen: **82%**
+ * on the chip, **81.9%** on Coverage, and **22.6 + 59.2 + 18.1** in the
+ * breakdown. Every one was correct and the reader could not tell whether they
+ * were looking at one measurement or three.
+ *
+ * One decimal place, and it is not an arbitrary choice: the parts are published
+ * at one decimal and have to sum to 100.0, so rounding the whole to zero while
+ * the parts keep their decimal *is* the defect. Anything that renders a
+ * recognition share reads `attributionPct` rather than calling `pct` with its
+ * own precision, which is what stops the drift returning.
+ */
+export const ATTRIBUTION_DP = 1;
+export const attributionPct = (share: number) => pct(share, ATTRIBUTION_DP);
+
+/**
+ * The scan rate, held once because **Phase 4's second slider consumes it**.
+ *
+ * The build record carried 82% and PRD §5.3 carried 81% for the same tenant, and
+ * the slider's worked arithmetic used p = 0.81. Neither number is hardcoded
+ * anywhere now: the slider reads this function, so the base moves with the data
+ * instead of with whichever document was open at the time.
+ */
+export const SCAN_RATE_DP = 0;
+export const scanRatePct = (rate: number) => pct(rate, SCAN_RATE_DP);
+
 export function coverageState(org: Org, coverage: Coverage): CoverageState {
   const t = coverage.totals;
   // Every month in the snapshot is inside the honest window by construction, so
@@ -85,9 +113,72 @@ export function coverageState(org: Org, coverage: Coverage): CoverageState {
     coversShare: t.ordersWithCovers / t.orders,
     gaps: org.cardTier.quality.filter((q) => !q.ok).map((q) => ({ month: q.month, reason: q.reason ?? "unavailable" })),
     monthsAdmitted: org.cardTier.months.length,
-    monthsTested: org.cardTier.quality.length,
+    monthsTested: org.cardTier.monthsTested,
     window: org.window,
     asOf: coverage.monthly.at(-1)?.month ?? org.window.end,
+  };
+}
+
+// ── C3: the venue pair arithmetic, closed ───────────────────────────────────
+
+/**
+ * Every venue and every pair accounted for, so the numbers on the map add up.
+ *
+ * The shipped surface stated **143 pairs tested** beside **19 venues**, which
+ * have 171 possible pairs, and drew 17 of them with no caption. Unexplained
+ * arithmetic on the page carrying "What this map is not" undoes the rest of the
+ * page, so the reconciliation is published rather than the discrepancy being
+ * quietly closed.
+ *
+ * Both explanations the build pack offered turned out to be wrong for this
+ * merchant. All 19 venues are geocoded, so geocode coverage is not it; and the
+ * evidence floor accounts for the 143→71 step, not the 171→143 one. **The
+ * missing 28 pairs share no guests at all** — a pair that never appears in the
+ * co-visitation query is not a pair that failed a test, it is a pair with
+ * nothing to test — and that is a finding about the estate rather than a gap in
+ * the method: 93.5% of guests visit exactly one venue.
+ */
+export type PairArithmetic = {
+  venues: number;
+  venuesPlaced: number;
+  venuesUngeocoded: number;
+  /** n(n−1)/2. Every pair that could exist. */
+  pairsPossible: number;
+  /** Pairs sharing at least one guest, so there was something to measure. */
+  pairsTested: number;
+  /** Pairs sharing nobody. Not a failure — nothing to test. */
+  pairsNoOverlap: number;
+  /** Tested but below the evidence floor, so not drawn. */
+  pairsSuppressed: number;
+  /** Measurable, and drawn where the fit is not extrapolating. */
+  pairsMeasurable: number;
+  /** Measurable but inside the distance range the fit cannot constrain. */
+  pairsExtrapolated: number;
+  minShared: number;
+  /** True when every venue and every pair is accounted for. Asserted by a check. */
+  closes: boolean;
+};
+
+export function pairArithmetic(network: Network): PairArithmetic {
+  const venues = network.nodes.length;
+  const venuesUngeocoded = network.ungeocoded.length;
+  const pairsPossible = (venues * (venues - 1)) / 2;
+  const pairsTested = network.pairsTested;
+  const pairsMeasurable = network.edges.length;
+  return {
+    venues,
+    venuesPlaced: venues - venuesUngeocoded,
+    venuesUngeocoded,
+    pairsPossible,
+    pairsTested,
+    pairsNoOverlap: pairsPossible - pairsTested,
+    pairsSuppressed: network.pairsSuppressed,
+    pairsMeasurable,
+    pairsExtrapolated: network.decay.extrapolatedPairs,
+    minShared: network.minShared,
+    // The real assertion, not a tautology: every tested pair is either below the
+    // evidence floor or measurable, and no more pairs were tested than exist.
+    closes: pairsTested === network.pairsSuppressed + pairsMeasurable && pairsTested <= pairsPossible,
   };
 }
 
@@ -192,7 +283,7 @@ export function valueClaims(m: Members, org: Org): ValueClaim[] {
       basis: `${windowShort(w)} · share of people with two or more visits · corrected for scan detection`,
       refusal: null,
       note:
-        `Membership is only visible when somebody scans, and members scan on ${pct(m.detection.scanPerVisit, 0)} of visits, ` +
+        `Membership is only visible when somebody scans, and members scan on ${scanRatePct(m.detection.scanPerVisit)} of visits, ` +
         `so members who came once are the ones most likely to be missed entirely. Uncorrected this reads ` +
         `${pct(m.detection.observedRepeatRate)}; the figure shown is the corrected one.`,
     },
@@ -249,11 +340,32 @@ export function densityTier(share: number): DensityTier {
   return "WEAK";
 }
 
+/**
+ * C6. Below this share of orders a period is not a quiet trading period, it is a
+ * period the business does not trade in.
+ *
+ * 0.1% is where the gap is, not a round number picked for tidiness: Coffee
+ * Guru's smallest genuine period is Pre-Dawn at 0.17% — 424 orders, a café
+ * opening early — and the next three down are Dinner at 0.043%, Late Evening at
+ * 0.0008% and Late Night at 0.0004%. Two orders in three months across twenty
+ * venues is a mis-keyed till, not a dinner service.
+ */
+export const DAYPART_TRADE_FLOOR = 0.001;
+
 export type TradingIdentity = {
   archetype: string;
   reason: string;
   confidence: number;
   primary: DaypartRow[];
+  /** Periods carrying trade, which is what confidence is measured against. */
+  tradingPeriods: number;
+  /** Periods the business does not trade in, excluded from the baseline. */
+  emptyPeriods: DaypartRow[];
+  /**
+   * What the confidence would have been measured against a flat eight-period
+   * day. Published beside the real figure because the difference is the finding.
+   */
+  confidenceAgainstAllPeriods: number;
 };
 
 /**
@@ -262,10 +374,32 @@ export type TradingIdentity = {
  * Confidence is the share of trade the classification actually accounts for,
  * discounted when the shape is ambiguous — two near-equal primaries describe a
  * business less well than one dominant one.
+ *
+ * ── C6: what was wrong with it ─────────────────────────────────────────────
+ *
+ * The concentration term measured the leader against **1/8**, a flat
+ * eight-period day. Coffee Guru does not have eight trading periods — it has
+ * five, and the other three hold 108, 2 and 1 orders across three months and
+ * twenty venues. Benchmarking a café against a day it could never trade made
+ * concentration look far better than it was, and **the published confidence of
+ * 81% falls to 70% when the baseline is the number of periods the business
+ * actually trades in**.
+ *
+ * That figure is a classification published to a customer, so the one that
+ * renders is the one computed on buckets that carry trade, and the other is
+ * shown beside it rather than quietly replaced.
+ *
+ * Phase 3 folds the empty rows and draws the heatmap. This changes the number
+ * only.
  */
 export function tradingIdentity(dp: Dayparts): TradingIdentity {
-  const total = dp.periods.reduce((a, d) => a + d.orders, 0) || 1;
-  const ranked = [...dp.periods].sort((a, b) => b.orders - a.orders);
+  const grandTotal = dp.periods.reduce((a, d) => a + d.orders, 0) || 1;
+  const empty = dp.periods.filter((d) => d.orders / grandTotal < DAYPART_TRADE_FLOOR);
+  const trading = dp.periods.filter((d) => d.orders / grandTotal >= DAYPART_TRADE_FLOOR);
+
+  const periods = trading.length ? trading : dp.periods;
+  const total = periods.reduce((a, d) => a + d.orders, 0) || 1;
+  const ranked = [...periods].sort((a, b) => b.orders - a.orders);
   const shares = ranked.map((d) => d.orders / total);
   const primary = ranked.filter((_, i) => shares[i] >= 0.25);
   const top = shares[0] ?? 0;
@@ -287,14 +421,22 @@ export function tradingIdentity(dp: Dayparts): TradingIdentity {
     reason = "No period reaches the 25% primary threshold.";
   }
 
-  // Concentration against a flat eight-period distribution, tempered by how
-  // clearly the leader leads.
+  // Concentration against a flat distribution **over the periods the business
+  // trades in**, tempered by how clearly the leader leads. The baseline is
+  // 1/(trading periods), not 1/8 — see the note above.
   const separation = top > 0 ? Math.min(1, (top - second) / top + 0.5) : 0;
-  const concentration = Math.min(1, (top - 0.125) / 0.5 + 0.4);
+  const flat = 1 / Math.max(periods.length, 1);
+  const score = (baseline: number) =>
+    Math.max(0, Math.min(1, Math.min(1, (top - baseline) / 0.5 + 0.4) * separation));
+
   return {
-    archetype, reason,
-    confidence: Math.max(0, Math.min(1, concentration * separation)),
+    archetype,
+    reason,
+    confidence: score(flat),
     primary,
+    tradingPeriods: periods.length,
+    emptyPeriods: empty,
+    confidenceAgainstAllPeriods: score(1 / Math.max(dp.periods.length, 1)),
   };
 }
 

@@ -15,10 +15,18 @@ import { Grid, Legend, PLOT, TipRow, Tooltip, barPath, niceTicks, useTooltip } f
  * question in the same glance.
  */
 export function GuestFlowChart({
-  flow, height = 300,
+  flow, height = 300, showLost = true,
 }: {
   flow: Flow[];
   height?: number;
+  /**
+   * R-191. False where the observation window is shorter than twice the lapse
+   * threshold the loss series depends on. The losses are not drawn faintly or
+   * captioned — they are absent, and the surface publishes the constraint in
+   * their place. A chart with a caption is still a chart, and it gets quoted
+   * without the caption in the next meeting.
+   */
+  showLost?: boolean;
 }) {
   const { tip, show, hide, ref } = useTooltip();
   const width = 900;
@@ -28,9 +36,11 @@ export function GuestFlowChart({
   // work — and stacking them here would make the chart disagree with the tiles.
   const { x, y, ticks, band } = useMemo(() => {
     const maxUp = Math.max(...flow.map((f) => f.gained), 1);
-    const maxDown = Math.max(...flow.map((f) => f.lost), 1);
+    const maxDown = showLost ? Math.max(...flow.map((f) => f.lost), 1) : 0;
     const top = maxUp * 1.1;
-    const bottom = -maxDown * 1.1;
+    // With losses withheld the axis stops at zero rather than reserving empty
+    // space beneath it, so the chart does not imply a series it is not drawing.
+    const bottom = showLost ? -maxDown * 1.1 : 0;
     const plotH = height - PLOT.top - PLOT.bottom;
     const plotW = width - PLOT.left - PLOT.right;
     const bandW = plotW / flow.length;
@@ -40,7 +50,7 @@ export function GuestFlowChart({
       y: (v: number) => PLOT.top + ((top - v) / (top - bottom)) * plotH,
       ticks: niceTicks(bottom, top, 5),
     };
-  }, [flow, height]);
+  }, [flow, height, showLost]);
 
   const barW = Math.max(band - 6, 3);
   const zero = y(0);
@@ -57,7 +67,7 @@ export function GuestFlowChart({
           items={[
             { label: "New", color: "var(--gain-new)" },
             { label: "Came back", color: "var(--gain-reactivated)" },
-            { label: "Lost", color: "var(--loss)" },
+            ...(showLost ? [{ label: "Lost", color: "var(--loss)" }] : []),
           ]}
         />
         {/* The same-month-last-year marker is gone with the two-year chrome. The
@@ -98,10 +108,14 @@ export function GuestFlowChart({
                       <TipRow label="Returning" value={count(f.returning)} color="var(--gain-returning)" />
                       <TipRow label="New" value={count(f.new)} color="var(--gain-new)" />
                       <TipRow label="Came back" value={count(f.reactivated)} color="var(--gain-reactivated)" />
-                      <TipRow label="Lost" value={count(f.lost)} color="var(--loss)" />
-                      <div className="mt-1 border-t border-line pt-1">
-                        <TipRow label="Net" value={`${f.net >= 0 ? "+" : ""}${count(f.net)}`} />
-                      </div>
+                      {showLost && (
+                        <>
+                          <TipRow label="Lost" value={count(f.lost)} color="var(--loss)" />
+                          <div className="mt-1 border-t border-line pt-1">
+                            <TipRow label="Net" value={`${f.net >= 0 ? "+" : ""}${count(f.net)}`} />
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))
                 }
@@ -121,7 +135,7 @@ export function GuestFlowChart({
                   )
                 ))}
 
-                {f.lost > 0 && (
+                {showLost && f.lost > 0 && (
                   <path d={barPath(bx, zero, barW, y(-f.lost) - zero, 4, false)} fill="var(--loss)" />
                 )}
 

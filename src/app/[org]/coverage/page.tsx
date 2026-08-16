@@ -6,7 +6,7 @@ import { getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
 import { runChecks, type Check } from "@/lib/checks";
 import { detectAnomalies, groupByVenue } from "@/lib/anomalies";
 import { qualityFindings } from "@/lib/quality";
-import { count, coverageState, dayLabel, money, monthLabel, pct, windowShort } from "@/lib/metrics";
+import { count, coverageState, dayLabel, money, monthLabel, pct, windowShort, attributionPct} from "@/lib/metrics";
 
 export const dynamic = "force-static";
 
@@ -77,14 +77,14 @@ export default async function CoveragePage({ params }: { params: Promise<{ org: 
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label="Revenue attributed"
-              value={pct(cov.identifiedRevenueShare, 1)}
+              value={attributionPct(cov.identifiedRevenueShare)}
               hint={`Revenue grain — the primary measure. Denominator: ${money(coverage.totals.revenue)} of completed trade, ${windowShort(w)}.`}
               accent="var(--accent)"
               footnote={`of ${money(coverage.totals.revenue)}`}
             />
             <Tile
               label="Orders attributed"
-              value={pct(cov.identifiedOrderShare, 1)}
+              value={attributionPct(cov.identifiedOrderShare)}
               hint={`Transaction grain — the secondary measure, named because it differs. Denominator: ${count(coverage.totals.orders)} orders.`}
               accent="var(--tier-card)"
               footnote={`of ${count(coverage.totals.orders)} orders`}
@@ -98,9 +98,15 @@ export default async function CoveragePage({ params }: { params: Promise<{ org: 
             />
             <Tile
               label="Card capture usable"
-              value={`${org.cardTier.allUsableMonths.length} of ${cov.monthsTested}`}
+              /* C1. Complete months on both sides. The shipped tile read
+                 "4 of 25" for Meat Flour Wine, and the fourth was a partial
+                 August — sixteen days of trade counted as a month. Counting the
+                 partial month in the numerator while leaving 25 in the
+                 denominator flattered the figure on the one page whose purpose
+                 is not flattering Oolio. The honest reading is 3 of 24. */
+              value={`${org.cardTier.monthsUsable} of ${org.cardTier.monthsTested}`}
               hint="Months tested across the two-year discovery window, and the months that passed both the volume and the single-token test. The analysis window is the most recent unbroken run of complete months among them."
-              accent={org.cardTier.allUsableMonths.length < cov.monthsTested / 2 ? "var(--warning)" : "var(--good)"}
+              accent={org.cardTier.monthsUsable < org.cardTier.monthsTested / 2 ? "var(--warning)" : "var(--good)"}
               footnote={
                 <>
                   {cov.monthsAdmitted} complete and contiguous, so in the window · {notTrading.length} before
@@ -344,8 +350,9 @@ export default async function CoveragePage({ params }: { params: Promise<{ org: 
               <Facts
                 rows={[
                   ["Discovery window", `${dayLabel(org.discoveryWindow.start)} – ${dayLabel(org.discoveryWindow.end)}`],
-                  ["Months tested", count(cov.monthsTested)],
-                  ["Months usable", count(cov.monthsAdmitted)],
+                  ["Complete months tested", count(org.cardTier.monthsTested)],
+                  ["Passed the grading", count(org.cardTier.monthsUsable)],
+                  ["Unbroken run reaching today", count(org.window.months)],
                   ["Analysis window", `${dayLabel(w.start)} – ${dayLabel(w.end)}`],
                   ["Complete months in it", count(w.months)],
                   ["Return curve horizon", `${org.calibration.horizonDays} days`],

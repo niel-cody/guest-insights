@@ -5,7 +5,7 @@ import { IconArrow, IconInfo } from "@/components/shell/Icons";
 import { VenueNetwork } from "@/components/charts/VenueNetwork";
 import { getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
-import { count, coverageState, delta, money, pct, windowShort } from "@/lib/metrics";
+import { count, coverageState, delta, money, pct, windowShort, pairArithmetic} from "@/lib/metrics";
 
 export const dynamic = "force-static";
 
@@ -19,6 +19,7 @@ export default async function VenuesPage({ params }: { params: Promise<{ org: st
   const orgs = await getAllOrgs();
   const { org, network } = snap;
   const cov = coverageState(org, snap.coverage);
+  const pairs = pairArithmetic(network);
   const checks = runChecks(snap, guests);
   const w = network.window;
   const cv = network.crossVenue;
@@ -184,6 +185,52 @@ export default async function VenuesPage({ params }: { params: Promise<{ org: st
                       ["Pairs below that bar", count(network.pairsSuppressed)],
                     ]}
                   />
+
+                  {/* C3. The arithmetic, closed on the face. The shipped surface
+                      stated 143 tested beside 19 venues — which have 171 pairs —
+                      and drew a subset with no caption. Unexplained arithmetic on
+                      the page carrying "What this map is not" undoes the page. */}
+                  <div className="mt-5 rounded-lg border border-line bg-surface-sunken px-4 py-3">
+                    <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
+                      Every pair accounted for
+                    </p>
+                    <table className="mt-2 w-full text-[13px]">
+                      <tbody>
+                        {[
+                          [`${pairs.venues} venues, so pairs that could exist`, pairs.pairsPossible, null],
+                          ["share no guests at all — nothing to test", -pairs.pairsNoOverlap,
+                            `${pct(1 - network.crossVenue.multiShareOfPeople, 1)} of guests visit exactly one venue, so most pairs never meet`],
+                          [`share fewer than ${pairs.minShared} guests — below the evidence floor`, -pairs.pairsSuppressed,
+                            "At these volumes a handful of shared guests is coincidence, not a relationship"],
+                          ["measurable, and in the model", pairs.pairsMeasurable, null],
+                        ].map(([label, value, note], i) => (
+                          <tr key={String(label)} className="border-b border-line last:border-b-0">
+                            <th scope="row" className="py-1.5 pr-3 text-left font-normal text-ink-secondary">
+                              {i === 0 || i === 3 ? (
+                                <span className="font-medium text-ink">{label}</span>
+                              ) : (
+                                label
+                              )}
+                              {note && (
+                                <span className="block text-[12px] text-ink-muted">{note}</span>
+                              )}
+                            </th>
+                            <td className="tnum py-1.5 text-right font-medium text-ink">
+                              {(value as number) < 0 ? "−" : ""}
+                              {count(Math.abs(value as number))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink-muted">
+                      {pairs.venuesUngeocoded === 0
+                        ? `All ${pairs.venues} venues carry a coordinate and are placed. `
+                        : `${pairs.venuesUngeocoded} of ${pairs.venues} venues carry no coordinate and cannot be placed: ${network.ungeocoded.join(", ")}. `}
+                      {pairs.pairsExtrapolated > 0 &&
+                        `${pairs.pairsExtrapolated} of the ${pairs.pairsMeasurable} measurable pairs sit closer than the fit can constrain and carry no residual, so they are in the count and not on the map.`}
+                    </p>
+                  </div>
                   <p className="mt-4 max-w-[60ch] text-[13px] leading-relaxed text-ink-secondary">
                     Co-visitation falls with distance almost exactly as a gravity model predicts, and distance
                     alone accounts for {pct(network.decay.r2, 0)} of the variation between pairs. That is the

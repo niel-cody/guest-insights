@@ -4,12 +4,14 @@ import { Card, CheckBadge, EmptyState, Tile } from "@/components/ui/Primitives";
 import { IconArrow } from "@/components/shell/Icons";
 import { GuestFlowChart } from "@/components/charts/GuestFlowChart";
 import { GrowthWaterfall, RealVsPriceBar } from "@/components/charts/GrowthWaterfall";
+import { Constraint, WindowNote } from "@/components/ui/WindowNote";
 import { getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
 import { derivedFromDisplayed } from "@/lib/checks";
+import { windowRules } from "@/lib/window";
 import {
-  SEGMENT_LABEL, count, coverageState, decompose, delta, memberFlow, money, monthLabel,
-  pct, ratio, rollUpSegments, tileCount, windowShort,
+  SEGMENT_LABEL, attributionPct, count, coverageState, decompose, delta, memberFlow, money,
+  monthLabel, pct, ratio, rollUpSegments, tileCount, windowShort,
 } from "@/lib/metrics";
 
 export const dynamic = "force-static";
@@ -23,6 +25,9 @@ export default async function OverviewPage({ params }: { params: Promise<{ org: 
   const cov = coverageState(org, snap.coverage);
   const checks = runChecks(snap, guests);
   const w = org.window;
+  // R-191, read once. A surface declares what a figure depends on; it does not
+  // decide whether the figure renders.
+  const rules = windowRules(org);
 
   const flow = memberFlow(snap.lifecycle);
   const latest = flow.at(-1);
@@ -59,12 +64,12 @@ export default async function OverviewPage({ params }: { params: Promise<{ org: 
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label="Revenue you can attribute"
-              value={pct(cov.identifiedRevenueShare, 0)}
+              value={attributionPct(cov.identifiedRevenueShare)}
               hint={`Revenue grain, ${windowShort(w)}. Denominator is all completed trade in the window, including cash.`}
               accent="var(--accent)"
               footnote={
                 <>
-                  {pct(cov.scannedRevenueShare, 1)} scanned · {pct(cov.identifiedRevenueShare - cov.scannedRevenueShare, 1)} added
+                  {attributionPct(cov.scannedRevenueShare)} scanned · {attributionPct(cov.identifiedRevenueShare - cov.scannedRevenueShare)} added
                   by the card
                 </>
               }
@@ -101,9 +106,9 @@ export default async function OverviewPage({ params }: { params: Promise<{ org: 
             <p className="max-w-[90ch] text-[15px] leading-relaxed text-ink">
               Over {windowShort(w)} you served {money(coverage.totals.revenue)} across{" "}
               {count(coverage.totals.orders)} orders. You can put{" "}
-              <strong>{pct(cov.identifiedRevenueShare, 0)}</strong> of that revenue against a person you could
+              <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> of that revenue against a person you could
               recognise again — where a loyalty CRM, which only sees a scan, would show{" "}
-              <strong>{pct(cov.scannedRevenueShare, 1)}</strong>.{" "}
+              <strong>{attributionPct(cov.scannedRevenueShare)}</strong>.{" "}
               {memberLift > 0.15 ? (
                 <>
                   Your {count(cs.member.people)} members are worth <strong>{ratio(memberLift)}</strong> a
@@ -178,12 +183,31 @@ export default async function OverviewPage({ params }: { params: Promise<{ org: 
             </p>
           </Card>
 
-          {/* ── flow ──────────────────────────────────────────────────────── */}
+          {/* C5 + R-205. The window, why it is the window, and what it entitles
+              this surface to claim — above the first chart with a time axis on
+              it, because a time axis is what invites a trend reading. */}
+          <WindowNote org={org} />
+
+          {/* ── flow ──────────────────────────────────────────────────────────
+              B1 / R-191. The window is 92 days and the lapse threshold is 89, so
+              a member could only be counted lost if last seen in the first three
+              days of it. Lost was near-zero by construction and the Net beside it
+              read as retention performance.
+
+              Gains render: new and reactivated depend on nothing but the calendar.
+              Net does not, because it is gains minus a quantity this window cannot
+              measure. The page reads gains before net, and where net used to be it
+              publishes the reason it cannot be published. */}
           <Card
-            title="Members gained and lost"
-            subtitle={`Enrolled members only — ${pct(cov.memberRevenueShare, 1)} of revenue. New and reactivated above the line, lapsed below it.`}
+            title={rules.lapse.renders ? "Members gained and lost" : "Members gained"}
+            subtitle={
+              rules.lapse.renders
+                ? `Enrolled members only — ${attributionPct(cov.memberRevenueShare)} of revenue. New and reactivated above the line, lapsed below it.`
+                : `Enrolled members only — ${attributionPct(cov.memberRevenueShare)} of revenue. New and reactivated, which depend on the calendar and not on a lapse threshold.`
+            }
             right={
-              latest && (
+              latest &&
+              (rules.lapse.renders ? (
                 <div className="text-right">
                   <div className="tnum text-[15px] font-semibold text-ink">
                     {(() => {
@@ -196,24 +220,43 @@ export default async function OverviewPage({ params }: { params: Promise<{ org: 
                     {count(tileCount(latest.lost))} lost
                   </div>
                 </div>
-              )
+              ) : (
+                <div className="text-right">
+                  <div className="tnum text-[15px] font-semibold text-ink">
+                    {count(tileCount(latest.gained))}
+                  </div>
+                  <div className="text-[12px] text-ink-muted">gained in {monthLabel(latest.month)}</div>
+                </div>
+              ))
             }
           >
             {flow.length >= 2 ? (
-              <GuestFlowChart flow={flow} />
+              <GuestFlowChart flow={flow} showLost={rules.lapse.renders} />
             ) : (
               <EmptyState
                 title="Not enough months to draw a flow"
                 body={`The honest window is ${w.months} complete months of trustworthy card data. A flow chart needs at least two.`}
               />
             )}
-            <p className="mt-4 max-w-[90ch] text-[12px] text-ink-muted">
-              A lapse is dated: a member lapses on the day their gap since the last visit crosses{" "}
-              {org.calibration.lapsedDays} days
-              {org.calibration.lapsedEstimable ? "" : ", the canonical threshold, because this window is too short to estimate one"}
-              . Gained and lost are counted on the same threshold, so the net is a statement with a date on it
-              rather than a snapshot artefact.
-            </p>
+            {rules.lapse.renders ? (
+              <p className="mt-4 max-w-[90ch] text-[12px] text-ink-muted">
+                A lapse is dated: a member lapses on the day their gap since the last visit crosses{" "}
+                {org.calibration.lapsedDays} days
+                {org.calibration.lapsedEstimable ? "" : ", the canonical threshold, because this window is too short to estimate one"}
+                . Gained and lost are counted on the same threshold, so the net is a statement with a date on
+                it rather than a snapshot artefact.
+              </p>
+            ) : (
+              <div className="mt-4">
+                <Constraint verdict={rules.lapse} label="Members lost, and net movement">
+                  <p className="mt-2 max-w-[86ch] text-[12px] leading-relaxed text-ink-muted">
+                    What clears this is not code. It is a longer run of trustworthy card months, which is
+                    CI-023 and now CI-028. At 24 clean months the window is roughly 730 days, twice the
+                    threshold is comfortably inside it, and this figure renders on its own.
+                  </p>
+                </Constraint>
+              </div>
+            )}
           </Card>
 
           {/* ── growth ────────────────────────────────────────────────────── */}

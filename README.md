@@ -173,7 +173,7 @@ v1 shipped five reconciliation invariants that compared numbers to themselves â€
 `41,410 of 41,410`, three times. They were green on the day 403,600 transactions
 carried one token.
 
-There are now **19 checks, and the contract is stricter than "they pass"**: each
+There are now **24 checks, and the contract is stricter than "they pass"**: each
 is demonstrated failing against a fixture corrupted in the specific way it claims
 to catch.
 
@@ -358,7 +358,7 @@ scripts/
 src/lib/
   stats.ts             Kaplan-Meier, paired intervals, standardisation, detection
   metrics.ts           every derived figure, so two screens cannot disagree
-  checks.ts            the 19 checks
+  checks.ts            the 24 checks
   data.ts              snapshot access â€” the seam a live warehouse would replace
 ```
 

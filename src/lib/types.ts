@@ -28,17 +28,33 @@ export type Venue = {
   lastDay: string | null;
 };
 
+/**
+ * One month's card-capture verdict, computed at load time by `scripts/grade.ts`.
+ *
+ * `coverage` and `ratio` measure different failures and both are kept. A month
+ * at 33% coverage whose covered rows are impeccable is usable with a correction;
+ * a month at 95% coverage whose references are three recycled tokens is not
+ * usable at all, and a single "quality" score would rank them the same way.
+ */
 export type ParMonth = {
   month: string;
   txns: number;
   orders: number;
   distinctPar: number;
+  /** Transactions carrying a *real* reference. The `'N/A'` placeholder is not one. */
   withPar: number;
+  /** Distinct references per transaction that carries one. */
   ratio: number;
+  /** Share of transactions carrying a real reference at all. */
+  coverage: number;
+  /** Share of real references sitting on the single most frequent one. */
   maxTokenShare: number;
   ok: boolean;
   reason: string | null;
 };
+
+/** R-205. What the loaded window entitles a surface to claim. */
+export type ClaimLevel = "none" | "growth" | "trend";
 
 export type SurvivalPointOut = { days: number; s: number; se: number; atRisk: number };
 
@@ -76,7 +92,20 @@ export type Org = {
   venues: Venue[];
   calibration: Calibration;
   storeMap: { terminals: number; venuesResolved: number };
-  cardTier: { months: string[]; allUsableMonths: string[]; quality: ParMonth[] };
+  cardTier: {
+    months: string[];
+    allUsableMonths: string[];
+    quality: ParMonth[];
+    /** Complete months graded. A partial month is never counted. C1. */
+    monthsTested: number;
+    /** Complete months that passed the grading. Not the same as the window. */
+    monthsUsable: number;
+    /** The partial month held back from the count, when it would otherwise have passed. */
+    partialMonthExcluded: string | null;
+    /** The longest clean run anywhere in history, which may not reach the present. */
+    longestRun: { start: string; end: string; months: number } | null;
+    claim: ClaimLevel;
+  };
   orderStatuses: { status: string; training: boolean; orders: number; revenue: number; zeroValue: number }[];
   dayparts: Daypart[];
 };

@@ -42,3 +42,6 @@ next-env.d.ts
 
 # extract salt — never commit, it would make the pseudonyms replayable
 .extract-salt
+
+# CI-023 evidence — regenerate with `npm run partner`, not committed
+data/_partners.json

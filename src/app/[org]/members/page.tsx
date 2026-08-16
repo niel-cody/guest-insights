@@ -4,8 +4,7 @@ import { Card, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives"
 import { IconAlert, IconArrow, IconCheck, IconInfo } from "@/components/shell/Icons";
 import { getAllOrgs, getSnapshot } from "@/lib/data";
 import {
-  causalReading, count, coverageState, delta, money, monthLabel, pct, ratio, valueClaims, windowShort,
-} from "@/lib/metrics";
+  causalReading, count, coverageState, delta, money, monthLabel, pct, ratio, valueClaims, windowShort, attributionPct, scanRatePct} from "@/lib/metrics";
 import type { ValueClaim } from "@/lib/metrics";
 
 export const dynamic = "force-static";
@@ -281,9 +280,9 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
                 measured through the card rather than the scan: a member who forgets is still the same person.
               </p>
               <p className="mt-3 text-[12px] text-ink-muted">
-                Members scan on {pct(cs.member.scanPerVisit, 0)} of visits. A loyalty CRM sees only those, which
-                is why it reports {pct(cov.scannedRevenueShare, 1)} of revenue where the card shows{" "}
-                {pct(cov.memberRevenueShare, 1)}.
+                Members scan on {scanRatePct(cs.member.scanPerVisit)} of visits. A loyalty CRM sees only those, which
+                is why it reports {attributionPct(cov.scannedRevenueShare)} of revenue where the card shows{" "}
+                {attributionPct(cov.memberRevenueShare)}.
               </p>
             </Card>
           </div>
@@ -342,7 +341,7 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
                 rows={[
                   ["Cards seen in the window", count(m.linkage.cards)],
                   ["Resolved to an enrolled member", count(m.linkage.cardsLinkedToMember)],
-                  ["Visits with a scan", `${pct(cs.member.scanPerVisit, 0)} of member visits`],
+                  ["Visits with a scan", `${scanRatePct(cs.member.scanPerVisit)} of member visits`],
                   [
                     "Cards seen on more than one member",
                     <span key="c" className="flex items-center justify-end gap-1.5">

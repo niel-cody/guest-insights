@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { CoverageState } from "@/lib/metrics";
-import { monthLabel, pct } from "@/lib/metrics";
+import { monthLabel, pct, attributionPct} from "@/lib/metrics";
 import { IconChevron } from "../shell/Icons";
 
 /**
@@ -25,7 +25,7 @@ export function CoverageChip({ state }: { state: CoverageState }) {
       >
         <span className="flex h-2 w-2 rounded-full" style={{ background: complete ? "var(--good)" : "var(--warning)" }} />
         <span className="font-medium text-ink">
-          Recognising {pct(state.identifiedRevenueShare, 0)} of revenue
+          Recognising {attributionPct(state.identifiedRevenueShare)} of revenue
         </span>
         <IconChevron className={`h-4 w-4 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -48,7 +48,7 @@ export function CoverageChip({ state }: { state: CoverageState }) {
           </div>
 
           <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[12px]">
-            <Row k="Measured on">Revenue. Transaction-grain share is {pct(state.identifiedOrderShare, 0)} of orders.</Row>
+            <Row k="Measured on">Revenue. Transaction-grain share is {attributionPct(state.identifiedOrderShare)} of orders.</Row>
             <Row k="Window">
               {monthLabel(state.window.start)} – {monthLabel(state.window.end)}
               {" "}({state.window.months} complete {state.window.months === 1 ? "month" : "months"})

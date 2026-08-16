@@ -12,7 +12,8 @@
  * badge — see `scripts/verify.ts`.
  */
 import type { Guests, Snapshot } from "./types";
-import { count, money, tileCount } from "./metrics";
+import { count, money, pairArithmetic, tileCount } from "./metrics";
+import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
 
 export type Severity = "blocking" | "warning";
 
@@ -325,6 +326,69 @@ export function runChecks(snap: Snapshot, guests: Guests | null): Check[] {
     enr.estimable
       ? `within-person on ${count(enr.visits.n)} switchers · spend lift ${(enr.spend.lift * 100).toFixed(1)}% (${(enr.spend.liftLo * 100).toFixed(1)}–${(enr.spend.liftHi * 100).toFixed(1)}%)`
       : "refused — no opportunity value is published",
+  ));
+
+  // C3. Every pair the map speaks about is accounted for somewhere.
+  const pairs = pairArithmetic(snap.network);
+  checks.push(ok(
+    "venue.pairArithmetic",
+    "Every possible venue pair is either untested for want of a shared guest, suppressed below the evidence floor, or in the model.",
+    "`143 pairs tested` printed beside `19 venues`, which have 171 pairs, on the surface that also carries 'What this map is not'. Unexplained arithmetic on that page undoes the rest of it.",
+    pairs.closes,
+    `${count(pairs.pairsPossible)} possible = ${count(pairs.pairsNoOverlap)} sharing nobody + ` +
+      `${count(pairs.pairsSuppressed)} below the ${pairs.minShared}-guest floor + ${count(pairs.pairsMeasurable)} measurable · ` +
+      `${pairs.venuesPlaced} of ${pairs.venues} venues placed`,
+  ));
+
+  // ── the window's authority over the figures that depend on it ─────────────
+
+  // R-191. The rule itself, asserted against the exact case that shipped: a
+  // 92-day window carrying an 89-day lapse threshold, where Lost was near-zero
+  // by construction and the Net beside it read as retention performance.
+  //
+  // No data corruption can reach this one — it is a property of the rule every
+  // surface calls — so it is proven as a unit check against the historical
+  // failing case in both directions. A rule that only ever returns "refuse" is
+  // as useless as one that only ever returns "render".
+  const refusesTheShippedCase = !windowVerdict({ ...win, days: 92 }, 89).renders;
+  const rendersWhenLongEnough = windowVerdict({ ...win, days: 730 }, 89).renders;
+  const live = windowRules(org);
+  checks.push(ok(
+    "window.thresholdObservability",
+    "A retention, churn, lapse or loss figure renders only where the window is at least twice the threshold it depends on.",
+    "`Net +520` on a 92-day window against an 89-day lapse threshold, where a guest could only be counted lost if last seen in the first three days — so the figure was set by the window, not by anybody's behaviour.",
+    refusesTheShippedCase && rendersWhenLongEnough,
+    `rule refuses at W=92 T=89 and renders at W=730 T=89 · this snapshot: window ${count(win.days)}d, ` +
+      `lapse ${org.calibration.lapsedDays}d → ${live.lapse.renders ? "renders" : "refused"}, ` +
+      `slipping ${org.calibration.slippingDays ?? "—"}d → ${live.slipping.renders ? "renders" : "refused"}`,
+    "blocking",
+    "unit",
+  ));
+
+  // R-205. The claim the surface is entitled to make is derived from the months
+  // actually loaded, every time. A snapshot whose claim was carried forward from
+  // a longer extract would let a growth statement outlive the data behind it.
+  checks.push(ok(
+    "window.claimMatchesMonths",
+    "The growth-or-trend claim on the surface is derived from the complete months loaded, never carried forward.",
+    "A surface still offering a year-on-year reading after the window it was built on shrank — 13 months is one comparison, 12 is none, and nothing on screen distinguished them.",
+    org.cardTier.claim === claimLevel(win.months),
+    `${win.months} complete months → ${claimLevel(win.months)} · snapshot declares ${org.cardTier.claim}`,
+  ));
+
+  // The placeholder. `PAYMENT_ACCOUNT_REFERENCE` is never NULL, and its dominant
+  // value across the estate is the literal string 'N/A' — 215,900,912 rows since
+  // June 2023. Coverage is measured on *real* references only, so a month that
+  // is 90% placeholder scores 10% here rather than 100% on a non-null count.
+  const admittedCoverage = admitted.length ? Math.min(...admitted.map((m) => m.coverage)) : 0;
+  checks.push(ok(
+    "card.coverageIsReal",
+    "Every admitted month carries a real card reference on enough of its trade to recover a population.",
+    "'PAR present on 82.87% of 405,116,084 rows' — a non-null count whose dominant value is the string 'N/A', which is how an estate with an eight-month reference blackout looked card-covered throughout it.",
+    admitted.length > 0 && admittedCoverage >= MIN_COVERAGE,
+    admitted.length
+      ? `weakest admitted month ${(admittedCoverage * 100).toFixed(0)}% of transactions carry a real reference · floor ${(MIN_COVERAGE * 100).toFixed(0)}%`
+      : "no months admitted",
   ));
 
   const cb = members.coverBasis;

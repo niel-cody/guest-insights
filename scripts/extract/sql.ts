@@ -28,6 +28,7 @@
  * is the spine.
  */
 import { CANONICAL_LAPSE_DAYS, NON_GUEST_VISITS_PER_DAY, daypartCase } from "./orgs";
+import { realParSql } from "../grade";
 
 const ORDERS = "OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.ORDERS";
 const PAYMENTS = "OOLIO_PAY_ACQUIRERS.PUBLIC.OOLIO_TRANSACTIONS";
@@ -117,12 +118,19 @@ export type StorePair = { storeId: string; payStore: string };
  * COUNT(PAR) coverage test scores it as fully covered, and a naive model turns
  * eight thousand transactions a month into one customer. This measures the ratio
  * of distinct references to transactions, which is the only test that catches it.
+ *
+ * The reference is normalised through `realParSql` first, which nulls the
+ * literal string `'N/A'`. That placeholder sits on 215,900,912 rows since June
+ * 2023 and is the single largest reason the estate looks card-covered and is
+ * not. Before it was nulled here, roughly 5% of Coffee Guru's admitted trade
+ * resolved to one phantom person; it survived only because the non-guest
+ * exclusion happened to catch it, which is luck rather than a control.
  */
 export function parQualityQuery(w: Window, payStores: string[]) {
   const inList = [...new Set(payStores)].map((s) => `'${s.replace(/'/g, "''")}'`).join(",");
   return `WITH txn AS (
   SELECT DATE_TRUNC('month', TRADING_DATE)::DATE AS MONTH,
-    NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '') AS PAR
+    ${realParSql("PAYMENT_ACCOUNT_REFERENCE")} AS PAR
   FROM ${PAYMENTS}
   WHERE TRADING_DATE BETWEEN '${w.start}' AND '${w.end}'
     AND STORE IN (${inList})
@@ -190,12 +198,12 @@ export function basePrelude(orgId: string, w: Window, pairs: StorePair[], cardMo
   const monthList = cardMonths.length ? cardMonths.map((m) => `${q(m)}::DATE`).join(",") : "NULL";
   return `${ordersCte(orgId, w)},
 pay AS (
-  SELECT ORDER_NUMBER, STORE, TRADING_DATE, NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '') AS PAR
+  SELECT ORDER_NUMBER, STORE, TRADING_DATE, ${realParSql("PAYMENT_ACCOUNT_REFERENCE")} AS PAR
   FROM ${PAYMENTS}
   WHERE TRADING_DATE BETWEEN '${w.start}' AND '${w.end}'
     AND DATE_TRUNC('month', TRADING_DATE) IN (${monthList})
     AND STORE IN (${inList})
-    AND NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '') IS NOT NULL
+    AND ${realParSql("PAYMENT_ACCOUNT_REFERENCE")} IS NOT NULL
     AND AMOUNT > 0
 ),
 map AS (

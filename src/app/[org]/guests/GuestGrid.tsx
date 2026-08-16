@@ -1,15 +1,46 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconSearch, IconX } from "@/components/shell/Icons";
 import { Card, EmptyState, Facts, Pill } from "@/components/ui/Primitives";
 import { SEGMENT_LABEL, count, dayLabel, habit, money, overdueRatio, pct } from "@/lib/metrics";
 import type { Guest, Guests, Org } from "@/lib/types";
+import { DEFAULT_VIEW, parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
+import { track } from "@/lib/instrument";
 
 type SortKey = "spend" | "visits" | "daysSince" | "firstSeen";
 
 const PAGE = 100;
+const DEFAULT_SORT: SortKey = "spend";
+
+/**
+ * The population a view selects, as a pure function.
+ *
+ * Exported because this is the thing B2a's route tests have to assert on. The
+ * defect that shipped was a parameter that survived in the URL and was then
+ * ignored, so a test that checks the parameter round-trips proves nothing —
+ * **the assertion has to be on the rendered population.** Keeping the selection
+ * here means the test and the grid run identical code rather than similar code.
+ */
+export function applyView(rows: Guest[], view: View): Guest[] {
+  const needle = view.q.trim().toLowerCase();
+  const sort = (view.sort ?? DEFAULT_SORT) as SortKey;
+  const out = rows.filter(
+    (g) =>
+      (!view.tier || g.tier === view.tier) &&
+      (!view.segment || g.segment === view.segment) &&
+      (view.band == null || g.valueBand === view.band) &&
+      (!view.daypart || g.homeDaypart === view.daypart) &&
+      (!view.venue.length || view.venue.includes(g.homeStoreId)) &&
+      (!needle || (g.name ?? "").toLowerCase().includes(needle) || g.id.includes(needle)),
+  );
+  return out.sort((a, b) => {
+    const dir = view.dir === "asc" ? -1 : 1;
+    if (sort === "firstSeen") return dir * (b.firstSeen ?? "").localeCompare(a.firstSeen ?? "");
+    return dir * (Number(b[sort]) - Number(a[sort]));
+  });
+}
 const BAND_LABEL = ["Lowest", "Second", "Middle", "Fourth", "Top"];
 
 /**
@@ -70,43 +101,84 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
   crossVenueShare: number;
 }) {
   const sp = useSearchParams();
-  const [q, setQ] = useState("");
-  const [tier, setTier] = useState<string>(sp.get("tier") ?? "all");
-  const [segment, setSegment] = useState<string>(sp.get("segment") ?? "all");
-  const [band, setBand] = useState<string>("all");
-  const [daypart, setDaypart] = useState<string>(sp.get("daypart") ?? "all");
-  const [venue, setVenue] = useState("all");
-  const [sort, setSort] = useState<SortKey>("spend");
-  const [minVisits] = useState(Number(sp.get("minVisits") ?? 0));
-  const [minVenues] = useState(Number(sp.get("minVenues") ?? 0));
-  const [unmasked, setUnmasked] = useState(false);
-  const [page, setPage] = useState(0);
-  const [open, setOpen] = useState<Guest | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const rows = guests.rows.filter(
-      (g) =>
-        (tier === "all" || g.tier === tier) &&
-        (segment === "all" || g.segment === segment) &&
-        (band === "all" || String(g.valueBand) === band) &&
-        (daypart === "all" || g.homeDaypart === daypart) &&
-        (venue === "all" || g.homeStoreId === venue) &&
-        g.visits >= minVisits &&
-        g.venues >= minVenues &&
-        (!needle || (g.name ?? "").toLowerCase().includes(needle) || g.id.includes(needle)),
-    );
-    return rows.sort((a, b) => {
-      if (sort === "firstSeen") return (a.firstSeen ?? "").localeCompare(b.firstSeen ?? "");
-      return Number(b[sort]) - Number(a[sort]);
-    });
-  }, [guests.rows, q, tier, segment, band, daypart, venue, sort, minVisits, minVenues]);
+  /**
+   * B2. **The view is derived from the URL on every render. It is never copied
+   * into state.**
+   *
+   * What shipped was `useState(sp.get("tier") ?? "all")` — the URL read once at
+   * mount and then abandoned. That is two sources of truth reconciled at exactly
+   * one moment, and it is why `?daypart=lunch` showed Daypart = All and 17,015
+   * matches on a cold load and Lunch and 3,148 on a soft one. Both renders were
+   * running different code paths over the same parameter.
+   *
+   * There is no local filter state below, so there is no second source to
+   * diverge from. Adding one would reintroduce the defect, which is the reason
+   * this is spelled out rather than left to be inferred.
+   */
+  const view = useMemo(
+    () => parseView(Object.fromEntries(sp.entries()) as SearchParams),
+    [sp],
+  );
+
+  /**
+   * Every filter change writes to the URL. B2b: without this, no view can be
+   * shared or bookmarked, which is the half of the defect that was invisible
+   * because nothing on screen was wrong.
+   *
+   * `replace`, not `push`: changing a filter is refining one question, not
+   * navigating, and a Back button that walks a user through nine intermediate
+   * filter states is its own defect. `scroll: false` keeps the grid still.
+   */
+  const setView = useCallback(
+    (patch: Partial<View>) => {
+      // Any change to the population resets to the first page, otherwise a
+      // narrower filter lands the reader on an empty page 4 and reads as "no
+      // matches". An explicit page in the patch wins.
+      const changesPopulation = Object.keys(patch).some(
+        (k) => k !== "page" && k !== "guest" && k !== "sort" && k !== "dir",
+      );
+      const next: View = {
+        ...view,
+        ...(changesPopulation ? { page: 1 } : {}),
+        ...patch,
+      };
+      // R-189. The control that moved, never the value chosen — knowing the
+      // daypart filter was used answers the question; knowing which daypart
+      // starts describing the operator's own trade back to whoever reads it.
+      for (const key of Object.keys(patch)) {
+        track(key === "guest" ? "drawer.open" : "filter.change", "guests", key);
+      }
+      router.replace(`${pathname}${toQuery(next)}`, { scroll: false });
+    },
+    [view, router, pathname],
+  );
+
+  /**
+   * The reveal is deliberately *not* in the URL.
+   *
+   * Every other control here is shareable because sharing a view is the point.
+   * Unmasking names is a privacy action, role-gated and audit-logged in
+   * production, and a link that silently unmasks on someone else's screen would
+   * make one person's authorisation travel to another person's browser.
+   */
+  const [unmasked, setUnmasked] = useState(false);
+
+  const filtered = useMemo(() => applyView(guests.rows, view), [guests.rows, view]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
-  const safePage = Math.min(page, pages - 1);
+  const safePage = Math.min(Math.max(view.page - 1, 0), pages - 1);
   const shown = filtered.slice(safePage * PAGE, safePage * PAGE + PAGE);
+
+  // The open guest is resolved from the URL, so a drawer can be sent. A guest id
+  // that is no longer in the filtered set opens nothing rather than throwing —
+  // a link that has been through a mail client should degrade, not break.
+  const open = view.guest ? (filtered.find((g) => g.id === view.guest) ?? null) : null;
   const index = open ? filtered.findIndex((g) => g.id === open.id) : -1;
-  const reset = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPage(0); };
+
+  const sort = (view.sort ?? DEFAULT_SORT) as SortKey;
 
   const dayparts = org.dayparts.filter((d) => guests.rows.some((g) => g.homeDaypart === d.key));
 
@@ -121,45 +193,45 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
             <label className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-1.5">
               <IconSearch className="h-4 w-4 text-ink-muted" />
               <input
-                value={q}
-                onChange={(e) => { setQ(e.target.value); setPage(0); }}
+                value={view.q}
+                onChange={(e) => setView({ q: e.target.value })}
                 placeholder="Name or id"
                 className="w-28 bg-transparent text-[13px] outline-none placeholder:text-ink-muted"
               />
             </label>
-            <Choice label="Tier" value={tier} onChange={reset(setTier)} options={[
+            <Choice label="Tier" value={view.tier ?? "all"} onChange={(v) => setView({ tier: v === "all" ? null : (v as View["tier"]), segment: v === "card" ? null : view.segment })} options={[
               { value: "all", label: "All" },
               { value: "member", label: "Members" },
               { value: "card", label: "Card only" },
             ]} />
             <Choice
               label="Segment"
-              value={segment}
-              onChange={reset(setSegment)}
-              disabled={tier === "card"}
-              hint={tier === "card" ? "Only members carry a lifecycle verdict" : undefined}
+              value={view.segment ?? "all"}
+              onChange={(v) => setView({ segment: v === "all" ? null : (v as View["segment"]) })}
+              disabled={view.tier === "card"}
+              hint={view.tier === "card" ? "Only members carry a lifecycle verdict" : undefined}
               options={[
                 { value: "all", label: "All" },
                 ...Object.entries(SEGMENT_LABEL).map(([value, label]) => ({ value, label })),
               ]}
             />
-            <Choice label="Value" value={band} onChange={reset(setBand)} options={[
+            <Choice label="Value" value={view.band == null ? "all" : String(view.band)} onChange={(v) => setView({ band: v === "all" ? null : Number(v) })} options={[
               { value: "all", label: "All" },
               ...BAND_LABEL.map((l, i) => ({ value: String(i + 1), label: `${l} fifth` })),
             ]} />
             {dayparts.length > 1 && (
-              <Choice label="Daypart" value={daypart} onChange={reset(setDaypart)} options={[
+              <Choice label="Daypart" value={view.daypart ?? "all"} onChange={(v) => setView({ daypart: v === "all" ? null : v })} options={[
                 { value: "all", label: "All" },
                 ...dayparts.map((d) => ({ value: d.key, label: d.label })),
               ]} />
             )}
             {org.venues.length > 1 && (
-              <Choice label="Venue" value={venue} onChange={reset(setVenue)} options={[
+              <Choice label="Venue" value={view.venue[0] ?? "all"} onChange={(v) => setView({ venue: v === "all" ? [] : [v] })} options={[
                 { value: "all", label: "All" },
                 ...org.venues.map((v) => ({ value: v.id, label: v.name })),
               ]} />
             )}
-            <Choice label="Sort" value={sort} onChange={reset((v: string) => setSort(v as SortKey))} options={[
+            <Choice label="Sort" value={sort} onChange={(v) => setView({ sort: v })} options={[
               { value: "spend", label: "Spend" },
               { value: "visits", label: org.labels.visits },
               { value: "daysSince", label: "Time away" },
@@ -204,7 +276,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
                 {shown.map((g) => (
                   <tr
                     key={g.id}
-                    onClick={() => setOpen(g)}
+                    onClick={() => setView({ guest: g.id })}
                     className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-hover"
                   >
                     <td className="px-5 py-2">
@@ -252,7 +324,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
           {pages > 1 && (
             <div className="flex items-center gap-2">
               <button
-                type="button" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}
+                type="button" disabled={safePage === 0} onClick={() => setView({ page: safePage })}
                 className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
               >
                 ←
@@ -261,7 +333,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
                 {safePage + 1} of {pages}
               </span>
               <button
-                type="button" disabled={safePage >= pages - 1} onClick={() => setPage(safePage + 1)}
+                type="button" disabled={safePage >= pages - 1} onClick={() => setView({ page: safePage + 2 })}
                 className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
               >
                 →
@@ -277,9 +349,13 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
           org={org}
           unmasked={unmasked}
           crossVenueShare={crossVenueShare}
-          onClose={() => setOpen(null)}
-          onPrev={index > 0 ? () => setOpen(filtered[index - 1]) : undefined}
-          onNext={index >= 0 && index < filtered.length - 1 ? () => setOpen(filtered[index + 1]) : undefined}
+          onClose={() => setView({ guest: null })}
+          onPrev={index > 0 ? () => setView({ guest: filtered[index - 1].id }) : undefined}
+          onNext={
+            index >= 0 && index < filtered.length - 1
+              ? () => setView({ guest: filtered[index + 1].id })
+              : undefined
+          }
         />
       )}
     </>
