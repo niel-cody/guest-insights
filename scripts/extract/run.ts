@@ -25,8 +25,8 @@ import {
 } from "./sql";
 import * as Q from "./queries";
 import {
-  detectionCorrect, kaplanMeier, paired, standardise, wilson,
-  type Episode, type Stratum,
+  detectionCorrect, fitDistanceDecay, kaplanMeier, paired, standardise, wilson,
+  type Episode, type PairObservation, type Stratum,
 } from "../../src/lib/stats";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -241,6 +241,13 @@ async function extractOrg(org: OrgConfig) {
     query<Row>(Q.enrolmentSwitchQuery(args)),
     query<Row>(Q.opportunityQuery(args)),
     query<Row>(Q.linkageQuery(args)),
+  ]);
+
+  console.log("  venue network…");
+  const [venueGeo, network, crossVenue] = await Promise.all([
+    query<Row>(Q.venueGeoQuery(org.id)),
+    query<Row>(Q.venueNetworkQuery(args)),
+    query<Row>(Q.crossVenueQuery(args)),
   ]);
 
   console.log("  lifecycle, growth, segments, guests…");
@@ -495,6 +502,135 @@ async function extractOrg(org: OrgConfig) {
         share: link.scannedOrders + link.unscannedOrders
           ? r4(link.unscannedOrders / (link.scannedOrders + link.unscannedOrders)) : 0,
       },
+    },
+  });
+
+  // ── the venue network ─────────────────────────────────────────────────────
+  //
+  // Edges are ranked by how far they beat the distance-decay curve, not by how
+  // many guests they share. Raw counts recover venue size: Amaroo and Franklin
+  // share the fifth-most guests in the estate and fewer than independence would
+  // predict, and a network drawn on counts would call that a strong relationship.
+  const geo = new Map(
+    venueGeo.map((g) => [String(g.STORE_ID), {
+      lat: g.LAT == null ? null : Number(g.LAT),
+      lon: g.LON == null ? null : Number(g.LON),
+      stateCode: String(g.STATE_CODE ?? ""),
+      timezone: String(g.TIMEZONE ?? ""),
+    }]),
+  );
+  const venueIds = new Set(venueList.map((v) => v.id));
+  const covByVenue = new Map(cov.map((c) => [c.storeId, c]));
+
+  const nodes = venueList.map((v) => {
+    const c = covByVenue.get(v.id);
+    const g = geo.get(v.id);
+    return {
+      id: v.id, name: v.name,
+      lat: g?.lat ?? null, lon: g?.lon ?? null,
+      stateCode: g?.stateCode ?? "", timezone: g?.timezone ?? "",
+      orders: c?.orders ?? 0, revenue: c?.revenue ?? 0,
+      memberRevenue: c?.memberRevenue ?? 0,
+      memberShare: c?.revenue ? r4(c.memberRevenue / c.revenue) : 0,
+      people: 0,
+    };
+  });
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // A pair needs enough shared guests to be signal rather than coincidence.
+  const MIN_SHARED = 20;
+  const rawEdges = network
+    .filter((r) => venueIds.has(String(r.A)) && venueIds.has(String(r.B)))
+    .map((r) => {
+      const peopleA = num(r.PEOPLE_A), peopleB = num(r.PEOPLE_B), pop = num(r.POPULATION);
+      const expected = pop ? (peopleA * peopleB) / pop : 0;
+      nodeById.get(String(r.A))!.people = peopleA;
+      nodeById.get(String(r.B))!.people = peopleB;
+      return {
+        a: String(r.A), b: String(r.B),
+        shared: num(r.SHARED), expected: r2(expected),
+        lift: expected ? r4(num(r.SHARED) / expected) : 0,
+        km: r.KM == null ? null : r2(num(r.KM)),
+      };
+    });
+  const measurable = rawEdges.filter((e) => e.shared >= MIN_SHARED && e.km != null && e.km > 0);
+  const decay = fitDistanceDecay(
+    measurable.map((e): PairObservation => ({ key: `${e.a}|${e.b}`, lift: e.lift, km: e.km!, shared: e.shared })),
+  );
+  // The fitted curve is a power law, which runs to infinity as distance runs to
+  // zero. Coffee Guru has two pairs under 2km and four under 3km, so below the
+  // tenth percentile of observed distances the model is extrapolating into a
+  // region almost nothing constrains — it predicts 5.9× for two venues 740m
+  // apart on the strength of pairs several kilometres away. Those pairs get no
+  // residual rather than a confident wrong one. The upper tail is safe: the
+  // curve is well behaved there and the finding at 36km is visible without the
+  // model at all, by comparison with other pairs at similar distance.
+  const sortedKm = measurable.map((e) => e.km!).sort((a, b) => a - b);
+  const supportFloorKm = sortedKm.length
+    ? sortedKm[Math.floor(0.1 * (sortedKm.length - 1))]
+    : 0;
+
+  const edges = measurable
+    .map((e) => {
+      const extrapolated = e.km! < supportFloorKm;
+      const predicted = decay.refusal || extrapolated ? null : r4(decay.predict(e.km!));
+      return {
+        ...e, predicted, extrapolated,
+        // How many times more co-visitation than distance alone predicts.
+        residual: predicted ? r4(e.lift / predicted) : null,
+      };
+    })
+    .sort((x, y) => (y.residual ?? -1) - (x.residual ?? -1));
+
+  const cv = crossVenue.map((r) => ({
+    venueBand: num(r.VENUE_BAND), isMember: String(r.IS_MEMBER).toLowerCase() === "true",
+    people: num(r.PEOPLE), visits: num(r.VISITS), spend: num(r.SPEND),
+    avgVisits: r2(num(r.AVG_VISITS)), avgSpend: r2(num(r.AVG_SPEND)),
+  }));
+  const single = cv.filter((c) => c.venueBand === 1);
+  const multi = cv.filter((c) => c.venueBand >= 2);
+  const agg = (rows: typeof cv) => {
+    const people = rows.reduce((a, c) => a + c.people, 0);
+    const spend = rows.reduce((a, c) => a + c.spend, 0);
+    const visits = rows.reduce((a, c) => a + c.visits, 0);
+    return {
+      people, spend: r2(spend), visits,
+      spendPerPerson: people ? r2(spend / people) : 0,
+      visitsPerPerson: people ? r2(visits / people) : 0,
+    };
+  };
+  const singleAgg = agg(single), multiAgg = agg(multi);
+  const totalSpend = singleAgg.spend + multiAgg.spend;
+  const totalPeople = singleAgg.people + multiAgg.people;
+
+  console.log(
+    `    ${nodes.filter((n) => n.lat != null).length}/${nodes.length} venues geocoded · ` +
+      `${edges.length} measurable pairs · ` +
+      (decay.refusal ? "decay refused" : `decay slope ${decay.slope.toFixed(2)} r2 ${decay.r2.toFixed(2)}`),
+  );
+
+  write(org.slug, "network", {
+    window: { ...w, days: windowDays },
+    nodes,
+    edges,
+    minShared: MIN_SHARED,
+    pairsTested: rawEdges.length,
+    pairsSuppressed: rawEdges.length - measurable.length,
+    ungeocoded: nodes.filter((n) => n.lat == null).map((n) => n.name),
+    decay: {
+      slope: r4(decay.slope), intercept: r4(decay.intercept),
+      r2: r4(decay.r2), n: decay.n, refusal: decay.refusal,
+      supportFloorKm: r2(supportFloorKm),
+      extrapolatedPairs: edges.filter((e) => e.extrapolated).length,
+    },
+    crossVenue: {
+      byBand: cv,
+      single: singleAgg,
+      multi: multiAgg,
+      multiShareOfPeople: totalPeople ? r4(multiAgg.people / totalPeople) : 0,
+      multiShareOfSpend: totalSpend ? r4(multiAgg.spend / totalSpend) : 0,
+      spendLift: singleAgg.spendPerPerson ? r4(multiAgg.spendPerPerson / singleAgg.spendPerPerson - 1) : 0,
+      visitLift: singleAgg.visitsPerPerson ? r4(multiAgg.visitsPerPerson / singleAgg.visitsPerPerson - 1) : 0,
     },
   });
 

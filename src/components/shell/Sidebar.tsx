@@ -50,6 +50,7 @@ const GROUPS = [
       { label: "Members", href: "members" },
       { label: "Guest list", href: "guests" },
       { label: "Trade density", href: "trade" },
+      { label: "Venues", href: "venues" },
       { label: "Coverage", href: "coverage" },
     ],
   },

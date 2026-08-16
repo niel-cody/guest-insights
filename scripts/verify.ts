@@ -28,16 +28,17 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 async function load(slug: string): Promise<Fixture> {
   const read = async <T,>(name: string) =>
     JSON.parse(await readFile(join(DATA, slug, `${name}.json`), "utf8")) as T;
-  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, venueMonthly, guests] =
+  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, guests] =
     await Promise.all([
       read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
       read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
       read<Snapshot["segments"]>("segments"), read<Snapshot["members"]>("members"),
-      read<Snapshot["dayparts"]>("dayparts"), read<Snapshot["venueMonthly"]>("venueMonthly"),
+      read<Snapshot["dayparts"]>("dayparts"), read<Snapshot["network"]>("network"),
+      read<Snapshot["venueMonthly"]>("venueMonthly"),
       read<Guests>("guests"),
     ]);
   return {
-    snap: { org, coverage, lifecycle, decomposition, segments, members, dayparts, venueMonthly },
+    snap: { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly },
     guests,
   };
 }

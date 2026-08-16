@@ -307,6 +307,70 @@ export function detectionCorrect({ observed, scanPerVisit: p }: DetectionInput):
   };
 }
 
+// ── spatial interaction ─────────────────────────────────────────────────────
+
+export type PairObservation = { key: string; lift: number; km: number; shared: number };
+
+export type DecayFit = {
+  /** Fitted on log(lift) = intercept + slope × log(km). */
+  intercept: number;
+  slope: number;
+  r2: number;
+  n: number;
+  /** Null when there are too few pairs to fit, with the reason. */
+  refusal: string | null;
+  predict: (km: number) => number;
+};
+
+/**
+ * Distance decay of co-visitation, as a gravity model.
+ *
+ * Two venues share guests for two quite different reasons: because they are near
+ * each other, and because something links them that distance does not explain.
+ * Only the second is worth an operator's attention, so the decay curve is fitted
+ * first and the *residual* is the finding.
+ *
+ * Lift is already normalised for venue size — it is observed shared guests over
+ * the number expected if venue choice were independent — which matters because
+ * raw co-visitation counts recover size and nothing else. At Coffee Guru,
+ * Amaroo and Franklin share 281 guests, the fifth-highest count in the estate,
+ * against 324 expected: a great many shared guests, and fewer than chance.
+ */
+export function fitDistanceDecay(pairs: PairObservation[], minPairs = 10): DecayFit {
+  const usable = pairs.filter((p) => p.lift > 0 && p.km > 0);
+  const noFit = (refusal: string): DecayFit => ({
+    intercept: 0, slope: 0, r2: 0, n: usable.length, refusal, predict: () => 1,
+  });
+  if (usable.length < minPairs) {
+    return noFit(
+      `${usable.length} venue ${usable.length === 1 ? "pair carries" : "pairs carry"} enough shared guests to measure, ` +
+        `against the ${minPairs} a decay curve needs. ` +
+        `No distance model is fitted and no residual is published.`,
+    );
+  }
+
+  const xs = usable.map((p) => Math.log(p.km));
+  const ys = usable.map((p) => Math.log(p.lift));
+  const n = xs.length;
+  const mx = xs.reduce((a, x) => a + x, 0) / n;
+  const my = ys.reduce((a, y) => a + y, 0) / n;
+  const sxx = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+  const sxy = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0);
+  if (sxx === 0) return noFit("Every measurable pair sits at the same distance, so decay is not identifiable.");
+
+  const slope = sxy / sxx;
+  const intercept = my - slope * mx;
+  const ssTot = ys.reduce((a, y) => a + (y - my) ** 2, 0);
+  const ssRes = ys.reduce((a, y, i) => a + (y - (intercept + slope * xs[i])) ** 2, 0);
+
+  return {
+    intercept, slope, n,
+    r2: ssTot > 0 ? 1 - ssRes / ssTot : 0,
+    refusal: null,
+    predict: (km: number) => Math.exp(intercept + slope * Math.log(Math.max(km, 0.01))),
+  };
+}
+
 // ── proportions ─────────────────────────────────────────────────────────────
 
 /** Wilson interval — behaves at the small counts a single venue produces. */

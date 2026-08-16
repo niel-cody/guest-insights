@@ -332,6 +332,66 @@ export type Dayparts = {
   weekendBaseline: number;
 };
 
+// ── the venue network ───────────────────────────────────────────────────────
+
+export type NetworkNode = {
+  id: string;
+  name: string;
+  lat: number | null;
+  lon: number | null;
+  stateCode: string;
+  timezone: string;
+  orders: number;
+  revenue: number;
+  memberRevenue: number;
+  memberShare: number;
+  people: number;
+};
+
+export type NetworkEdge = {
+  a: string;
+  b: string;
+  shared: number;
+  /** Shared guests if visiting either venue were independent of the other. */
+  expected: number;
+  /** Observed over expected. Normalised for venue size, so it is not a size proxy. */
+  lift: number;
+  km: number | null;
+  /** Lift the fitted distance-decay curve predicts at this distance. */
+  predicted: number | null;
+  /** Observed lift over predicted. Null where the curve is extrapolating. */
+  residual: number | null;
+  extrapolated: boolean;
+};
+
+export type Network = {
+  window: AnalysisWindow;
+  nodes: NetworkNode[];
+  edges: NetworkEdge[];
+  minShared: number;
+  pairsTested: number;
+  pairsSuppressed: number;
+  ungeocoded: string[];
+  decay: {
+    slope: number;
+    intercept: number;
+    r2: number;
+    n: number;
+    refusal: string | null;
+    supportFloorKm: number;
+    extrapolatedPairs: number;
+  };
+  crossVenue: {
+    byBand: { venueBand: number; isMember: boolean; people: number; visits: number; spend: number; avgVisits: number; avgSpend: number }[];
+    single: { people: number; spend: number; visits: number; spendPerPerson: number; visitsPerPerson: number };
+    multi: { people: number; spend: number; visits: number; spendPerPerson: number; visitsPerPerson: number };
+    multiShareOfPeople: number;
+    multiShareOfSpend: number;
+    spendLift: number;
+    visitLift: number;
+  };
+};
+
 export type VenueMonth = {
   month: string;
   storeId: string;
@@ -355,5 +415,6 @@ export type Snapshot = {
   segments: Segments;
   members: Members;
   dayparts: Dayparts;
+  network: Network;
   venueMonthly: VenueMonth[];
 };

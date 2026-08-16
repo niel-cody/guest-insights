@@ -550,6 +550,85 @@ WHERE ORGANIZATION_ID = '${orgId}'
 GROUP BY STORE_ID`;
 }
 
+/**
+ * Venue coordinates, from the platform rather than from a map service.
+ *
+ * `DT_STORES.GEOCODE` is a real per-store geography column, so the estate map is
+ * a capability the platform already has rather than a set of coordinates typed in
+ * by hand. Estate-wide only 883 of 2,540 stores carry one, which is a data gap
+ * with a named consequence: an ungeocoded venue cannot appear on the map or in
+ * the catchment model.
+ *
+ * `STATE_CODE` is dirty — `ACT` and `Australian Capital Territory` both occur, as
+ * do `NSW` and `New South Wales` — so nothing keys on it.
+ */
+export function venueGeoQuery(orgId: string) {
+  return `SELECT ID AS STORE_ID, NAME, STATE_CODE, TIMEZONE,
+  ST_Y(GEOCODE) AS LAT, ST_X(GEOCODE) AS LON, H3_INDEX_5
+FROM OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.DT_STORES
+WHERE ORG_ID = '${orgId}' AND COALESCE(IS_DELETED, FALSE) = FALSE`;
+}
+
+/**
+ * The venue network: which venues share guests, and how far apart they are.
+ *
+ * Co-visitation is normalised against what independence would produce —
+ * `expected = n_a × n_b / N` — because raw shared-guest counts simply recover
+ * venue size. Distance comes from the stored geocode, so the app can fit the
+ * decay curve and publish what beats it.
+ *
+ * A guest counts toward a pair once, however many times they visited either
+ * venue, so a single very frequent person cannot manufacture an edge.
+ */
+export function venueNetworkQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+pvv AS (
+  SELECT DISTINCT v.PERSON_ID, v.STORE_ID
+  FROM visits v JOIN eligible e ON e.PERSON_ID = v.PERSON_ID
+),
+node AS (
+  SELECT STORE_ID, COUNT(DISTINCT PERSON_ID) AS PEOPLE FROM pvv GROUP BY STORE_ID
+),
+tot AS (SELECT COUNT(DISTINCT PERSON_ID) AS N FROM pvv),
+pair AS (
+  SELECT a.STORE_ID AS A, b.STORE_ID AS B, COUNT(*) AS SHARED
+  FROM pvv a JOIN pvv b ON a.PERSON_ID = b.PERSON_ID AND a.STORE_ID < b.STORE_ID
+  GROUP BY 1, 2
+)
+SELECT p.A, p.B, p.SHARED, na.PEOPLE AS PEOPLE_A, nb.PEOPLE AS PEOPLE_B, t.N AS POPULATION,
+  ST_DISTANCE(sa.GEOCODE, sb.GEOCODE) / 1000 AS KM
+FROM pair p
+JOIN node na ON na.STORE_ID = p.A
+JOIN node nb ON nb.STORE_ID = p.B
+CROSS JOIN tot t
+LEFT JOIN OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.DT_STORES sa ON sa.ID = p.A
+LEFT JOIN OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.DT_STORES sb ON sb.ID = p.B
+ORDER BY p.SHARED DESC`;
+}
+
+/**
+ * The multi-venue guest, as a cohort.
+ *
+ * A small group — 6.5% of Coffee Guru's identified people — worth 2.5 times the
+ * spend per head, and invisible to any per-venue report. This is the segment the
+ * network exists to make actionable.
+ */
+export function crossVenueQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+p AS (SELECT person.* FROM person JOIN eligible e ON e.PERSON_ID = person.PERSON_ID)
+SELECT
+  LEAST(VENUES, 4) AS VENUE_BAND,
+  IFF(TIER = 'member', TRUE, FALSE) AS IS_MEMBER,
+  COUNT(*) AS PEOPLE,
+  SUM(VISITS) AS VISITS,
+  SUM(SPEND) AS SPEND,
+  AVG(VISITS) AS AVG_VISITS,
+  AVG(SPEND) AS AVG_SPEND
+FROM p GROUP BY 1, 2 ORDER BY 1, 2`;
+}
+
 /** Venue by month, the grain the anomaly detection needs. */
 export function venueMonthlyQuery({ orgId, w, pairs, cardMonths }: Args) {
   return `WITH ${basePrelude(orgId, w, pairs, cardMonths)}

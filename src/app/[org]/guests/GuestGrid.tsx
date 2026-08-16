@@ -78,6 +78,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
   const [venue, setVenue] = useState("all");
   const [sort, setSort] = useState<SortKey>("spend");
   const [minVisits] = useState(Number(sp.get("minVisits") ?? 0));
+  const [minVenues] = useState(Number(sp.get("minVenues") ?? 0));
   const [unmasked, setUnmasked] = useState(false);
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState<Guest | null>(null);
@@ -92,13 +93,14 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
         (daypart === "all" || g.homeDaypart === daypart) &&
         (venue === "all" || g.homeStoreId === venue) &&
         g.visits >= minVisits &&
+        g.venues >= minVenues &&
         (!needle || (g.name ?? "").toLowerCase().includes(needle) || g.id.includes(needle)),
     );
     return rows.sort((a, b) => {
       if (sort === "firstSeen") return (a.firstSeen ?? "").localeCompare(b.firstSeen ?? "");
       return Number(b[sort]) - Number(a[sort]);
     });
-  }, [guests.rows, q, tier, segment, band, daypart, venue, sort, minVisits]);
+  }, [guests.rows, q, tier, segment, band, daypart, venue, sort, minVisits, minVenues]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const safePage = Math.min(page, pages - 1);
