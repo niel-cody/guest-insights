@@ -1,5 +1,7 @@
 /** Inline 20px stroke icons. Kept local so the app has no icon dependency. */
-type P = { className?: string };
+import type { CSSProperties } from "react";
+
+type P = { className?: string; style?: CSSProperties };
 const base = {
   width: 20, height: 20, viewBox: "0 0 24 24", fill: "none",
   stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const,

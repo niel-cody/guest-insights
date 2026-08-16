@@ -3,9 +3,31 @@
  *
  * There is exactly one definition of an order, one of a bridged card payment and
  * one of a person. Every screen reads these, so a number cannot disagree with
- * itself between two surfaces — the failure the live Customer Report ships today.
+ * itself between two surfaces.
+ *
+ * ── What changed in v2 ─────────────────────────────────────────────────────
+ *
+ * v1 ranked identity: member beats card beats unattributed. That made the same
+ * human two different objects — a member who scanned, and a card that did not —
+ * and it is the reason the member-versus-card comparison could not be published
+ * (1,030 enrolled humans in one column, 7,824 payment instruments in the other).
+ *
+ * v2 inverts it. **The card is the spine and membership is an attribute of the
+ * person, not a rival tier.** Measured over the honest window, 92% of member
+ * orders at Meat Flour Wine and 85% at Coffee Guru also carry a payment
+ * reference, so the card is the more complete identifier of the two. Resolving a
+ * person through their card and then attaching the member flag means:
+ *
+ *   - a member who forgets to scan stays the same person, and their unscanned
+ *     spend counts toward their value instead of being lost to the card tier;
+ *   - member and non-member are the same grain, so the comparison the operator
+ *     actually wants becomes expressible and defensible;
+ *   - scan rate becomes a measurable member property rather than an invisible one.
+ *
+ * This is the answer to open decision #1 in the handover: two axes, and the card
+ * is the spine.
  */
-import { CANONICAL_LAPSE_DAYS, NON_GUEST_VISITS_PER_DAY } from "./orgs";
+import { CANONICAL_LAPSE_DAYS, NON_GUEST_VISITS_PER_DAY, daypartCase } from "./orgs";
 
 const ORDERS = "OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.ORDERS";
 const PAYMENTS = "OOLIO_PAY_ACQUIRERS.PUBLIC.OOLIO_TRANSACTIONS";
@@ -14,26 +36,49 @@ export type Window = { start: string; end: string };
 
 /**
  * Clean order grain. Completed, non-training, positive value.
- * Refunds and voids are excluded rather than netted — the POC counts trade, not
- * ledger movement, and says so.
+ *
+ * The status filter is load-bearing and is stated rather than assumed. Meat Flour
+ * Wine carries 45,485 rows in `CREATED` across the discovery window holding
+ * $2,799 of value in total — tickets opened on a terminal and never finalised.
+ * A parity check written as `ORDER_STATUS NOT IN ('VOID','CANCELLED')` counts
+ * them and reports 91,649 orders where the business took 41,578. Both numbers are
+ * arithmetically correct; only one of them is trade. See `source.orderCountParity`.
  */
 export function ordersCte(orgId: string, w: Window) {
-  return `ord AS (
+  return `ord_raw AS (
   SELECT
-    ORDER_ID, ORDER_NUMBER, STORE_ID, STORE_NAME, VENUE_NAME,
+    ORDER_ID, ORDER_NUMBER, STORE_ID, STORE_NAME,
     CREATED_AT_TZ AS TS,
     CREATED_AT_TZ::DATE AS D,
     TOTAL_PRICE, ITEMS_COUNT, COALESCE(TOTAL_DISCOUNT, 0) AS TOTAL_DISCOUNT,
     NULLIF(TABLE_GUEST_COUNT, 0) AS COVERS,
     NULLIF(SALES_CHANNEL_NAME, '') AS CHANNEL,
     ORDER_TYPE_NAME,
-    NULLIF(CUSTOMER_ID, '') AS MEMBER_ID
+    NULLIF(CUSTOMER_ID, '') AS MEMBER_ID,
+    ${daypartCase("CREATED_AT_TZ")} AS DAYPART,
+    IFF(DAYOFWEEK(CREATED_AT_TZ) IN (0, 6), TRUE, FALSE) AS IS_WEEKEND
   FROM ${ORDERS}
   WHERE ORGANIZATION_ID = '${orgId}'
     AND CREATED_AT_TZ >= '${w.start}' AND CREATED_AT_TZ < DATEADD(day, 1, '${w.end}')
     AND ORDER_STATUS = 'COMPLETED'
     AND COALESCE(IS_TRAINING, FALSE) = FALSE
     AND TOTAL_PRICE > 0
+),
+/* Venue identity is the store id. The *name* is a slowly-changing attribute and
+   must never be used as a key: Meat Flour Wine's Braeside venue traded under
+   'Meat Flour Wine Store', then 'Meat Flour Wine', then 'Meat Flour Wine -
+   Braeside'. Grouping by name invents a third venue with 6,799 orders that never
+   existed, and dates Braeside's opening to the day it was renamed. Three Coffee
+   Guru stores have the same problem. We resolve one current name per store and
+   apply it to all history, which is also what leaves 74 guests in v1 with a home
+   venue the venue list has never heard of. */
+venue AS (
+  SELECT STORE_ID, MAX_BY(STORE_NAME, TS) AS STORE_NAME, COUNT(DISTINCT STORE_NAME) AS NAMES_SEEN
+  FROM ord_raw GROUP BY STORE_ID
+),
+ord AS (
+  SELECT o.* EXCLUDE STORE_NAME, v.STORE_NAME
+  FROM ord_raw o JOIN venue v ON v.STORE_ID = o.STORE_ID
 )`;
 }
 
@@ -62,18 +107,6 @@ HAVING COUNT(*) >= 25
 ORDER BY MATCHES DESC`;
 }
 
-/**
- * Order grain with identity attached — the single object every screen sits on.
- *
- * The identity ladder, in priority order:
- *   member        the order carries a CUSTOMER_ID (they enrolled and were scanned)
- *   card          the order bridges to a payment carrying a PAR
- *   unattributed  neither. Never a person, never counted as one.
- *
- * Card identity does not override member identity. A member who forgot to scan
- * appears in the card tier; how often that happens is measured separately as
- * PAR→member linkage rather than silently corrected.
- */
 export type StorePair = { storeId: string; payStore: string };
 
 /**
@@ -87,25 +120,68 @@ export type StorePair = { storeId: string; payStore: string };
  */
 export function parQualityQuery(w: Window, payStores: string[]) {
   const inList = [...new Set(payStores)].map((s) => `'${s.replace(/'/g, "''")}'`).join(",");
-  return `SELECT
-  DATE_TRUNC('month', TRADING_DATE)::DATE AS MONTH,
-  COUNT(*) AS TXNS,
-  COUNT(DISTINCT NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '')) AS DISTINCT_PAR,
-  COUNT_IF(NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '') IS NOT NULL) AS WITH_PAR
-FROM ${PAYMENTS}
-WHERE TRADING_DATE BETWEEN '${w.start}' AND '${w.end}'
-  AND STORE IN (${inList})
-  AND AMOUNT > 0
+  return `WITH txn AS (
+  SELECT DATE_TRUNC('month', TRADING_DATE)::DATE AS MONTH,
+    NULLIF(TRIM(PAYMENT_ACCOUNT_REFERENCE), '') AS PAR
+  FROM ${PAYMENTS}
+  WHERE TRADING_DATE BETWEEN '${w.start}' AND '${w.end}'
+    AND STORE IN (${inList})
+    AND AMOUNT > 0
+),
+volume AS (
+  SELECT MONTH, COUNT(*) AS TXNS, COUNT(DISTINCT PAR) AS DISTINCT_PAR,
+         COUNT_IF(PAR IS NOT NULL) AS WITH_PAR
+  FROM txn GROUP BY 1
+),
+/* The share of a month's carded transactions sitting on its single most frequent
+   reference. This is the test that catches the failure a non-null count cannot:
+   a real card population never has one token above a fraction of a percent, and
+   the ten broken months sit at 100%. */
+token AS (
+  SELECT MONTH, MAX(N) / NULLIF(SUM(N), 0) AS MAX_TOKEN_SHARE
+  FROM (SELECT MONTH, PAR, COUNT(*) AS N FROM txn WHERE PAR IS NOT NULL GROUP BY 1, 2)
+  GROUP BY 1
+)
+SELECT v.MONTH, v.TXNS, v.DISTINCT_PAR, v.WITH_PAR, COALESCE(t.MAX_TOKEN_SHARE, 1) AS MAX_TOKEN_SHARE
+FROM volume v LEFT JOIN token t ON t.MONTH = v.MONTH
+ORDER BY v.MONTH`;
+}
+
+/**
+ * Orders per month, so card-capture grading can tell "the payment feed is
+ * broken" apart from "the venue was not open yet". v1 marked eight months usable
+ * that pre-dated both Meat Flour Wine venues trading, which is how "card months
+ * available 12 of 25" came to describe four.
+ */
+export function monthlyOrdersQuery(orgId: string, w: Window) {
+  return `SELECT DATE_TRUNC('month', CREATED_AT_TZ)::DATE AS MONTH, COUNT(*) AS ORDERS
+FROM ${ORDERS}
+WHERE ORGANIZATION_ID = '${orgId}'
+  AND CREATED_AT_TZ >= '${w.start}' AND CREATED_AT_TZ < DATEADD(day, 1, '${w.end}')
+  AND ORDER_STATUS = 'COMPLETED' AND COALESCE(IS_TRAINING, FALSE) = FALSE AND TOTAL_PRICE > 0
 GROUP BY 1 ORDER BY 1`;
 }
 
 /**
- * @param cardMonths  the months in which PAR is trustworthy for this merchant, as
- *   month-start dates. Card capture is not a switch that flips once — at Coffee
- *   Guru it ran correctly, stopped dead for ten months, and resumed. Outside these
- *   months a card payment is real trade we can see but cannot attribute to a
- *   person, so it counts as unattributed rather than being quietly folded in or,
- *   worse, collapsed into one enormous fictional customer.
+ * Order counts by status, so the parity check can state what it excludes and why
+ * rather than asserting a number and hoping.
+ */
+export function orderStatusQuery(orgId: string, w: Window) {
+  return `SELECT ORDER_STATUS, COALESCE(IS_TRAINING, FALSE) AS TRAINING,
+  COUNT(*) AS ORDERS, SUM(TOTAL_PRICE) AS REVENUE, COUNT_IF(TOTAL_PRICE <= 0) AS ZERO_VALUE
+FROM ${ORDERS}
+WHERE ORGANIZATION_ID = '${orgId}'
+  AND CREATED_AT_TZ >= '${w.start}' AND CREATED_AT_TZ < DATEADD(day, 1, '${w.end}')
+GROUP BY 1, 2 ORDER BY ORDERS DESC`;
+}
+
+/**
+ * The identity spine.
+ *
+ * @param cardMonths the months in which PAR is trustworthy for this merchant.
+ *   Card capture is not a switch that flips once — at Coffee Guru it ran
+ *   correctly, stopped dead for ten months, and resumed. Outside these months a
+ *   card payment is real trade we can see but cannot attribute to a person.
  */
 export function basePrelude(orgId: string, w: Window, pairs: StorePair[], cardMonths: string[]) {
   const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -126,8 +202,8 @@ map AS (
   SELECT * FROM VALUES ${mapValues} AS t(STORE_ID, PAY_STORE)
 ),
 /* One payment row per order. Split bills produce several; we take the first PAR
-   by transaction reference so an order maps to exactly one payer. Orders paid on
-   two cards are the Payer-grain caveat named on screen. */
+   by reference so an order maps to exactly one payer. Orders paid on two cards
+   are the Payer-grain caveat named on screen. */
 bridged AS (
   SELECT o.ORDER_ID, MIN(p.PAR) AS PAR, COUNT(DISTINCT p.PAR) AS PAR_COUNT
   FROM ord o
@@ -156,32 +232,58 @@ guest_payments AS (
   LEFT JOIN non_guest n ON n.PAR = b.PAR
   WHERE n.PAR IS NULL
 ),
+carded AS (
+  SELECT o.*, g.PAR
+  FROM ord o LEFT JOIN guest_payments g ON g.ORDER_ID = o.ORDER_ID
+),
+/* Card → member resolution. A card that has ever been seen on a scanned order
+   belongs to that member on every other order it appears on. This is what makes
+   a member's unscanned spend count toward the member rather than falling into an
+   anonymous card, and it is the single change that makes member value
+   measurable. Where one card has served several members the dominant one wins;
+   the count of contested cards is published, not hidden. */
+link AS (
+  SELECT PAR, MEMBER_ID, COUNT(*) AS N
+  FROM carded WHERE PAR IS NOT NULL AND MEMBER_ID IS NOT NULL
+  GROUP BY 1, 2
+),
+par_member AS (
+  SELECT PAR, MAX_BY(MEMBER_ID, N) AS MEMBER_ID, COUNT(*) AS MEMBERS_ON_CARD
+  FROM link GROUP BY PAR
+),
 base AS (
   SELECT
-    o.*,
-    g.PAR,
+    c.*,
+    COALESCE(c.MEMBER_ID, pm.MEMBER_ID) AS PERSON_MEMBER_ID,
+    IFF(c.MEMBER_ID IS NOT NULL, TRUE, FALSE) AS SCANNED,
     CASE
-      WHEN o.MEMBER_ID IS NOT NULL THEN 'member'
-      WHEN g.PAR IS NOT NULL THEN 'card'
+      WHEN COALESCE(c.MEMBER_ID, pm.MEMBER_ID) IS NOT NULL THEN 'member'
+      WHEN c.PAR IS NOT NULL THEN 'card'
       ELSE 'unattributed'
     END AS TIER
-  FROM ord o
-  LEFT JOIN guest_payments g ON g.ORDER_ID = o.ORDER_ID
+  FROM carded c LEFT JOIN par_member pm ON pm.PAR = c.PAR
 ),
 /* Person grain. A visit is a person-day at a venue, not an order — two coffees
    bought an hour apart is one visit, and counting it as two is how the live
-   report overstates frequency. */
+   report overstates frequency.
+   The person id resolves through the member where one is known and through the
+   card otherwise, so the two populations are the same kind of object. */
 person_orders AS (
   SELECT
-    COALESCE(MEMBER_ID, 'card:' || PAR) AS PERSON_ID,
-    TIER, STORE_ID, STORE_NAME, D, TS, TOTAL_PRICE, ITEMS_COUNT, COVERS, CHANNEL, ORDER_ID
+    COALESCE(PERSON_MEMBER_ID, 'card:' || PAR) AS PERSON_ID,
+    TIER, SCANNED, STORE_ID, STORE_NAME, D, TS, DAYPART, IS_WEEKEND,
+    TOTAL_PRICE, ITEMS_COUNT, COVERS, CHANNEL, ORDER_ID
   FROM base
   WHERE TIER <> 'unattributed'
 ),
 visits AS (
-  SELECT PERSON_ID, ANY_VALUE(TIER) AS TIER, D, STORE_ID, ANY_VALUE(STORE_NAME) AS STORE_NAME,
+  SELECT PERSON_ID, ANY_VALUE(TIER) AS TIER, D, STORE_ID,
+         ANY_VALUE(STORE_NAME) AS STORE_NAME,
+         MAX_BY(DAYPART, TOTAL_PRICE) AS DAYPART,
+         BOOLOR_AGG(IS_WEEKEND) AS IS_WEEKEND,
          SUM(TOTAL_PRICE) AS SPEND, SUM(ITEMS_COUNT) AS ITEMS,
-         SUM(COVERS) AS COVERS, COUNT(*) AS ORDERS
+         SUM(COVERS) AS COVERS, COUNT(*) AS ORDERS,
+         COUNT_IF(SCANNED) AS SCANNED_ORDERS
   FROM person_orders
   GROUP BY PERSON_ID, D, STORE_ID
 ),
@@ -194,9 +296,17 @@ person AS (
     SUM(SPEND) AS SPEND,
     SUM(ITEMS) AS ITEMS,
     SUM(ORDERS) AS ORDERS,
+    SUM(SCANNED_ORDERS) AS SCANNED_ORDERS,
+    /* Visits on which the guest scanned at least once. This is the quantity the
+       detection correction needs: membership is only observable when somebody
+       scans, so the per-visit scan probability sets how many members with one
+       visit we never see at all. */
+    COUNT_IF(SCANNED_ORDERS > 0) AS SCANNED_VISITS,
+    SUM(COVERS) AS COVERS,
     MIN(D) AS FIRST_SEEN,
     MAX(D) AS LAST_SEEN,
     DATEDIFF(day, MIN(D), MAX(D)) AS TENURE_DAYS,
+    MODE(DAYPART) AS HOME_DAYPART,
     MAX_BY(STORE_ID, D) AS HOME_STORE_ID,
     MAX_BY(STORE_NAME, D) AS HOME_STORE
   FROM visits
@@ -208,7 +318,7 @@ person AS (
  * The card tier is only a person once it has been seen twice. A single-visit card
  * is a transaction we can see, not a customer we can count — the POC pack's
  * non-negotiable, and the reason the tier can carry a count without claiming a
- * relationship.
+ * relationship. Members are people from the moment they enrol.
  */
 export const CARD_PERSON_FILTER = `(TIER = 'member' OR VISITS >= 2)`;
 

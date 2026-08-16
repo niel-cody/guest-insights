@@ -12,7 +12,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cache } from "react";
-import type { Coverage, Guests, Org, Snapshot } from "./types";
+import type { Coverage, Dayparts, Guests, Members, Org, Snapshot } from "./types";
 
 const DATA = join(process.cwd(), "data");
 
@@ -26,18 +26,22 @@ export type OrgSlug = (typeof ORG_SLUGS)[number];
 export const getOrg = cache(async (slug: string): Promise<Org> => read<Org>(slug, "org"));
 
 export const getSnapshot = cache(async (slug: string): Promise<Snapshot> => {
-  const [org, coverage, lifecycle, decomposition, segments, comparison, linkage, venueMonthly] = await Promise.all([
-    read<Snapshot["org"]>(slug, "org"),
-    read<Snapshot["coverage"]>(slug, "coverage"),
-    read<Snapshot["lifecycle"]>(slug, "lifecycle"),
-    read<Snapshot["decomposition"]>(slug, "decomposition"),
-    read<Snapshot["segments"]>(slug, "segments"),
-    read<Snapshot["comparison"]>(slug, "comparison"),
-    read<Snapshot["linkage"]>(slug, "linkage"),
-    read<Snapshot["venueMonthly"]>(slug, "venueMonthly"),
-  ]);
-  return { org, coverage, lifecycle, decomposition, segments, comparison, linkage, venueMonthly };
+  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, venueMonthly] =
+    await Promise.all([
+      read<Snapshot["org"]>(slug, "org"),
+      read<Snapshot["coverage"]>(slug, "coverage"),
+      read<Snapshot["lifecycle"]>(slug, "lifecycle"),
+      read<Snapshot["decomposition"]>(slug, "decomposition"),
+      read<Snapshot["segments"]>(slug, "segments"),
+      read<Snapshot["members"]>(slug, "members"),
+      read<Snapshot["dayparts"]>(slug, "dayparts"),
+      read<Snapshot["venueMonthly"]>(slug, "venueMonthly"),
+    ]);
+  return { org, coverage, lifecycle, decomposition, segments, members, dayparts, venueMonthly };
 });
+
+export const getMembers = cache(async (slug: string): Promise<Members> => read<Members>(slug, "members"));
+export const getDayparts = cache(async (slug: string): Promise<Dayparts> => read<Dayparts>(slug, "dayparts"));
 
 /** Large; only the guest list and the Brief pull this. */
 export const getGuests = cache(async (slug: string): Promise<Guests> => read<Guests>(slug, "guests"));

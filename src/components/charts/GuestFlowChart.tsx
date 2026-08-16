@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Flow } from "@/lib/metrics";
-import { count, monthLabel, sameMonthLastYear } from "@/lib/metrics";
+import { count, monthLabel } from "@/lib/metrics";
 import { Grid, Legend, PLOT, TipRow, Tooltip, barPath, niceTicks, useTooltip } from "./chart-kit";
 
 /**
@@ -20,7 +20,6 @@ export function GuestFlowChart({
   flow: Flow[];
   height?: number;
 }) {
-  const [showLastYear, setShowLastYear] = useState(true);
   const { tip, show, hide, ref } = useTooltip();
   const width = 900;
 
@@ -59,18 +58,12 @@ export function GuestFlowChart({
             { label: "New", color: "var(--gain-new)" },
             { label: "Came back", color: "var(--gain-reactivated)" },
             { label: "Lost", color: "var(--loss)" },
-            ...(showLastYear ? [{ label: "Same month last year", color: "var(--ink-muted)", dashed: true }] : []),
           ]}
         />
-        <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={showLastYear}
-            onChange={(e) => setShowLastYear(e.target.checked)}
-            className="accent-[var(--accent)]"
-          />
-          Last-year marker
-        </label>
+        {/* The same-month-last-year marker is gone with the two-year chrome. The
+            honest window is three months of trustworthy card data, and a
+            year-on-year comparator drawn across the card outage would compare a
+            measured month against a month in which nothing could be measured. */}
       </div>
 
       <div ref={ref} className="relative overflow-x-auto">
@@ -78,13 +71,12 @@ export function GuestFlowChart({
           viewBox={`0 0 ${width} ${height}`}
           className="w-full min-w-[680px]"
           role="img"
-          aria-label="Guests gained and lost each month over the last 24 months"
+          aria-label={`Members gained and lost in each of the ${flow.length} months in the window`}
         >
           <Grid ticks={ticks} y={y} width={width} format={(v) => count(Math.abs(v))} />
 
           {flow.map((f, i) => {
             const bx = x(i) + (band - barW) / 2;
-            const lastYear = showLastYear ? sameMonthLastYear(flow, f.month) : undefined;
 
             // Gains stack up from zero, with a 2px surface gap between segments.
             let acc = 0;
@@ -110,11 +102,6 @@ export function GuestFlowChart({
                       <div className="mt-1 border-t border-line pt-1">
                         <TipRow label="Net" value={`${f.net >= 0 ? "+" : ""}${count(f.net)}`} />
                       </div>
-                      {lastYear && (
-                        <p className="mt-1 text-[11px] text-ink-muted">
-                          Same month last year: {count(lastYear.gained)} gained
-                        </p>
-                      )}
                     </div>
                   ))
                 }
@@ -138,13 +125,6 @@ export function GuestFlowChart({
                   <path d={barPath(bx, zero, barW, y(-f.lost) - zero, 4, false)} fill="var(--loss)" />
                 )}
 
-                {lastYear && (
-                  <line
-                    x1={bx - 1} x2={bx + barW + 1}
-                    y1={y(lastYear.gained)} y2={y(lastYear.gained)}
-                    stroke="var(--ink-muted)" strokeWidth={1.5} strokeDasharray="3 2"
-                  />
-                )}
               </g>
             );
           })}

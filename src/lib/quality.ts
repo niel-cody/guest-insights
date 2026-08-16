@@ -9,7 +9,7 @@
  * Findings are derived from the data, never hardcoded, so they disappear when the
  * problem does.
  */
-import type { ComparisonRow, Coverage, Org } from "./types";
+import type { Coverage, Members, Org } from "./types";
 import { pct } from "./metrics";
 
 export type Finding = {
@@ -25,14 +25,15 @@ export type Finding = {
 export function qualityFindings(
   org: Org,
   coverage: Coverage,
-  comparison: ComparisonRow[],
+  members: Members,
 ): Finding[] {
   const out: Finding[] = [];
   const t = coverage.totals;
 
   // ── party size ────────────────────────────────────────────────────────────
-  const identified = comparison.reduce((a, r) => a + r.orders, 0);
-  const withCovers = comparison.reduce((a, r) => a + r.ordersWithCovers, 0);
+  const cb = members.coverBasis;
+  const identified = cb.member.orders + cb.nonMember.orders;
+  const withCovers = cb.member.ordersWithCovers + cb.nonMember.ordersWithCovers;
   const coversShare = identified ? withCovers / identified : 0;
 
   if (org.serviceModel === "table" && coversShare < 0.9) {
@@ -45,7 +46,10 @@ export function qualityFindings(
         `It is recorded on ${pct(coversShare, 0)}. Staff skipping the guest-count prompt is the ` +
         `usual cause, and it is a thirty-second fix at the terminal.`,
       unlocks:
-        "Whether members are genuinely worth more, or simply arrive in larger groups. Without party size the comparison cannot be published at all.",
+        `Whether members are genuinely worth more per head, or simply arrive in smaller groups. ` +
+        `Party size sits on ${pct(cb.member.coverage, 0)} of member orders against ${pct(cb.nonMember.coverage, 0)} of everyone else's, ` +
+        `and the member orders that record it average ${Math.round(cb.member.avgOrderWithCovers / Math.max(cb.member.avgOrderWithoutCovers, 1) * 10) / 10}× those that do not — ` +
+        `so the missing half is not missing at random and the comparison cannot be published at all.`,
       owner: "Venue",
     });
   }

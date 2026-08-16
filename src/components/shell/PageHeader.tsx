@@ -55,17 +55,20 @@ export function PageHeader({
           <IconChevron className="pointer-events-none absolute right-2 h-4 w-4 text-ink-muted" />
         </label>
 
-        <div className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[13px]">
-          <span className="text-ink-muted">Trade</span>
-          <span className="font-medium text-ink">
+        {/* Scope, not controls. These were bordered boxes styled exactly like the
+            organisation <select> beside them, so they read as filters that did
+            nothing. They are facts about the window, and now look like facts. */}
+        <p className="flex items-center gap-2 text-[13px] text-ink-secondary">
+          <span className="tnum font-medium text-ink">
             {dayLabel(org.window.start)} – {dayLabel(org.window.end)}
           </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[13px]">
-          <span className="text-ink-muted">Venues</span>
-          <span className="font-medium text-ink">{org.venues.length}</span>
-        </div>
+          <span className="text-ink-muted">·</span>
+          <span>{org.window.months} complete months</span>
+          <span className="text-ink-muted">·</span>
+          <span>
+            {org.venues.length} {org.venues.length === 1 ? "venue" : "venues"}
+          </span>
+        </p>
 
         {controls}
       </div>

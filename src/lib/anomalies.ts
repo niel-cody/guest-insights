@@ -21,7 +21,7 @@
  * cries wolf gets switched off in a fortnight.
  */
 import type { VenueMonth } from "./types";
-import { completeMonths, monthLabel, money, pct } from "./metrics";
+import { monthLabel, money, pct } from "./metrics";
 
 export type Anomaly = {
   id: string;
@@ -157,7 +157,9 @@ export function detectAnomalies(
   // Test the last *complete* month. A fortnight of trade fails almost every test
   // for the wrong reason, and a panel whose top finding is "the month is not over"
   // is a panel nobody opens twice.
-  const months = completeMonths(all.map((m) => ({ month: m })), windowEnd).map((m) => m.month);
+  // Every month in the snapshot is a complete month inside the honest window, so
+  // there is no trailing partial to strip here any more — the window does it.
+  const months = all.filter((m) => m <= windowEnd);
   const latest = months.at(-1);
   if (!latest) return [];
   const card = new Set(cardMonths);

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { IconAlert, IconCheck, IconInfo } from "../shell/Icons";
 
@@ -111,18 +112,37 @@ export function EmptyState({
   );
 }
 
-export function InvariantBadge({ ok, count }: { ok: boolean; count: number }) {
+/**
+ * The badge names and links its constituents.
+ *
+ * v1 shipped this as a static span reading "5 checks pass", above five checks
+ * that could not fail. A badge that cannot be opened is a claim; this one is a
+ * link to the evidence, and it counts only checks proven capable of failing.
+ */
+export function CheckBadge({
+  href, checks,
+}: {
+  href: string;
+  checks: { ok: boolean; severity: "blocking" | "warning" }[];
+}) {
+  const blockingFailed = checks.filter((c) => !c.ok && c.severity === "blocking").length;
+  const warnings = checks.filter((c) => !c.ok && c.severity === "warning").length;
+  // A firing warning is the product working, not the build failing: it is how the
+  // page knows to withhold a comparison. Only a blocking failure means a number
+  // on screen cannot be trusted, and only that turns the badge red.
+  const tone = blockingFailed > 0 ? "var(--critical)" : warnings > 0 ? "var(--warning)" : "var(--good)";
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium"
-      style={{
-        borderColor: ok ? "var(--good)" : "var(--critical)",
-        color: ok ? "var(--good)" : "var(--critical)",
-      }}
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition-opacity hover:opacity-80"
+      style={{ borderColor: tone, color: tone }}
     >
-      {ok ? <IconCheck className="h-3.5 w-3.5" /> : <IconAlert className="h-3.5 w-3.5" />}
-      {ok ? `${count} checks pass` : "Reconciliation failed"}
-    </span>
+      {blockingFailed > 0 ? <IconAlert className="h-3.5 w-3.5" /> : <IconCheck className="h-3.5 w-3.5" />}
+      {blockingFailed > 0
+        ? `${blockingFailed} of ${checks.length} checks failing`
+        : `${checks.length - warnings} checks pass`}
+      {warnings > 0 && <span className="opacity-75">· {warnings} to review</span>}
+    </Link>
   );
 }
 

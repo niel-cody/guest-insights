@@ -5,13 +5,18 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   IconBriefcase, IconChart, IconChevron, IconDollar, IconGear, IconHome,
-  IconSearch, IconTag, IconTeam, IconUsers,
+  IconTag, IconTeam, IconUsers,
 } from "./Icons";
 
 /**
  * The Oolio Insights shell: a fixed icon rail beside a section navigator.
- * Only Customers is populated — everything else is present so the POC sits in the
- * product's real information architecture rather than floating on its own.
+ *
+ * The rail is *context*, not navigation — it exists so the POC sits inside the
+ * product's real information architecture rather than floating on its own. It is
+ * therefore rendered as inert context and marked as such, rather than as eight
+ * buttons that do nothing. Build v1 shipped roughly twenty affordances with no
+ * behaviour behind them; the rule now is that a control is wired or it is not a
+ * control.
  */
 const RAIL = [
   { label: "Home", icon: IconHome },
@@ -24,6 +29,14 @@ const RAIL = [
   { label: "Settings", icon: IconGear },
 ];
 
+/**
+ * Four surfaces, down from seven.
+ *
+ * Coming back, Growth and Value are absorbed into Overview and Members. The
+ * pre-shift Brief moves to Loyalty: Insights reports what happened, Loyalty acts
+ * on it, and the segment definitions are published once — here — rather than
+ * redefined on both sides of the boundary.
+ */
 const GROUPS = [
   { label: "Sales", items: [] },
   { label: "Payments", items: [] },
@@ -34,11 +47,9 @@ const GROUPS = [
     open: true,
     items: [
       { label: "Overview", href: "overview" },
-      { label: "Coming back", href: "coming-back" },
-      { label: "Value", href: "value" },
-      { label: "Growth", href: "growth" },
+      { label: "Members", href: "members" },
       { label: "Guest list", href: "guests" },
-      { label: "Brief", href: "brief" },
+      { label: "Trade density", href: "trade" },
       { label: "Coverage", href: "coverage" },
     ],
   },
@@ -52,23 +63,27 @@ export function Sidebar({ orgSlug }: { orgSlug: string }) {
   return (
     <div className="flex h-full">
       {/* icon rail */}
-      <nav className="flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3">
+      <div
+        className="flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3"
+        aria-label="Oolio Insights sits inside this product. Only Insights is part of this proof of concept."
+      >
         <div className="mb-3 grid h-9 w-9 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white">
           N
         </div>
         {RAIL.map(({ label, icon: Icon, active }) => (
           <div
             key={label}
-            aria-current={active ? "page" : undefined}
-            className={`group flex w-[60px] flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium ${
-              active ? "bg-accent-soft text-accent" : "text-ink-secondary"
+            aria-hidden={!active}
+            title={active ? undefined : "Not part of this proof of concept"}
+            className={`flex w-[60px] flex-col items-center gap-1 rounded-lg px-1 py-2 text-[10px] font-medium ${
+              active ? "bg-accent-soft text-accent" : "text-ink-muted opacity-55"
             }`}
           >
-            <Icon className={active ? "text-accent" : "text-ink-secondary"} />
+            <Icon className={active ? "text-accent" : "text-ink-muted"} />
             <span className="leading-none">{label}</span>
           </div>
         ))}
-      </nav>
+      </div>
 
       {/* section nav */}
       <nav className="flex w-[268px] shrink-0 flex-col border-r border-line bg-surface">
@@ -77,17 +92,9 @@ export function Sidebar({ orgSlug }: { orgSlug: string }) {
           <span className="text-[15px] font-semibold">Insights</span>
         </div>
 
-        <div className="px-3 pb-3">
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-sunken px-2.5 py-2">
-            <IconSearch className="h-4 w-4 text-ink-muted" />
-            <input
-              placeholder="Search…"
-              className="w-full bg-transparent text-[13px] outline-none placeholder:text-ink-muted"
-            />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* The search box that used to sit here searched nothing. Removed rather
+            than left as an affordance the operator would try once and distrust. */}
+        <div className="flex-1 overflow-y-auto px-2 pt-1 pb-4">
           {GROUPS.map((group) => {
             const isOpen = open[group.label] ?? group.open ?? false;
             const disabled = group.items.length === 0;

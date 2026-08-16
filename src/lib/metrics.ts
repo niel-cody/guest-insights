@@ -1,10 +1,16 @@
 /**
  * Derived metrics. Every figure a screen shows comes from here, so two surfaces
- * cannot disagree — the failure the live Customer Report ships today, where the
- * chart says 761 and the table says 758.
+ * cannot disagree — the failure that produced eighteen contradicting counts in
+ * build v1.
+ *
+ * The rule that governs this file: **a figure never renders without its window,
+ * its grain and its denominator.** Where one of the three is unavailable, the
+ * function returns null and the surface declines to draw rather than publishing
+ * a number nobody can reproduce.
  */
 import type {
-  Coverage, DecompositionRow, Guest, Guests, LifecycleRow, Org, SegmentRow, Segments,
+  AnalysisWindow, Coverage, DaypartRow, Dayparts, DecompositionRow, Guest, LifecycleRow,
+  Members, Org, SegmentRow, Segments,
 } from "./types";
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -14,11 +20,18 @@ export const tileCount = (n: number) => Math.round(n / 10) * 10;
 
 export const money = (n: number, currency = "AUD") =>
   new Intl.NumberFormat("en-AU", {
-    style: "currency", currency, maximumFractionDigits: n >= 1000 ? 0 : 2,
+    style: "currency", currency, maximumFractionDigits: Math.abs(n) >= 1000 ? 0 : 2,
   }).format(n);
 
 export const count = (n: number) => new Intl.NumberFormat("en-AU").format(Math.round(n));
 export const pct = (n: number, dp = 1) => `${(n * 100).toFixed(dp)}%`;
+
+/** A signed multiplier, for comparisons. `+41%`, `−4%`. */
+export const delta = (n: number, dp = 0) =>
+  `${n >= 0 ? "+" : "−"}${(Math.abs(n) * 100).toFixed(dp)}%`;
+
+/** `2.9×` when the gap is large enough that a percentage stops reading. */
+export const ratio = (n: number) => (n >= 1 ? `${(1 + n).toFixed(1)}×` : delta(n));
 
 export const monthLabel = (iso: string, long = false) =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-AU", {
@@ -30,83 +43,258 @@ export const dayLabel = (iso: string) =>
     day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
   });
 
-// ── coverage, and the honesty it requires ───────────────────────────────────
+/** The window, spelled out. Attaches to every figure that is not self-evident. */
+export const windowLabel = (w: AnalysisWindow) =>
+  `${dayLabel(w.start)} – ${dayLabel(w.end)} · ${w.months} complete months`;
+
+export const windowShort = (w: AnalysisWindow) =>
+  `${monthLabel(w.start)}–${monthLabel(w.end)}`;
+
+// ── coverage ────────────────────────────────────────────────────────────────
 
 export type CoverageState = {
   /** Revenue grain is the primary measure. Transaction grain names its denominator. */
   identifiedRevenueShare: number;
   memberRevenueShare: number;
+  /** The share a loyalty CRM would see: scanned orders only. */
+  scannedRevenueShare: number;
   cardRevenueShare: number;
   identifiedOrderShare: number;
   memberOrderShare: number;
-  /** The months the card tier can be trusted, most recent last. */
-  cardMonths: string[];
-  /** The most recent unbroken run of trustworthy card months. */
-  currentWindow: { start: string; end: string; months: number } | null;
-  /** Months excluded, with the reason, so a gap in a chart is explained not hidden. */
+  coversShare: number;
   gaps: { month: string; reason: string }[];
-  /** True when the card tier covers the whole analysis window. */
-  cardTierComplete: boolean;
+  monthsAdmitted: number;
+  monthsTested: number;
+  window: AnalysisWindow;
   asOf: string;
 };
 
 export function coverageState(org: Org, coverage: Coverage): CoverageState {
   const t = coverage.totals;
-  const cardMonths = [...org.cardTier.months].sort();
-  const gaps = org.cardTier.quality
-    .filter((q) => !q.ok)
-    .map((q) => ({ month: q.month, reason: q.reason ?? "unavailable" }));
+  // Every month in the snapshot is inside the honest window by construction, so
+  // there is no averaging across a repair here — the window *is* the run of
+  // trustworthy months. v1 computed shares across three different regimes and
+  // produced a figure that described none of them.
+  return {
+    identifiedRevenueShare: (t.memberRevenue + t.cardRevenue) / t.revenue,
+    memberRevenueShare: t.memberRevenue / t.revenue,
+    scannedRevenueShare: t.scannedRevenue / t.revenue,
+    cardRevenueShare: t.cardRevenue / t.revenue,
+    identifiedOrderShare: (t.memberOrders + t.cardOrders) / t.orders,
+    memberOrderShare: t.memberOrders / t.orders,
+    coversShare: t.ordersWithCovers / t.orders,
+    gaps: org.cardTier.quality.filter((q) => !q.ok).map((q) => ({ month: q.month, reason: q.reason ?? "unavailable" })),
+    monthsAdmitted: org.cardTier.months.length,
+    monthsTested: org.cardTier.quality.length,
+    window: org.window,
+    asOf: coverage.monthly.at(-1)?.month ?? org.window.end,
+  };
+}
 
-  // Walk back from the most recent month while the months stay contiguous.
-  let currentWindow: CoverageState["currentWindow"] = null;
-  if (cardMonths.length) {
-    const step = (m: string, back: number) => {
-      const d = new Date(`${m}T00:00:00Z`);
-      d.setUTCMonth(d.getUTCMonth() - back);
-      return d.toISOString().slice(0, 10);
-    };
-    let i = cardMonths.length - 1;
-    while (i > 0 && cardMonths[i - 1] === step(cardMonths[i], 1)) i--;
-    currentWindow = {
-      start: cardMonths[i],
-      end: cardMonths[cardMonths.length - 1],
-      months: cardMonths.length - i,
-    };
+// ── the member value case ───────────────────────────────────────────────────
+
+export type ValueClaim = {
+  key: string;
+  question: string;
+  /** The figure, or null when the data cannot support the claim. */
+  member: number | null;
+  nonMember: number | null;
+  lift: number | null;
+  unit: "money" | "count" | "rate";
+  /** Window, grain and denominator, always. */
+  basis: string;
+  /** Why this is not published, when it is not. */
+  refusal: string | null;
+  /** The claim this one exists to correct. */
+  note?: string;
+};
+
+/**
+ * The value case, as a set of claims each carrying its own basis.
+ *
+ * The order is the argument. Per-visit spend comes first *because it is the
+ * figure that says members are worth less* — it is what the category publishes
+ * and it is true. Frequency comes next and reverses the conclusion. Per-person
+ * value resolves it. A report that leads with the flattering number and buries
+ * the rest is the thing this product exists not to be.
+ */
+export function valueClaims(m: Members, org: Org): ValueClaim[] {
+  const { member, nonMember } = m.crossSection;
+  const w = m.window;
+  const basis = `${windowShort(w)} · per person identified by card · ${count(member.people + nonMember.people)} people`;
+  const lift = (a: number, b: number) => (a ? b / a - 1 : null);
+  const perCover = m.coverBasis;
+  const coverTrustworthy =
+    perCover.member.coverage > 0.9 && perCover.nonMember.coverage > 0.9;
+
+  return [
+    {
+      key: "spendPerVisit",
+      question: "Do members spend more per visit?",
+      member: member.spendPerVisit,
+      nonMember: nonMember.spendPerVisit,
+      lift: lift(nonMember.spendPerVisit, member.spendPerVisit),
+      unit: "money",
+      basis: `${windowShort(w)} · per visit · ${count(member.visits + nonMember.visits)} visits`,
+      refusal: null,
+      note:
+        org.serviceModel === "table"
+          ? "This is the figure that gets loyalty programmes cut. It is also the wrong denominator for a table-service business: a visit is a table, and members are not booking the same size table."
+          : "This is the figure that gets loyalty programmes cut, and on its own it is true. It is not the whole answer.",
+    },
+    {
+      key: "itemsPerVisit",
+      question: "Do they buy more when they come?",
+      member: member.itemsPerVisit,
+      nonMember: nonMember.itemsPerVisit,
+      lift: lift(nonMember.itemsPerVisit, member.itemsPerVisit),
+      unit: "count",
+      basis: `${windowShort(w)} · items per visit`,
+      refusal: null,
+    },
+    {
+      key: "spendPerCover",
+      question: "Per head at the table, do members spend more?",
+      member: coverTrustworthy ? perCover.member.spendPerCover : null,
+      nonMember: coverTrustworthy ? perCover.nonMember.spendPerCover : null,
+      lift:
+        coverTrustworthy && perCover.nonMember.spendPerCover && perCover.member.spendPerCover
+          ? lift(perCover.nonMember.spendPerCover, perCover.member.spendPerCover)
+          : null,
+      unit: "money",
+      basis: `${windowShort(w)} · per cover · orders recording a party size only`,
+      refusal: coverTrustworthy
+        ? null
+        : `Party size is recorded on ${pct(perCover.member.coverage, 0)} of member orders and ` +
+          `${pct(perCover.nonMember.coverage, 0)} of everyone else's. The member orders that do record it average ` +
+          `${money(perCover.member.avgOrderWithCovers)} against ${money(perCover.member.avgOrderWithoutCovers)} for those that do not, ` +
+          `so restricting to them keeps the top of the member distribution and nearly all of the other. ` +
+          `The missingness runs in the direction of the answer, so the comparison is not published.`,
+    },
+    {
+      key: "visits",
+      question: "Do they come back more often?",
+      member: member.avgVisits,
+      nonMember: nonMember.avgVisits,
+      lift: lift(nonMember.avgVisits, member.avgVisits),
+      unit: "count",
+      basis: `${windowShort(w)} · visits per person over ${w.days} days`,
+      refusal: null,
+      note: "A visit is a person-day at a venue, not an order.",
+    },
+    {
+      key: "repeatRate",
+      question: "How many come back at all?",
+      member: m.detection.correctedRepeatRate,
+      nonMember: nonMember.repeatRate,
+      lift: lift(nonMember.repeatRate, m.detection.correctedRepeatRate),
+      unit: "rate",
+      basis: `${windowShort(w)} · share of people with two or more visits · corrected for scan detection`,
+      refusal: null,
+      note:
+        `Membership is only visible when somebody scans, and members scan on ${pct(m.detection.scanPerVisit, 0)} of visits, ` +
+        `so members who came once are the ones most likely to be missed entirely. Uncorrected this reads ` +
+        `${pct(m.detection.observedRepeatRate)}; the figure shown is the corrected one.`,
+    },
+    {
+      key: "spendPerPerson",
+      question: "So what is a member worth?",
+      member: member.spendPerPerson,
+      nonMember: nonMember.spendPerPerson,
+      lift: lift(nonMember.spendPerPerson, member.spendPerPerson),
+      unit: "money",
+      basis,
+      refusal: null,
+      note: "Frequency times basket. This is the number that answers the question.",
+    },
+  ];
+}
+
+/**
+ * What the cross-sectional gap is, and what it is not.
+ *
+ * The gap is real and it is worth knowing — it sizes the base the business
+ * already has. It is not the value of enrolling somebody, because the people who
+ * enrol were already coming back. Only the within-person design separates them,
+ * and where that design has too few people the product says so.
+ */
+export function causalReading(m: Members): {
+  association: number;
+  causal: { lift: number; lo: number; hi: number; n: number } | null;
+  selectionShare: number | null;
+  refusal: string | null;
+} {
+  const association = m.crossSection.lifts.spendPerPerson;
+  if (!m.enrolment.estimable) {
+    return { association, causal: null, selectionShare: null, refusal: m.enrolment.refusal };
+  }
+  const s = m.enrolment.spend;
+  return {
+    association,
+    causal: { lift: s.lift, lo: s.liftLo, hi: s.liftHi, n: s.n },
+    // How much of the observed gap the within-person design does not explain.
+    selectionShare: association > 0 ? Math.max(0, 1 - s.lift / association) : null,
+    refusal: null,
+  };
+}
+
+// ── trade density ───────────────────────────────────────────────────────────
+
+export type DensityTier = "PRIMARY" | "SECONDARY" | "TERTIARY" | "WEAK";
+
+export function densityTier(share: number): DensityTier {
+  if (share >= 0.25) return "PRIMARY";
+  if (share >= 0.15) return "SECONDARY";
+  if (share >= 0.05) return "TERTIARY";
+  return "WEAK";
+}
+
+export type TradingIdentity = {
+  archetype: string;
+  reason: string;
+  confidence: number;
+  primary: DaypartRow[];
+};
+
+/**
+ * The trading identity, derived rather than declared.
+ *
+ * Confidence is the share of trade the classification actually accounts for,
+ * discounted when the shape is ambiguous — two near-equal primaries describe a
+ * business less well than one dominant one.
+ */
+export function tradingIdentity(dp: Dayparts): TradingIdentity {
+  const total = dp.periods.reduce((a, d) => a + d.orders, 0) || 1;
+  const ranked = [...dp.periods].sort((a, b) => b.orders - a.orders);
+  const shares = ranked.map((d) => d.orders / total);
+  const primary = ranked.filter((_, i) => shares[i] >= 0.25);
+  const top = shares[0] ?? 0;
+  const second = shares[1] ?? 0;
+
+  let archetype: string;
+  let reason: string;
+  if (primary.length === 1 && top >= 0.6) {
+    archetype = `Daypart Specialist (${ranked[0].label})`;
+    reason = `${pct(top, 0)} of orders fall in one period.`;
+  } else if (primary.length >= 2) {
+    archetype = `High-Throughput ${ranked[0].label.split(" ")[0]}`;
+    reason = `${ranked.slice(0, primary.length).map((d) => d.label).join(" and ")} are both primary, together ${pct(shares.slice(0, primary.length).reduce((a, b) => a + b, 0), 0)} of orders.`;
+  } else if (primary.length === 1) {
+    archetype = `${ranked[0].label}-Led`;
+    reason = `${ranked[0].label} is the only primary period at ${pct(top, 0)}.`;
+  } else {
+    archetype = "Distributed";
+    reason = "No period reaches the 25% primary threshold.";
   }
 
-  // Shares are measured over the *current* card window, not over every month that
-  // ever worked. Coffee Guru's card capture ran, broke for ten months, and was
-  // repaired; averaging the three periods produces a number that describes none of
-  // them and understates what the merchant would get today. The history is in the
-  // chip, one click away.
-  const live = new Set(
-    currentWindow
-      ? cardMonths.filter((m) => m >= currentWindow!.start && m <= currentWindow!.end)
-      : cardMonths,
-  );
-  const liveMonths = coverage.monthly.filter((m) => live.has(m.month));
-  const liveRevenue = liveMonths.reduce((a, m) => a + m.revenue, 0) || t.revenue;
-  const liveMember = liveMonths.reduce((a, m) => a + m.memberRevenue, 0);
-  const liveCard = liveMonths.reduce((a, m) => a + m.cardRevenue, 0);
-
-  // Transaction grain is the secondary measure and names its own denominator, so
-  // it is counted over the same window rather than inferred from the revenue share.
-  const liveOrders = liveMonths.reduce((a, m) => a + m.orders, 0) || t.orders;
-  const liveIdentifiedOrders = liveMonths.length
-    ? liveMonths.reduce((a, m) => a + m.memberOrders + m.cardOrders, 0)
-    : t.memberOrders + t.cardOrders;
-
+  // Concentration against a flat eight-period distribution, tempered by how
+  // clearly the leader leads.
+  const separation = top > 0 ? Math.min(1, (top - second) / top + 0.5) : 0;
+  const concentration = Math.min(1, (top - 0.125) / 0.5 + 0.4);
   return {
-    identifiedRevenueShare: (liveMember + liveCard) / liveRevenue,
-    memberRevenueShare: liveMember / liveRevenue,
-    cardRevenueShare: liveCard / liveRevenue,
-    identifiedOrderShare: liveIdentifiedOrders / liveOrders,
-    memberOrderShare: t.memberOrders / t.orders,
-    cardMonths,
-    currentWindow,
-    gaps,
-    cardTierComplete: gaps.length === 0,
-    asOf: coverage.monthly.at(-1)?.month ?? org.window.end,
+    archetype, reason,
+    confidence: Math.max(0, Math.min(1, concentration * separation)),
+    primary,
   };
 }
 
@@ -123,8 +311,8 @@ export type Flow = {
   active: number;
 };
 
-/** Member-tier flow. The card tier gets counts but no lapse judgement — reissue
- *  is unmeasured, so "lost" on a card is a claim we cannot support. */
+/** Member flow. The card tier gets counts but no lapse judgement — reissue is
+ *  unmeasured, so "lost" on a card is a claim we cannot support. */
 export function memberFlow(lifecycle: LifecycleRow[]): Flow[] {
   return lifecycle
     .filter((r) => r.tier === "member")
@@ -141,32 +329,22 @@ export function memberFlow(lifecycle: LifecycleRow[]): Flow[] {
 }
 
 /**
- * Drop a trailing partial month.
+ * How this person actually behaves.
  *
- * The extract runs mid-month, so the last row is a fortnight of trade. Comparing
- * it to a full month makes growth look like collapse, which is the single easiest
- * way to lose a room. Charts may show it; headline figures never do.
+ * Returns null rather than substituting the org median when the guest has no
+ * established cadence. v1 described four guests at 9, 22, 22 and 22 days as all
+ * "normally coming every 17 days", which was the org median wearing a personal
+ * pronoun.
  */
-export function completeMonths<T extends { month: string }>(rows: T[], windowEnd: string): T[] {
-  if (!rows.length) return rows;
-  const end = new Date(`${windowEnd}T00:00:00Z`);
-  const lastDayOfEndMonth = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
-  const partial = end.getUTCDate() < lastDayOfEndMonth;
-  const endMonth = `${windowEnd.slice(0, 7)}-01`;
-  return partial ? rows.filter((r) => r.month !== endMonth) : rows;
+export function habit(g: Guest): string | null {
+  if (g.cadenceDays == null || g.visits < 3) return null;
+  return `usually every ${Math.round(g.cadenceDays)}d · last seen ${g.daysSince}d ago`;
 }
 
-/** How this person actually behaves, in the words an operator would use. */
-export function habit(g: Guest, org: Org): string {
-  const cadence = Math.round(g.cadenceDays ?? org.calibration.medianGapDays);
-  return `usually every ${cadence}d · ${g.daysSince}d ago`;
-}
-
-/** Same month last year, for the reference line the trend needs to be readable. */
-export function sameMonthLastYear<T extends { month: string }>(rows: T[], month: string): T | undefined {
-  const d = new Date(`${month}T00:00:00Z`);
-  d.setUTCFullYear(d.getUTCFullYear() - 1);
-  return rows.find((r) => r.month === d.toISOString().slice(0, 10));
+/** How overdue this guest is against their own cadence, not a fixed rule. */
+export function overdueRatio(g: Guest): number | null {
+  if (g.cadenceDays == null || g.cadenceDays <= 0 || g.visits < 3) return null;
+  return g.daysSince / g.cadenceDays;
 }
 
 // ── revenue decomposition ───────────────────────────────────────────────────
@@ -174,13 +352,13 @@ export function sameMonthLastYear<T extends { month: string }>(rows: T[], month:
 /**
  * Symmetric Shapley decomposition of a multiplicative model.
  *
- * Revenue = guests × visits-per-guest × items-per-visit × price-per-item. When
- * revenue moves, each factor gets the average of its marginal contribution across
- * every order in which the factors could have changed. Unlike a sequential
- * (chained) split, the answer does not depend on the order the analyst happened to
- * pick, and unlike a log/LMDI split it needs no residual term: the parts sum to
- * the whole exactly. That is what lets the waterfall be drawn without a
- * "everything else" bar, which is the bar an operator stops trusting the chart at.
+ * Revenue = guests × visits-per-guest × items-per-visit × price-per-item. Each
+ * factor gets the average of its marginal contribution across every order in
+ * which the factors could have changed. Unlike a chained split the answer does
+ * not depend on the order the analyst picked, and unlike LMDI it needs no
+ * residual term — which matters here because LMDI is undefined when a factor is
+ * zero and this business has months with zero card volume. LMDI is decided
+ * against, not under consideration.
  */
 export function shapley(from: number[], to: number[]): number[] {
   const n = from.length;
@@ -188,9 +366,8 @@ export function shapley(from: number[], to: number[]): number[] {
   const weight = (s: number) => (fact(s) * fact(n - 1 - s)) / fact(n);
 
   return from.map((_, i) => {
-    const delta = to[i] - from[i];
+    const d = to[i] - from[i];
     let acc = 0;
-    // Enumerate every subset of the other factors already moved to period 1.
     const others = [...Array(n).keys()].filter((j) => j !== i);
     for (let mask = 0; mask < 1 << others.length; mask++) {
       let product = 1;
@@ -200,7 +377,7 @@ export function shapley(from: number[], to: number[]): number[] {
         if (moved) size++;
         product *= moved ? to[j] : from[j];
       });
-      acc += weight(size) * delta * product;
+      acc += weight(size) * d * product;
     }
     return acc;
   });
@@ -210,25 +387,37 @@ export type Decomposition = {
   from: DecompositionRow;
   to: DecompositionRow;
   revenueChange: number;
-  terms: { key: string; label: string; value: number; kind: "real" | "price" }[];
-  /** Growth attributable to more trade, versus growth attributable to charging more. */
+  terms: { key: string; label: string; value: number; kind: "real" | "price"; operand: string }[];
   real: number;
   price: number;
 };
 
 const TERMS = [
-  { key: "guests", label: "More guests", kind: "real" as const },
-  { key: "visitsPerGuest", label: "Visiting more often", kind: "real" as const },
-  { key: "itemsPerVisit", label: "Buying more per visit", kind: "real" as const },
-  { key: "pricePerItem", label: "Paying more per item", kind: "price" as const },
+  { key: "guests", label: "guests", kind: "real" as const },
+  { key: "visitsPerGuest", label: "visits per guest", kind: "real" as const },
+  { key: "itemsPerVisit", label: "items per visit", kind: "real" as const },
+  { key: "pricePerItem", label: "price per item", kind: "price" as const },
 ];
 
+/**
+ * Labels state the *direction the factor moved*, never the direction its name
+ * implies. v1 rendered `Visiting more often` against −$2,913 and `Paying more
+ * per item` against −$287.83, because the labels were hard-coded to the positive
+ * sense of the factor.
+ */
 export function decompose(from: DecompositionRow, to: DecompositionRow): Decomposition {
   const keys = TERMS.map((t) => t.key) as (keyof DecompositionRow)[];
   const a = keys.map((k) => Number(from[k]));
   const b = keys.map((k) => Number(to[k]));
   const values = shapley(a, b);
-  const terms = TERMS.map((t, i) => ({ ...t, value: values[i] }));
+  const terms = TERMS.map((t, i) => {
+    const moved = b[i] - a[i];
+    const dir = moved >= 0 ? "More" : "Fewer";
+    const priceDir = moved >= 0 ? "Higher" : "Lower";
+    const label = t.kind === "price" ? `${priceDir} ${t.label}` : `${dir} ${t.label}`;
+    const fmt = (v: number) => (t.key === "guests" ? count(v) : v.toFixed(2));
+    return { ...t, label, value: values[i], operand: `${fmt(a[i])} → ${fmt(b[i])}` };
+  });
   return {
     from, to,
     revenueChange: to.revenue - from.revenue,
@@ -245,29 +434,34 @@ export const SEGMENT_LABEL: Record<string, string> = {
   established: "Established",
   slipping: "Slipping",
   lapsed: "Lapsed",
+  new: "New",
   "one-visit": "Seen once",
 };
 
-export const SEGMENT_ORDER = ["regular", "established", "slipping", "lapsed", "one-visit"] as const;
+export const SEGMENT_ORDER = ["regular", "established", "slipping", "lapsed", "new", "one-visit"] as const;
 
 export function rollUpSegments(segments: Segments, tier?: "member" | "card") {
   const rows = tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows;
   const by = new Map<string, { guests: number; visits: number; spend: number; multiVenue: number }>();
   for (const r of rows) {
-    const cur = by.get(r.segment) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 };
-    by.set(r.segment, {
+    const key = r.segment ?? "unclassified";
+    const cur = by.get(key) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 };
+    by.set(key, {
       guests: cur.guests + r.guests,
       visits: cur.visits + r.visits,
       spend: cur.spend + r.spend,
       multiVenue: cur.multiVenue + r.multiVenue,
     });
   }
-  return SEGMENT_ORDER.map((s) => ({ segment: s, label: SEGMENT_LABEL[s], ...(by.get(s) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 }) }));
+  return SEGMENT_ORDER.map((s) => ({
+    segment: s,
+    label: SEGMENT_LABEL[s],
+    ...(by.get(s) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 }),
+  })).filter((s) => s.guests > 0);
 }
 
 export function valueBands(segments: Segments, tier?: "member" | "card") {
-  const rows = (tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows)
-    .filter((r) => r.segment !== "one-visit");
+  const rows = tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows;
   const by = new Map<number, SegmentRow[]>();
   for (const r of rows) by.set(r.valueBand, [...(by.get(r.valueBand) ?? []), r]);
   return [...by.entries()]
@@ -279,193 +473,4 @@ export function valueBands(segments: Segments, tier?: "member" | "card") {
       minSpend: Math.min(...rs.map((r) => r.minSpend)),
       maxSpend: Math.max(...rs.map((r) => r.maxSpend)),
     }));
-}
-
-// ── the named lists ─────────────────────────────────────────────────────────
-
-export type NamedList = {
-  key: string;
-  title: string;
-  /** What the operator is meant to do, and when. Never a list without an action. */
-  action: string;
-  why: string;
-  guests: Guest[];
-  /** True population size; the list itself is capped for a human to act on. */
-  total: number;
-  valueAtRisk?: number;
-};
-
-/**
- * The three lists the front page promises. Each is a group of named people with
- * one thing to do, because a dashboard that ends in a number ends the loop.
- */
-/** What this guest is worth over a quarter, at the rate they have actually traded. */
-const quarterlyValue = (g: Guest) => (g.spend / Math.max(g.tenureDays, 30)) * 90;
-
-export function namedLists(guests: Guests, org: Org): NamedList[] {
-  const rows = guests.rows;
-
-  // A daily customer is "overdue" after three days, which is true and useless.
-  // The absence has to be long enough that a phone call is not absurd, so the
-  // list takes the later of their own cadence and a week.
-  const slipping = rows
-    .filter(
-      (g) =>
-        g.tier === "member" &&
-        g.segment === "slipping" &&
-        // Eight visits is where a per-day value estimate stops being noise. Below
-        // it, one big Saturday makes somebody look like the most valuable guest
-        // in the business.
-        g.visits >= 8 &&
-        g.daysSince >= 7,
-    )
-    .sort((a, b) => quarterlyValue(b) - quarterlyValue(a));
-
-  const unknownRegulars = rows
-    .filter((g) => g.tier === "card" && g.visits >= 8 && g.daysSince <= org.calibration.lapsedDays)
-    .sort((a, b) => b.visits - a.visits);
-
-  const secondVisit = rows
-    .filter((g) => g.visits === 1 && g.daysSince <= 21)
-    .sort((a, b) => b.spend - a.spend);
-
-  return [
-    {
-      key: "slipping",
-      title: "Slipping regulars",
-      action: "Call or text them this week",
-      why: `Members with a settled habit who are now well past their own usual gap — not a fixed rule applied to everybody.`,
-      guests: slipping.slice(0, 25),
-      total: slipping.length,
-      valueAtRisk: slipping.reduce((a, g) => a + quarterlyValue(g), 0),
-    },
-    {
-      key: "unknown-regulars",
-      title: "Regulars we don't know",
-      action: "Ask them to join when you recognise the card",
-      why: "Card-identified guests visiting at least eight times who have never enrolled. The single largest enrolment opportunity you have.",
-      guests: unknownRegulars.slice(0, 25),
-      total: unknownRegulars.length,
-    },
-    {
-      key: "second-visit",
-      title: "Second-visit candidates",
-      action: "Give them a reason to come back inside a fortnight",
-      why: "Seen once in the last three weeks. Converting a first visit to a second is where retention is actually won.",
-      guests: secondVisit.slice(0, 25),
-      total: secondVisit.length,
-    },
-  ];
-}
-
-// ── the Brief ───────────────────────────────────────────────────────────────
-
-export type Brief = {
-  /** True when there is genuinely nothing worth saying. The silence state is the
-   *  retention model: a brief that always speaks is one nobody reads. */
-  silent: boolean;
-  headline: string;
-  lines: string[];
-  names: { name: string; fact: string }[];
-  action: string | null;
-  wordCount: number;
-};
-
-export function preShiftBrief(
-  org: Org, lists: NamedList[], flow: Flow[], cov: CoverageState,
-): Brief {
-  const slipping = lists.find((l) => l.key === "slipping")!;
-  const latest = flow.at(-1);
-  const names = slipping.guests.slice(0, 5).map((g) => ({
-    name: g.name,
-    fact: `${g.visits} ${org.labels.visits}, usually every ${Math.round(g.cadenceDays ?? org.calibration.medianGapDays)} days, not seen for ${g.daysSince}`,
-  }));
-
-  if (!names.length) {
-    return {
-      silent: true,
-      headline: "Nothing to chase today",
-      lines: ["No regular has slipped past their usual gap since the last brief. Good week."],
-      names: [],
-      action: null,
-      wordCount: 0,
-    };
-  }
-
-  const lines = [
-    `${count(slipping.total)} regulars have slipped past their usual gap.`,
-    latest && latest.net < 0
-      ? `You lost ${count(latest.lost)} and gained ${count(latest.gained)} in ${monthLabel(latest.month)}.`
-      : latest
-        ? `You gained ${count(latest.gained)} and lost ${count(latest.lost)} in ${monthLabel(latest.month)}.`
-        : "",
-    `Five worth a word today:`,
-  ].filter(Boolean);
-
-  const wordCount = [...lines, ...names.map((n) => `${n.name} ${n.fact}`)]
-    .join(" ").split(/\s+/).filter(Boolean).length;
-
-  return {
-    silent: false,
-    headline: `${count(slipping.total)} regulars slipping`,
-    lines,
-    names,
-    action: slipping.action,
-    wordCount,
-  };
-}
-
-// ── reconciliation ──────────────────────────────────────────────────────────
-
-export type Invariant = { name: string; ok: boolean; detail: string };
-
-/**
- * Reconciliation invariants are a build gate, not a test suite. If one fails the
- * surface renders a failed state rather than a wrong number.
- */
-export function invariants(
-  coverage: Coverage, segments: Segments, guests: Guests | null, lifecycle: LifecycleRow[],
-): Invariant[] {
-  const t = coverage.totals;
-  const tierSum = t.memberOrders + t.cardOrders + t.unattributedOrders;
-  const venueSum = coverage.byVenue.reduce((a, v) => a + v.orders, 0);
-  const segSum = segments.rows.reduce((a, r) => a + r.guests, 0);
-  const monthlySum = coverage.monthly.reduce((a, m) => a + m.orders, 0);
-
-  const out: Invariant[] = [
-    {
-      name: "Identity tiers partition every order",
-      ok: tierSum === t.orders,
-      detail: `${count(tierSum)} of ${count(t.orders)}`,
-    },
-    {
-      name: "Venue totals reconcile to the estate",
-      ok: venueSum === t.orders,
-      detail: `${count(venueSum)} of ${count(t.orders)}`,
-    },
-    {
-      name: "Monthly totals reconcile to the estate",
-      ok: monthlySum === t.orders,
-      detail: `${count(monthlySum)} of ${count(t.orders)}`,
-    },
-    {
-      name: "Segment population matches the guest population",
-      ok: segSum === segments.population,
-      detail: `${count(segSum)} of ${count(segments.population)}`,
-    },
-    {
-      name: "No month reports more lapses than it had active guests",
-      ok: lifecycle.every((r) => r.lapsed <= r.active + r.lapsed),
-      detail: `${lifecycle.length} months checked`,
-    },
-  ];
-
-  if (guests) {
-    out.push({
-      name: "Guest grid is a subset of the true population",
-      ok: guests.sampled <= guests.population,
-      detail: `${count(guests.sampled)} shown of ${count(guests.population)}`,
-    });
-  }
-  return out;
 }

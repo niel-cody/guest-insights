@@ -1,220 +1,276 @@
 import Link from "next/link";
+import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { Card, CheckBadge, EmptyState, Tile } from "@/components/ui/Primitives";
+import { IconArrow } from "@/components/shell/Icons";
 import { GuestFlowChart } from "@/components/charts/GuestFlowChart";
 import { GrowthWaterfall, RealVsPriceBar } from "@/components/charts/GrowthWaterfall";
-import { Page, PageHeader } from "@/components/shell/PageHeader";
-import { IconArrow } from "@/components/shell/Icons";
-import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
 import { getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { runChecks } from "@/lib/checks";
+import { derivedFromDisplayed } from "@/lib/checks";
 import {
-  completeMonths, count, coverageState, decompose, habit, memberFlow, money, monthLabel,
-  namedLists, pct, rollUpSegments, sameMonthLastYear, tileCount,
+  SEGMENT_LABEL, count, coverageState, decompose, delta, memberFlow, money, monthLabel,
+  pct, ratio, rollUpSegments, tileCount, windowShort,
 } from "@/lib/metrics";
 
-export default async function Overview({ params }: { params: Promise<{ org: string }> }) {
+export const dynamic = "force-static";
+
+export default async function OverviewPage({ params }: { params: Promise<{ org: string }> }) {
   const { org: slug } = await params;
-  const [snap, guests, orgs] = await Promise.all([getSnapshot(slug), getGuests(slug), getAllOrgs()]);
-  const { org, coverage, lifecycle, decomposition, segments } = snap;
+  const snap = await getSnapshot(slug);
+  const guests = await getGuests(slug);
+  const orgs = await getAllOrgs();
+  const { org, coverage, segments, members, decomposition } = snap;
+  const cov = coverageState(org, snap.coverage);
+  const checks = runChecks(snap, guests);
+  const w = org.window;
 
-  const cov = coverageState(org, coverage);
-  const flow = memberFlow(lifecycle);
-  // Headline figures use complete months only; the chart may still show the
-  // partial one because a chart has a shape to explain it and a tile does not.
-  const settled = completeMonths(flow, org.window.end);
-  const latest = settled.at(-1);
-  const lastYear = latest ? sameMonthLastYear(settled, latest.month) : undefined;
-  const lists = namedLists(guests, org);
-  const segs = rollUpSegments(segments, "member");
-  const regulars = segs.find((s) => s.segment === "regular")?.guests ?? 0;
+  const flow = memberFlow(snap.lifecycle);
+  const latest = flow.at(-1);
 
-  const dm = completeMonths(decomposition, org.window.end);
-  const dec = dm.length >= 2 ? decompose(dm.at(-2)!, dm.at(-1)!) : null;
+  // Every month in the snapshot is a complete month inside the honest window, so
+  // a first-to-last comparison is like-for-like by construction.
+  const first = decomposition[0];
+  const last = decomposition.at(-1);
+  const growth = first && last && first !== last ? decompose(first, last) : null;
+
+  const cs = members.crossSection;
+  const identifiedPeople = cs.member.people + cs.nonMember.people;
+  const memberLift = cs.lifts.spendPerPerson;
+
+  // Members only — a lifecycle verdict on a card is a claim we cannot support.
+  const stands = rollUpSegments(segments, "member").filter((s) => s.guests > 0);
+  const standsTotal = stands.reduce((a, s) => a + s.guests, 0);
+  const standsSpend = stands.reduce((a, s) => a + s.spend, 0);
 
   return (
     <>
-      <PageHeader org={org} orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))} title="Overview" coverage={cov} />
+      <PageHeader
+        org={org}
+        orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))}
+        title="Overview"
+        coverage={cov}
+        actions={
+          <CheckBadge href={`/${org.slug}/coverage#checks`} checks={checks} />
+        }
+      />
       <Page>
-        <div className="mx-auto max-w-[1240px] space-y-5">
-          {/* 1 — the owned count */}
-          <div className="grid gap-4 md:grid-cols-3">
+        <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
+          {/* ── where you sit ─────────────────────────────────────────────── */}
+          <div className="grid gap-4 md:grid-cols-4">
             <Tile
-              label={`Your regulars`}
-              value={count(tileCount(regulars))}
-              accent="var(--gain-returning)"
-              hint="Enrolled members with ten or more visits who are still inside their usual gap. Person grain."
+              label="Revenue you can attribute"
+              value={pct(cov.identifiedRevenueShare, 0)}
+              hint={`Revenue grain, ${windowShort(w)}. Denominator is all completed trade in the window, including cash.`}
+              accent="var(--accent)"
               footnote={
-                <>Of {count(tileCount(segs.reduce((a, s) => a + s.guests, 0)))} known {org.labels.guests} in total</>
+                <>
+                  {pct(cov.scannedRevenueShare, 1)} scanned · {pct(cov.identifiedRevenueShare - cov.scannedRevenueShare, 1)} added
+                  by the card
+                </>
               }
             />
             <Tile
-              label={latest ? `Gained in ${monthLabel(latest.month)}` : "Gained"}
-              value={latest ? count(tileCount(latest.gained)) : "—"}
-              accent="var(--gain-new)"
-              hint="New guests plus guests who came back after lapsing, in the most recent month."
+              label="People you can name"
+              value={count(tileCount(identifiedPeople))}
+              hint={`Distinct people identified by card or enrolment over ${w.days} days. Not the number of customers you served — that is unknowable.`}
+              accent="var(--tier-card)"
+              footnote={`${count(tileCount(cs.member.people))} enrolled · ${count(tileCount(cs.nonMember.people))} card only`}
+            />
+            <Tile
+              label="A member is worth"
+              value={memberLift >= 1 ? ratio(memberLift) : delta(memberLift)}
+              hint="Per person over the window, against a card-recognised non-member. Association, not effect — the Members screen separates them."
+              accent={memberLift >= 0 ? "var(--tier-member)" : "var(--warning)"}
               footnote={
-                latest && lastYear ? (
-                  <>
-                    {lastYear.gained ? pct((latest.gained - lastYear.gained) / lastYear.gained, 0) : "—"} against{" "}
-                    {monthLabel(lastYear.month)}
-                  </>
-                ) : null
+                <>
+                  {money(cs.member.spendPerPerson)} against {money(cs.nonMember.spendPerPerson)}
+                </>
               }
             />
             <Tile
-              label={latest ? `Lost in ${monthLabel(latest.month)}` : "Lost"}
-              value={latest ? count(tileCount(latest.lost)) : "—"}
-              accent="var(--loss)"
-              hint="Guests whose gap since their last visit crossed the lapse threshold during the month."
-              footnote={
-                latest ? (
-                  <span style={{ color: latest.net < 0 ? "var(--critical)" : "var(--good)" }}>
-                    Net {latest.net >= 0 ? "+" : "−"}{count(Math.abs(latest.net))}
-                  </span>
-                ) : null
-              }
+              label="Members not recognised"
+              value={pct(members.opportunity.unscanned.share, 0)}
+              hint="Share of known members' orders on which nobody scanned. Fixable at the till, with no programme and no budget."
+              accent="var(--warning)"
+              footnote={`${count(members.opportunity.unscanned.orders)} orders · ${money(members.opportunity.unscanned.revenue)}`}
             />
           </div>
 
-          {/* 2 — the sentence */}
-          {latest && (
-            <Card>
-              <p className="text-[15px] leading-relaxed text-ink">
-                <strong>{count(lists[0].total)}</strong> regulars have slipped past their usual gap.
-                They normally come every <strong>{Math.round(org.calibration.medianGapDays)} days</strong>;
-                these have not been seen for more than <strong>{org.calibration.slippingDays}</strong>.
-                {lists[1].total > 0 && (
-                  <>
-                    {" "}A further <strong>{count(lists[1].total)}</strong> people visit at least eight
-                    times and have never joined anything.
-                  </>
-                )}
-              </p>
-            </Card>
-          )}
+          {/* ── the sentence ──────────────────────────────────────────────── */}
+          <Card>
+            <p className="max-w-[90ch] text-[15px] leading-relaxed text-ink">
+              Over {windowShort(w)} you served {money(coverage.totals.revenue)} across{" "}
+              {count(coverage.totals.orders)} orders. You can put{" "}
+              <strong>{pct(cov.identifiedRevenueShare, 0)}</strong> of that revenue against a person you could
+              recognise again — where a loyalty CRM, which only sees a scan, would show{" "}
+              <strong>{pct(cov.scannedRevenueShare, 1)}</strong>.{" "}
+              {memberLift > 0.15 ? (
+                <>
+                  Your {count(cs.member.people)} members are worth <strong>{ratio(memberLift)}</strong> a
+                  recognised non-member, and the reason is frequency rather than basket: they return{" "}
+                  {cs.member.avgVisits.toFixed(1)} times against {cs.nonMember.avgVisits.toFixed(1)} while
+                  spending {delta(cs.lifts.spendPerVisit)} per visit.
+                </>
+              ) : (
+                <>
+                  Your {count(cs.member.people)} members return {delta(cs.lifts.visits)} more often than a
+                  recognised non-member, but each visit is a smaller party, so over the window a member is worth{" "}
+                  <strong>{delta(memberLift)}</strong> — the frequency is real and it is being cancelled by
+                  party size.
+                </>
+              )}{" "}
+              <Link href={`/${org.slug}/members`} className="font-medium text-accent hover:underline">
+                The evidence, and what it will not claim →
+              </Link>
+            </p>
+          </Card>
 
-          {/* 3 — the action block */}
-          <div className="grid gap-4 lg:grid-cols-3">
-            {lists.map((list) => (
-              <Card key={list.key} className="flex h-full flex-col">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-[15px] font-semibold text-ink">{list.title}</h3>
-                  <span className="tnum shrink-0 text-[19px] font-semibold text-ink">
-                    {count(list.total)}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{list.why}</p>
+          {/* ── where everybody stands ────────────────────────────────────── */}
+          <Card
+            title="Where your members stand"
+            subtitle={`${count(standsTotal)} enrolled people, classified against their own visit cadence. Every row opens the people behind it.`}
+            padded={false}
+          >
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
+                  <th className="px-5 py-2.5 text-left font-medium">Segment</th>
+                  <th className="px-3 py-2.5 text-right font-medium">People</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Share</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Spend</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Per head</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Share of spend</th>
+                  <th className="px-5 py-2.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {stands.map((s) => (
+                  <tr key={s.segment} className="border-b border-line last:border-b-0 hover:bg-surface-hover">
+                    <th scope="row" className="px-5 py-2.5 text-left font-medium text-ink">
+                      {SEGMENT_LABEL[s.segment]}
+                    </th>
+                    <td className="tnum px-3 py-2.5 text-right text-ink">{count(s.guests)}</td>
+                    <td className="tnum px-3 py-2.5 text-right text-ink-secondary">
+                      {pct(s.guests / standsTotal, 1)}
+                    </td>
+                    <td className="tnum px-3 py-2.5 text-right text-ink-secondary">{money(s.spend)}</td>
+                    <td className="tnum px-3 py-2.5 text-right font-medium text-ink">
+                      {money(s.spend / Math.max(s.guests, 1))}
+                    </td>
+                    <td className="tnum px-3 py-2.5 text-right text-ink-secondary">
+                      {pct(s.spend / Math.max(standsSpend, 1), 1)}
+                    </td>
+                    <td className="px-5 py-2.5 text-right">
+                      <Link
+                        href={`/${org.slug}/guests?segment=${s.segment}`}
+                        className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline"
+                      >
+                        Open <IconArrow className="h-3 w-3" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="border-t border-line px-5 py-3 text-[12px] text-ink-muted">
+              Only enrolled people are classified. A card cannot be told apart from a card that was reissued, so
+              a lifecycle verdict on one would be a guess — the field is empty at source, not hidden here.
+            </p>
+          </Card>
 
-                <ul className="mt-3 space-y-1.5">
-                  {list.guests.slice(0, 3).map((g) => (
-                    <li key={g.id} className="flex items-center justify-between gap-3 text-[13px]">
-                      <span className="flex items-center gap-2 truncate">
-                        <Pill tone={g.tier === "member" ? "member" : "card"}>
-                          {g.tier === "member" ? "M" : "C"}
-                        </Pill>
-                        <span className="truncate font-medium text-ink">{g.name}</span>
-                      </span>
-                      <span className="tnum shrink-0 text-[12px] text-ink-muted">
-                        {habit(g, org)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="mt-auto pt-4">
-                  <Link
-                    href={`/${org.slug}/brief#${list.key}`}
-                    className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-accent hover:underline"
-                  >
-                    {list.action}
-                    <IconArrow className="h-4 w-4" />
-                  </Link>
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          {/* 4 — where growth came from */}
-          {dec ? (
-            <Card
-              title="Where your growth came from"
-              subtitle={`${monthLabel(dec.from.month, true)} to ${monthLabel(dec.to.month, true)}, symmetric Shapley allocation`}
-              right={
+          {/* ── flow ──────────────────────────────────────────────────────── */}
+          <Card
+            title="Members gained and lost"
+            subtitle={`Enrolled members only — ${pct(cov.memberRevenueShare, 1)} of revenue. New and reactivated above the line, lapsed below it.`}
+            right={
+              latest && (
                 <div className="text-right">
-                  <div className="tnum text-[19px] font-semibold" style={{ color: dec.revenueChange >= 0 ? "var(--good)" : "var(--critical)" }}>
-                    {dec.revenueChange >= 0 ? "+" : "−"}{money(Math.abs(dec.revenueChange))}
+                  <div className="tnum text-[15px] font-semibold text-ink">
+                    {(() => {
+                      const net = derivedFromDisplayed(latest.gained, latest.lost, (a, b) => a - b);
+                      return `${net >= 0 ? "+" : "−"}${count(Math.abs(net))}`;
+                    })()}
                   </div>
-                  <div className="text-[12px] text-ink-muted">change in revenue</div>
+                  <div className="text-[12px] text-ink-muted">
+                    net in {monthLabel(latest.month)} · {count(tileCount(latest.gained))} gained,{" "}
+                    {count(tileCount(latest.lost))} lost
+                  </div>
                 </div>
+              )
+            }
+          >
+            {flow.length >= 2 ? (
+              <GuestFlowChart flow={flow} />
+            ) : (
+              <EmptyState
+                title="Not enough months to draw a flow"
+                body={`The honest window is ${w.months} complete months of trustworthy card data. A flow chart needs at least two.`}
+              />
+            )}
+            <p className="mt-4 max-w-[90ch] text-[12px] text-ink-muted">
+              A lapse is dated: a member lapses on the day their gap since the last visit crosses{" "}
+              {org.calibration.lapsedDays} days
+              {org.calibration.lapsedEstimable ? "" : ", the canonical threshold, because this window is too short to estimate one"}
+              . Gained and lost are counted on the same threshold, so the net is a statement with a date on it
+              rather than a snapshot artefact.
+            </p>
+          </Card>
+
+          {/* ── growth ────────────────────────────────────────────────────── */}
+          {growth ? (
+            <Card
+              title="Where the change came from"
+              subtitle={`${monthLabel(growth.from.month)} to ${monthLabel(growth.to.month)}, across identified guests. Symmetric Shapley, so the parts sum to the whole exactly and no residual bar is needed.`}
+              right={
+                <span
+                  className="tnum text-[15px] font-semibold"
+                  style={{ color: growth.revenueChange >= 0 ? "var(--good)" : "var(--loss)" }}
+                >
+                  {growth.revenueChange >= 0 ? "+" : "−"}{money(Math.abs(growth.revenueChange))}
+                </span>
               }
             >
-              <GrowthWaterfall d={dec} />
-              <div className="mt-4 border-t border-line pt-4">
-                <RealVsPriceBar d={dec} />
+              <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+                <GrowthWaterfall d={growth} />
+                <div>
+                  <RealVsPriceBar d={growth} />
+                  <table className="mt-4 w-full text-[13px]">
+                    <tbody>
+                      {growth.terms.map((t) => (
+                        <tr key={t.key} className="border-b border-line last:border-b-0">
+                          <th scope="row" className="py-2 text-left font-medium text-ink">
+                            {t.label}
+                            <span className="tnum ml-2 block text-[12px] font-normal text-ink-muted">
+                              {t.operand}
+                            </span>
+                          </th>
+                          <td
+                            className="tnum py-2 text-right font-medium"
+                            style={{ color: t.value >= 0 ? "var(--good)" : "var(--loss)" }}
+                          >
+                            {t.value >= 0 ? "+" : "−"}{money(Math.abs(t.value))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-3 text-[12px] leading-relaxed text-ink-muted">
+                    Each label states the direction the factor actually moved, not the direction its name
+                    implies. Price per item moved{" "}
+                    {money(growth.to.pricePerItem - growth.from.pricePerItem)} — the bar beside it is that
+                    movement&apos;s contribution to revenue, which is a different quantity and a much larger one.
+                  </p>
+                </div>
               </div>
-              <p className="mt-3 text-[14px] leading-relaxed text-ink">
-                {dec.real >= 0 && dec.price >= 0 && (
-                  <>
-                    <strong>{money(Math.abs(dec.real))}</strong> of the change came from more trade and{" "}
-                    <strong>{money(Math.abs(dec.price))}</strong> from charging more per item.
-                  </>
-                )}
-                {dec.real < 0 && dec.price > 0 && (
-                  <>
-                    Prices added <strong>{money(dec.price)}</strong>, but trade fell by{" "}
-                    <strong>{money(Math.abs(dec.real))}</strong>. You put prices up and it cost you volume.
-                  </>
-                )}
-                {dec.real > 0 && dec.price < 0 && (
-                  <>
-                    Trade added <strong>{money(dec.real)}</strong> while average price fell by{" "}
-                    <strong>{money(Math.abs(dec.price))}</strong>. Growth is real, not repricing.
-                  </>
-                )}
-                {dec.real < 0 && dec.price < 0 && (
-                  <>Both trade and price fell. <strong>{money(Math.abs(dec.real))}</strong> of the loss is fewer guests and less frequency.</>
-                )}
-              </p>
             </Card>
           ) : (
-            <Card title="Where your growth came from">
+            <Card title="Where the change came from">
               <EmptyState
-                title="Not enough complete months yet"
-                body="The decomposition needs two complete months of trade to compare."
+                title="Not enough complete months to decompose"
+                body="A decomposition needs two complete months either side of the comparison. The honest window does not yet contain them."
               />
             </Card>
           )}
-
-          {/* 5 — the 24-month trend */}
-          <Card
-            title={`Gained and lost, ${flow.length} months`}
-            subtitle="Enrolled members. Gains above the line, losses below."
-            right={
-              <Link href={`/${org.slug}/coming-back`} className="text-[13px] font-medium text-accent hover:underline">
-                Coming back →
-              </Link>
-            }
-          >
-            {flow.length ? (
-              <>
-                <GuestFlowChart flow={flow} />
-                <p className="mt-3 border-t border-line pt-3 text-[13px] leading-relaxed text-ink-secondary">
-                  Lapse is dated: a guest lapses on the day their gap crosses{" "}
-                  {org.calibration.lapsedDays} days, calibrated from this business&rsquo;s own
-                  inter-visit distribution rather than a fixed 90-day rule.
-                  {!cov.cardTierComplete && (
-                    <>
-                      {" "}Card-identified guests are excluded from this chart — see{" "}
-                      <Link href={`/${org.slug}/coverage`} className="font-medium text-accent hover:underline">
-                        Coverage
-                      </Link>
-                      .
-                    </>
-                  )}
-                </p>
-              </>
-            ) : (
-              <EmptyState title="No lifecycle history" body="No complete months of member trade in this window." />
-            )}
-          </Card>
         </div>
       </Page>
     </>

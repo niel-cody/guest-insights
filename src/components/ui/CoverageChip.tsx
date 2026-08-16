@@ -14,7 +14,7 @@ import { IconChevron } from "../shell/Icons";
  */
 export function CoverageChip({ state }: { state: CoverageState }) {
   const [open, setOpen] = useState(false);
-  const complete = state.cardTierComplete;
+  const complete = state.gaps.length === 0;
 
   return (
     <div className="relative">
@@ -49,20 +49,18 @@ export function CoverageChip({ state }: { state: CoverageState }) {
 
           <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[12px]">
             <Row k="Measured on">Revenue. Transaction-grain share is {pct(state.identifiedOrderShare, 0)} of orders.</Row>
-            {state.currentWindow && (
-              <Row k="Card window">
-                {monthLabel(state.currentWindow.start)} – {monthLabel(state.currentWindow.end)}
-                {" "}({state.currentWindow.months} {state.currentWindow.months === 1 ? "month" : "months"})
-              </Row>
-            )}
+            <Row k="Window">
+              {monthLabel(state.window.start)} – {monthLabel(state.window.end)}
+              {" "}({state.window.months} complete {state.window.months === 1 ? "month" : "months"})
+            </Row>
             <Row k="As of">{monthLabel(state.asOf)}</Row>
           </dl>
 
           {!complete && (
             <div className="mt-3 rounded-lg border border-line bg-surface-sunken p-3">
               <p className="text-[12px] font-medium text-ink">
-                Card recognition is not available for {state.gaps.length} of the last{" "}
-                {state.gaps.length + state.cardMonths.length} months.
+                Card recognition is not usable in {state.gaps.length} of the{" "}
+                {state.monthsTested} months tested.
               </p>
               <ul className="mt-1.5 max-h-32 space-y-0.5 overflow-y-auto text-[12px] text-ink-secondary">
                 {state.gaps.map((g) => (
@@ -73,8 +71,8 @@ export function CoverageChip({ state }: { state: CoverageState }) {
                 ))}
               </ul>
               <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">
-                Those months are charted as unattributed rather than as a fall in
-                customers. Nothing on this screen treats them as a decline.
+                Those months are outside the analysis window entirely — not charted as a
+                fall in customers, and not averaged into any figure on this screen.
               </p>
             </div>
           )}
