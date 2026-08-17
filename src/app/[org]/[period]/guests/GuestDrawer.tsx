@@ -159,10 +159,21 @@ function WhoTheyAre({ g, org, items }: { g: Guest; org: Org; items: Items | null
   ];
 
   const rest: [string, React.ReactNode][] = [
-    ["Orders", String(g.orders)],
+    // The visit-to-order ratio was undefined anywhere in the product, and a 3×
+    // gap on the flagship record reads as an error rather than as two different
+    // units. It is defined here, where both numbers sit.
+    [
+      "Orders",
+      <>
+        {count(g.orders)}
+        <span className="block text-[11px] font-normal text-ink-muted">
+          across {count(g.visits)} {org.labels.visits} — a visit is a day at a venue, an order is a
+          transaction, so {(g.orders / Math.max(g.visits, 1)).toFixed(1)} orders a visit
+        </span>
+      </>,
+    ],
     ["Items", String(g.items)],
     ["Average per visit", money(g.spend / Math.max(g.visits, 1))],
-    ["Covers recorded", g.covers > 0 ? String(g.covers) : "none — counter service records no party size"],
     [
       "First seen",
       <>
@@ -197,16 +208,30 @@ function WhoTheyAre({ g, org, items }: { g: Guest; org: Org; items: Items | null
   return (
     <>
       {/* The error bar, above the numbers it qualifies. */}
+      {/* ── The scan line, rewritten to say one thing ────────────────────────
+          It read "You saw their card on 74 of their 347 orders" while the detail
+          row below labelled the same 74 as "Scanned". **Those are different
+          events**, and the sentence named the wrong one: 74 is the count of
+          orders they *scanned* on, not the count we saw their card on — we saw
+          the card on all 347, which is exactly how this build knows about the
+          other 273. Written the old way the number contradicts the visit count
+          directly beneath it, because visits are derived from card sightings and
+          cannot exceed them.
+
+          The second paragraph then said the opposite of the first. One sentence,
+          one event, and the floor stated as a floor. */}
       {g.tier === "member" && g.orders > 0 && g.scannedOrders < g.orders && (
         <div className="rounded-lg border px-4 py-3" style={{ borderColor: "var(--warning)" }}>
           <p className="text-[13px] leading-relaxed text-ink">
-            You saw their card on <strong>{count(g.scannedOrders)} of their {count(g.orders)} orders</strong>{" "}
-            ({pct(g.scannedOrders / g.orders, 0)}). Their true spend is likely higher than{" "}
-            <strong>{money(g.spend)}</strong>.
+            They scanned on <strong>{count(g.scannedOrders)} of {count(g.orders)} orders</strong> (
+            {pct(g.scannedOrders / g.orders, 0)}). You still see the other{" "}
+            {count(g.orders - g.scannedOrders)} through their card, so{" "}
+            <strong>{money(g.spend)} is a floor</strong> — what is missing is only what they paid for
+            another way.
           </p>
           <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">
-            Every figure below is measured through the payment card, so the visits they did not scan are
-            already counted. What is missing is any order they paid for another way.
+            A loyalty CRM would show you {pct(g.scannedOrders / g.orders, 0)} of this person. That gap is
+            the whole reason this report is built on the card rather than on the scan.
           </p>
         </div>
       )}
@@ -229,8 +254,11 @@ function WhoTheyAre({ g, org, items }: { g: Guest; org: Org; items: Items | null
       </dl>
 
       <details open={more} onToggle={(e) => setMore((e.target as HTMLDetailsElement).open)}>
+        {/* Counted, not asserted. It said "Eleven" and listed ten, which is the
+            kind of defect that makes a reader check everything else on the
+            screen — and they should. */}
         <summary className="cursor-pointer list-none text-[13px] font-medium text-accent marker:hidden hover:underline">
-          {more ? "Fewer details" : `Eleven more details`}
+          {more ? "Fewer details" : `${rest.length} more details`}
         </summary>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-[13px]">
           {rest.map(([k, v]) => (
@@ -401,6 +429,9 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
   const rhythm = rhythmShift(history);
   const venuesUsed = [...new Set(history.map((h) => h[3]).filter((i) => i >= 0))];
   const homeShare = history.filter((h) => org.venues[h[3]]?.id === g.homeStoreId).length / history.length;
+  const venueSplit = venuesUsed
+    .map((index) => ({ index, visits: history.filter((h) => h[3] === index).length }))
+    .sort((a, b) => b.visits - a.visits);
 
   return (
     <>
@@ -450,45 +481,50 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
         compact
       />
 
-      {/* The venue ribbon, on the same time axis. For somebody using six of
-          nineteen sites the whole question is whether they are a commuter with a
-          home store and a work store, a genuine rotator, or somebody who moved
-          house in June — and a flat list makes you hold sixty venue names in
-          your head to find out. */}
+      {/* ── The venue mix, as text ───────────────────────────────────────────
+          This was a thirteen-column strip of coloured blocks with no axis, no
+          labels and no numbers, sitting directly beneath a labelled and readable
+          grid. It could be looked at and not read: to answer "is this person a
+          commuter with a home store and a work store, a rotator, or somebody who
+          moved house in June" you had to decode five colours across thirteen
+          unlabelled columns, and the answer was one sentence all along.
+
+          So it is one sentence. The grid above already carries the time axis,
+          and this carries the venue split, which is a ranking rather than a
+          shape — and a ranking of five things is a list. */}
       {venuesUsed.length > 1 && (
         <div>
           <h3 className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-            Which venue, week by week
+            Where they go
           </h3>
-          <div className="mt-1.5 flex gap-[3px]">
-            {weeks.map((wk) => {
-              const inWeek = [...venueByDay.entries()].filter(([k]) => k.endsWith(`|${wk.key}`));
-              return (
-                <div key={wk.key} className="flex flex-1 flex-col gap-[2px]">
-                  {inWeek.length === 0 ? (
-                    <div className="h-3 rounded-[2px] border border-dashed border-line" />
-                  ) : (
-                    [...new Set(inWeek.map(([, v]) => v))].map((v) => (
+          <table className="mt-1.5 w-full text-[12px]">
+            <tbody>
+              {venueSplit.map((v) => (
+                <tr key={v.index} className="border-b border-line last:border-b-0">
+                  <th scope="row" className="w-[140px] py-1.5 pr-3 text-left font-normal text-ink">
+                    {org.venues[v.index]?.name ?? "—"}
+                    {org.venues[v.index]?.id === g.homeStoreId && (
+                      <span className="ml-1.5 text-[10px] text-ink-muted">home</span>
+                    )}
+                  </th>
+                  <td className="py-1.5">
+                    <div className="h-2 w-full rounded-sm bg-surface-sunken">
                       <div
-                        key={v}
-                        className="h-3 rounded-[2px]"
-                        style={{ background: venueColour(v) }}
-                        aria-label={`${wk.label}: ${org.venues[v]?.name}`}
+                        className="h-full rounded-sm"
+                        style={{
+                          width: `${(v.visits / Math.max(history.length, 1)) * 100}%`,
+                          background: g.tier === "member" ? "var(--tier-member)" : "var(--tier-card)",
+                        }}
                       />
-                    ))
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-            {venuesUsed.map((v) => (
-              <li key={v} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
-                <span className="h-2.5 w-2.5 rounded-[2px]" style={{ background: venueColour(v) }} />
-                {org.venues[v]?.name ?? "—"}
-              </li>
-            ))}
-          </ul>
+                    </div>
+                  </td>
+                  <td className="tnum w-[96px] py-1.5 pl-3 text-right whitespace-nowrap text-ink-secondary">
+                    {count(v.visits)} · {pct(v.visits / Math.max(history.length, 1), 0)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

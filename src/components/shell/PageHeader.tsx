@@ -21,7 +21,7 @@ import type { Org } from "@/lib/types";
  * open on click rather than on hover (§8 rule 7 — hover does not exist on touch).
  */
 export function PageHeader({
-  org, orgs, title, coverage, filters, actions, periods, period, checks,
+  org, orgs, title, coverage, filters, actions, periods, period, checks, coverageScope = "card",
 }: {
   org: Org;
   orgs: { slug: string; name: string }[];
@@ -33,6 +33,12 @@ export function PageHeader({
   periods: Periods;
   period: Period;
   checks?: Check[];
+  /**
+   * What the recognition chip is describing on this page. Behaviour carries
+   * both tiers, so its chip must say so rather than assert the card-tier
+   * figure over member-tier content.
+   */
+  coverageScope?: "card" | "mixed";
 }) {
   return (
     <header className="shrink-0 border-b border-line bg-surface">
@@ -41,10 +47,20 @@ export function PageHeader({
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
           <span className="text-[13px] text-ink-muted">Customers</span>
         </div>
+        {/* ── The recognition chip is scoped to what it describes ─────────────
+            It asserted "Recognising 82.4% of revenue" persistently, on every
+            page, above every block. That is a card-tier figure, and on Behaviour
+            it sat above a member-tier section covering roughly a fifth of
+            orders — a chip claiming 82.4% over a 19% population is not a
+            caveat problem, it is wrong.
+
+            It now says which tier it is describing. On a page that carries both,
+            it says so, and the wall inside the page carries the member-tier
+            figure where the member-tier content starts. */}
         <div className="flex items-center gap-2">
           {actions}
           {checks && <CheckBadge href="#checks" checks={checks} />}
-          {coverage && <CoverageChip state={coverage} />}
+          {coverage && <CoverageChip state={coverage} scope={coverageScope} />}
         </div>
       </div>
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
 import { IconArrow } from "@/components/shell/Icons";
-import { DayMatrix, type MatrixCell } from "@/components/charts/DayMatrix";
+import { TradingWeek } from "@/components/charts/TradingWeek";
 import { CohortLens } from "@/components/charts/CohortLens";
 import { getPeriods, getAllOrgs, getSnapshot } from "@/lib/data";
 import {
@@ -12,12 +12,8 @@ import type { DaypartRow } from "@/lib/types";
 
 export const dynamic = "force-static";
 
-/** The three shadings the one grid supports. Order matters: density first. */
-const VIEWS = [
-  { key: "orders", label: "Order density", hue: "var(--accent)" },
-  { key: "revenue", label: "Revenue density", hue: "var(--tier-card)" },
-  { key: "member", label: "Member share", hue: "var(--tier-member)" },
-] as const;
+/** Named per page: the tab and every screenshot used to read "Guests". */
+export const metadata = { title: "Behaviour" };
 
 /**
  * Behaviour. §6. When and where they trade.
@@ -91,6 +87,9 @@ export default async function BehaviourPage({
         period={current}
         title="Behaviour"
         coverage={cov}
+        // This page carries both tiers, so the chip must not assert the
+        // card-tier figure over the member-tier section below the wall.
+        coverageScope="mixed"
       />
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
@@ -99,53 +98,45 @@ export default async function BehaviourPage({
             title="What kind of business this trades as"
             subtitle={`Derived from ${count(totalOrders)} orders, ${win}. Not declared — read off the density distribution.`}
           >
-            <div className="grid gap-4 md:grid-cols-3">
-              <Tile
-                label="Trading identity"
-                value={identity.archetype}
-                accent="var(--accent)"
-                footnote={
-                  <>
-                    {identity.reason}
-                    <span className="mt-1 block text-ink-muted">
-                      Card tier · {win} · archetype set from the Trade Density Framework
-                    </span>
-                  </>
-                }
-              />
-              <Tile
-                label="Confidence"
-                value={pct(identity.confidence, 0)}
-                accent={identity.confidence > 0.6 ? "var(--good)" : "var(--warning)"}
-                footnote={
-                  <>
-                    {identity.primary.length} primary period{identity.primary.length === 1 ? "" : "s"} of{" "}
-                    {identity.tradingPeriods} that carry trade
-                    {identity.emptyPeriods.length > 0 && (
-                      <span className="mt-1 block text-ink-muted">
-                        Measured against the periods this business actually trades in. Against all{" "}
-                        {identity.emptyPeriods.length + identity.tradingPeriods} it would read{" "}
-                        {pct(identity.confidenceAgainstAllPeriods, 0)} — flattering, because it benchmarks a
-                        café against a day it could never trade.
-                      </span>
-                    )}
-                  </>
-                }
-              />
-              <Tile
-                label="Weekend share of trade"
-                value={pct(dayparts.weekendBaseline, 1)}
-                accent="var(--ink-muted)"
-                footnote={
-                  <>
-                    baseline for reading the grid below
-                    <span className="mt-1 block text-ink-muted">
-                      Two of seven days is 28.6%. Far above it is a weekend-shaped business.
-                    </span>
-                  </>
-                }
-              />
-            </div>
+            {/* ── Three cards became one statement ────────────────────────────
+                **The archetype label has gone.** "High-Throughput Breakfast" was
+                an unprovenanced framework name cited as authority on the face of
+                a customer report, computed at organisation level across 19
+                venues in three states that this build's own outlier detection
+                says are not alike. It is useless at four mixed venues, useless
+                at 620, and tautological at one. The fact underneath it is true
+                and worth stating, so the fact stays and the label goes.
+
+                **Confidence has gone.** It was undefined and self-contradicting:
+                two primary periods of five is 40%, not 70%, and the note saying
+                it would read higher against all eight was describing a
+                concentration measure that *rises* when you add empty periods,
+                which is perverse. Neither denominator yields either number.
+
+                **Weekend share has gone from the hero row.** 28.0% against a
+                28.6% calendar baseline is a null result, and presenting
+                no-difference at card size teaches an owner to distrust the cards
+                beside it. It survives as the baseline sentence under the grid,
+                which is where it is actually used. */}
+            <p className="max-w-[95ch] text-[15px] leading-relaxed text-ink">
+              <strong>
+                {identity.primary.map((d) => d.label).join(" and ")} together carry{" "}
+                {pct(
+                  identity.primary.reduce((a, d) => a + d.orders, 0) / Math.max(totalOrders, 1),
+                  0,
+                )}{" "}
+                of all orders
+              </strong>{" "}
+              — {count(totalOrders)} orders across {identity.tradingPeriods} periods this business actually
+              trades in, {win}. Weekend trade is {pct(dayparts.weekendBaseline, 1)} against a{" "}
+              {pct(2 / 7, 1)} calendar baseline, so the week is flat: this is a weekday-shaped business,
+              not a weekend-shaped one.
+            </p>
+            <p className="mt-2 max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
+              Stated as a fact rather than as an archetype. A single label for {org.venues.length} venues
+              across the states this estate trades in would describe none of them well, and this report&apos;s
+              own outlier detection says they are not alike.
+            </p>
           </Card>
 
           {/* ── §6.2 the heatmap, above the table ────────────────────────── */}
@@ -154,65 +145,15 @@ export default async function BehaviourPage({
             subtitle="Day of week against daypart, both in venue-local time. Three shadings of one grid."
           >
             {dayGrid ? (
-              <div className="flex flex-col gap-8">
-                {VIEWS.map((v) => {
-                  const cells = new Map<string, MatrixCell>();
-                  let max = 0;
-                  for (const c of dayGrid.cells) {
-                    const value =
-                      v.key === "orders" ? c.orders
-                        : v.key === "revenue" ? c.revenue
-                          : c.orders ? c.memberOrders / c.orders : 0;
-                    max = Math.max(max, value);
-                    cells.set(`${c.dow}|${c.daypart}`, {
-                      value,
-                      label:
-                        v.key === "member"
-                          ? `${pct(value, 1)} member share · ${count(c.orders)} orders`
-                          : v.key === "revenue"
-                            ? `${money(c.revenue)} · ${count(c.orders)} orders`
-                            : `${count(c.orders)} orders · ${money(c.revenue)}`,
-                    });
-                  }
-                  return (
-                    <div key={v.key}>
-                      <h3 className="mb-2 text-[13px] font-semibold text-ink">{v.label}</h3>
-                      <DayMatrix
-                        // All eight periods, in clock order. The three the
-                        // business does not trade in stay as columns here even
-                        // though they fold to one line in the table below: a
-                        // calendar with days missing is not a calendar, and a
-                        // column of dashed no-trade cells says something real —
-                        // that this café closes before dinner. Ink stays
-                        // proportional because a no-trade cell is drawn as an
-                        // outline rather than as a filled one.
-                        columns={org.dayparts.map((d) => ({
-                          key: d.key,
-                          label: d.label,
-                          sublabel: `${String(d.from).padStart(2, "0")}–${String(d.to % 24).padStart(2, "0")}`,
-                        }))}
-                        cells={cells}
-                        max={max}
-                        hue={v.hue}
-                        population={
-                          v.key === "member"
-                            ? `Member share of orders · estate average ${pct(memberShareOverall, 1)}`
-                            : `${count(totalOrders)} orders · ${money(totalRevenue)}`
-                        }
-                        window={`${win} · venue-local time`}
-                      />
-                    </div>
-                  );
-                })}
-                <p className="max-w-[100ch] text-[12px] leading-relaxed text-ink-muted">
-                  <strong className="text-ink-secondary">Both axes are venue-local.</strong> Day of week and
-                  daypart are derived from the localised trading timestamp, not from UTC — a UTC derivation
-                  moves Australian early-morning trade straight out of the column carrying{" "}
-                  {count(dayparts.periods.find((d) => d.key === "breakfast")?.orders ?? 0)} orders, and does
-                  it silently. Dayparts run in clock order and are never sorted by value: this is a calendar,
-                  not a ranking. The precision layer is the table below, which <em>is</em> sorted by density.
-                </p>
-              </div>
+              <TradingWeek
+                dayGrid={dayGrid}
+                dayparts={org.dayparts}
+                totalOrders={totalOrders}
+                totalRevenue={totalRevenue}
+                memberShareOverall={memberShareOverall}
+                windowLabel={win}
+                breakfastOrders={dayparts.periods.find((d) => d.key === "breakfast")?.orders ?? 0}
+              />
             ) : (
               <EmptyState
                 title="No day grid in this snapshot"
@@ -544,6 +485,25 @@ export default async function BehaviourPage({
                 {cohorts?.grading.thresholdDays ?? 90}-day threshold clears the {cohorts?.grading.requiredDays ?? 180}{" "}
                 it needs; the card tier&apos;s {snap.org.window.days} does not.
               </p>
+              {/* ── The two member counts, reconciled where they collide ──────
+                  Overview says 4,966 members. The triangle below counts many
+                  more. Both are right and they are different questions: one is
+                  members seen in the 92-day card window, the other is everybody
+                  who has ever scanned across 21 months. A reader who meets the
+                  second without the first has been handed a 2.3× discrepancy
+                  under a banner telling them not to combine figures across the
+                  line — which is exactly the moment they will try. */}
+              {cohorts && (
+                <p className="mt-2 max-w-[100ch] rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+                  <strong className="text-ink">Why there are more members below than above.</strong> The
+                  Overview counts {count(snap.members.crossSection.member.people)} enrolled people{" "}
+                  <em>seen in the {snap.org.window.days}-day card window</em>. The cohorts below count{" "}
+                  {count(cohorts.cohorts.reduce((a, c) => a + c.members, 0))} people who have{" "}
+                  <em>ever scanned</em> across {count(cohorts.grading.days)} days, including everybody who
+                  stopped coming before this window opened. Neither is wrong and neither is a subset you
+                  can subtract from the other — they answer different questions on different clocks.
+                </p>
+              )}
             </header>
             <div className="p-5">
               {cohorts ? (

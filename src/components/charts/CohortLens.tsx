@@ -204,12 +204,15 @@ export function CohortLens({ cohorts }: { cohorts: Cohorts }) {
       <GapDistribution cohorts={cohorts} />
 
       {/* ── rule 3: the trend that is not published ─────────────────────── */}
+      {/* Stated, not struck. Same reason as the refused value panel: a
+          strikethrough is a deletion mark, and it makes a reader wonder what the
+          sentence said instead of reading why there isn't one. */}
       <div className="rounded-lg border border-dashed px-4 py-3.5" style={{ borderColor: "var(--warning)" }}>
-        <h3 className="text-[14px] font-semibold text-ink-muted line-through decoration-2">
-          Cohort quality is falling
+        <h3 className="text-[14px] font-semibold text-ink">
+          What we cannot yet tell you: whether cohort quality is falling
         </h3>
         <p className="mt-1.5 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
-          <strong className="text-ink">Not published.</strong> Six-month survival does fall across the run.
+          Six-month survival does fall across the run.
           So does the meaning of the word &quot;member&quot;: scan coverage rose from{" "}
           {pct(cohorts.coverage.find((c) => c.month >= cohorts.window.start)?.coverage ?? 0, 1)} to{" "}
           {pct(cohorts.coverage.at(-1)?.coverage ?? 0, 1)} of orders over the same period, so later cohorts

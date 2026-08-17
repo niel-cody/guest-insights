@@ -32,10 +32,14 @@ const RAIL = [
 /**
  * The Customers section, whole. Five items, and the order is deliberate.
  *
- * **Overview, then the existing loyalty pair, then the two new ones** — group
- * level down to the individual. A reviewer clicking down this list is meant to
- * react to the shape of the section rather than to three reports floating on
- * their own, which is why the two production reports appear here at all.
+ * **The three built reports run first, group level down to the individual —
+ * Overview, Behaviour, Guests — then the two production placeholders.**
+ *
+ * They used to be interleaved, with the two untouched loyalty reports sitting
+ * between the Overview and the two pages that continue its argument. That
+ * interrupts the goal path twice: a reviewer clicking down the list hits two
+ * dead ends before reaching the surfaces the Overview is setting up. Placement
+ * is in scope even where the pages themselves are not.
  *
  * Two of the five are **placeholders**. Loyalty Spend and Loyalty Redemption
  * exist in production and are not being built, changed or fixed. They are here so
@@ -49,10 +53,10 @@ const RAIL = [
  */
 const CUSTOMERS = [
   { label: "Overview", href: "overview", placeholder: false },
-  { label: "Loyalty Spend", href: "loyalty-spend", placeholder: true },
-  { label: "Loyalty Redemption", href: "loyalty-redemption", placeholder: true },
   { label: "Behaviour", href: "behaviour", placeholder: false },
   { label: "Guests", href: "guests", placeholder: false },
+  { label: "Loyalty Spend", href: "loyalty-spend", placeholder: true },
+  { label: "Loyalty Redemption", href: "loyalty-redemption", placeholder: true },
 ] as const;
 
 const GROUPS: {

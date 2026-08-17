@@ -117,16 +117,37 @@ async function main() {
         html.indexOf("What this report can tell you") < html.indexOf("And what it cannot"));
     }
 
-    // ── §8 rule 3: a refusal is struck through, never blank ────────────────
+    // ── A refusal is stated with its reason, and never left blank ──────────
     //
-    // Matched on the *rendered figure* — an element whose whole text is the
-    // refusal — rather than on the phrase, which also appears in prose
-    // explaining why something is not published elsewhere.
-    for (const m of html.matchAll(/>(not published|Not published)</g)) {
-      const context = html.slice(Math.max(0, m.index - 260), m.index);
-      check("the refusal renders struck through rather than blank",
-        context.includes("line-through"),
-        `a refusal at offset ${m.index} carries no strike`);
+    // This used to assert a strikethrough. **Strikethrough is a deletion mark**
+    // — it reads as "this was here and we took it away", which makes a reader
+    // wonder what the number said rather than read why there isn't one. The
+    // rule it was enforcing is the one that matters and it is unchanged: a
+    // refusal must be *visible in place*, because its absence would change how
+    // the figures beside it read, and a blank reads as broken.
+    //
+    // So what is asserted now is the substance: wherever a figure is refused,
+    // a reason follows it within the same block. A "Not published" with nothing
+    // after it is the failure this catches.
+    //
+    // Matched on the rendered figure rather than on the phrase, which also
+    // appears in prose explaining why something is not published elsewhere.
+    for (const m of html.matchAll(/>Not published</g)) {
+      // The property, not the vocabulary: a paragraph of real prose follows.
+      // Keying on words like "because" fails on refusals that are correctly
+      // worded and simply phrase it differently, which is a test that punishes
+      // good writing.
+      // Tag-agnostic: the reason may be a paragraph in a value panel or a
+      // footnote span in a tile. What matters is that a reader meets real prose
+      // straight after the refusal, not which element carries it.
+      const after = html.slice(m.index, m.index + 1400).replace(/<[^>]+>/g, " ");
+      const words = after.replace(/^\s*Not published[.\s]*/i, "").trim().split(/\s+/);
+      check("a refused figure is followed by its reason",
+        words.length >= 20,
+        `a refusal at offset ${m.index} states no reason — ${words.length} words follow it`);
+      check("a refused figure is not struck through",
+        !html.slice(Math.max(0, m.index - 200), m.index + 200).includes("line-through"),
+        `a refusal at offset ${m.index} is struck through — say it, do not scar it`);
     }
 
     // ── §8 rule 7: no info icons ───────────────────────────────────────────

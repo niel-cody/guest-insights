@@ -365,8 +365,23 @@ export function GuestGrid({
             <strong className="text-ink-secondary">
               Every figure on Overview and Behaviour is computed on the whole population, never on this set.
             </strong>{" "}
-            Names are masked by default; in production the reveal is role-gated and audit-logged. Nothing
-            here exports, downloads, copies or sends.
+            {/* ── The masking claim, corrected to what is actually true ───────
+                This asserted that the reveal "is role-gated and audit-logged".
+                It is not. Masking in this build happens **in the browser**, which
+                means the unmasked values are already in the page payload —
+                anyone with dev tools, a saved HAR or a proxy has the full
+                working set, including the entire top of the value distribution,
+                whether or not they ever press the button.
+
+                The sentence is now future-tense, because a control described in
+                the present tense that does not exist is worse than no control:
+                it is the sentence a reviewer relies on when deciding whether
+                this screen is safe to show somebody. Moving masking to the
+                server is a blocker on any external showing, not a nice-to-have. */}
+            Names are masked in this view. <strong className="text-ink-secondary">The masking is applied
+            in the browser, so treat the underlying values as present in the page</strong> — the
+            role-gated, audit-logged reveal described in the spec is not built yet and is required before
+            this screen is shown outside Oolio. The buttons here do not export, download, copy or send.
           </p>
           {pages > 1 && (
             <div className="flex items-center gap-2">

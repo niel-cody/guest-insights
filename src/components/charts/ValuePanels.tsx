@@ -80,24 +80,27 @@ function Panel({ claim }: { claim: ValueClaim }) {
 
   return (
     <div className="bg-surface-raised px-4 py-3.5">
-      <h3
-        className={`text-[13px] font-semibold ${refused ? "text-ink-muted line-through decoration-2" : "text-ink"}`}
-      >
+      <h3 className={`text-[13px] font-semibold ${refused ? "text-ink-secondary" : "text-ink"}`}>
         {claim.question}
       </h3>
 
       {refused ? (
         <>
-          {/* §8 rule 3. Struck through, not blank — and the strike is on the
-              figures as well as the title, so it reads as withheld rather than
-              as missing. */}
-          <div className="mt-2 flex items-baseline gap-3">
-            <span className="text-[15px] font-semibold text-ink-muted line-through decoration-2">
-              not published
-            </span>
+          {/* ── The refusal is stated, not struck ────────────────────────────
+              This used to render struck through. **Strikethrough is a deletion
+              mark**: in every document a reader has ever seen it means "this was
+              here and we took it away", which invites them to wonder what the
+              number said rather than read why there isn't one. It is a scar
+              where a sentence belongs.
+
+              The refusal still has to be *visible in place* — its absence would
+              change how the other five panels read, and a blank reads as broken
+              (§8 rule 3). So the panel keeps its slot and says the thing in
+              words. Same content, no scar. */}
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-[15px] font-semibold text-ink-secondary">Not published</span>
           </div>
-          <div className="mt-2 h-[26px]" />
-          <p className="max-w-[46ch] text-[11px] leading-relaxed text-ink-secondary">
+          <p className="mt-2 max-w-[46ch] text-[11px] leading-relaxed text-ink-secondary">
             {claim.refusal}
           </p>
         </>
@@ -117,9 +120,21 @@ function Panel({ claim }: { claim: ValueClaim }) {
             </span>
           </div>
 
-          {/* The shared axis. The 1.0× reference sits at the same x in every
-              panel, which is the only reason six panels can be read as one
-              picture. */}
+          {/* ── The shared axis, and the label that has to sit on it ─────────
+              The 1.0× reference sits at the same x in every panel, which is the
+              only reason six panels read as one picture.
+
+              But the scale is load-bearing in a way that nearly cost the block
+              its argument. On a log axis spanning 0.5× to 6×, a panel at 0.93×
+              and a panel at 1.04× are **visually indistinguishable from the
+              reference line** — so the two panels that refute the headline are
+              precisely the two the scale erases, while 4.9× dominates the eye.
+              A reader scanning the six would take away "members are worth much
+              more" and miss that two of the six say otherwise.
+
+              Every bar therefore carries its own value label. The shared scale
+              keeps the ratios comparable; the label stops a near-null reading as
+              nothing at all. */}
           <div className="relative mt-2.5 h-[26px]">
             <div className="absolute inset-x-0 top-[11px] h-1 rounded-full bg-surface-sunken" />
             {r !== null && (
@@ -127,7 +142,7 @@ function Panel({ claim }: { claim: ValueClaim }) {
                 className="absolute top-[11px] h-1 rounded-full"
                 style={{
                   left: `${Math.min(ONE, position(r)) * 100}%`,
-                  width: `${Math.abs(position(r) - ONE) * 100}%`,
+                  width: `${Math.max(Math.abs(position(r) - ONE) * 100, 0.6)}%`,
                   background: up ? "var(--good)" : "var(--warning)",
                 }}
               />
@@ -142,6 +157,17 @@ function Panel({ claim }: { claim: ValueClaim }) {
             >
               1.0×
             </span>
+            {r !== null && (
+              <span
+                className="tnum absolute top-0 text-[10px] font-medium"
+                style={{
+                  left: `${Math.min(Math.max(position(r), 0.02), 0.86) * 100}%`,
+                  color: up ? "var(--good)" : "var(--warning)",
+                }}
+              >
+                {r.toFixed(2)}×
+              </span>
+            )}
           </div>
 
           <p className="mt-0.5 max-w-[46ch] text-[11px] leading-relaxed text-ink-muted">{claim.basis}</p>

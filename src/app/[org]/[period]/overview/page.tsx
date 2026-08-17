@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Tile } from "@/components/ui/Primitives";
 import { IconArrow } from "@/components/shell/Icons";
-import { SegmentScatter, SegmentTreemap } from "@/components/charts/SegmentCharts";
+import { SegmentGap } from "@/components/charts/SegmentCharts";
 import { SelectionCorrection, ValuePanels } from "@/components/charts/ValuePanels";
 import { TrustPanel } from "@/components/ui/TrustPanel";
 import { Disclosure } from "@/components/ui/Disclosure";
@@ -17,6 +17,24 @@ import {
 } from "@/lib/metrics";
 
 export const dynamic = "force-static";
+
+/** Named per page: the tab and every screenshot used to read "Guests". */
+export const metadata = { title: "Overview" };
+
+/**
+ * Take-up rates the opportunity band is re-scaled to on the face.
+ *
+ * The band is the full confidence interval applied to the full trade of every
+ * candidate, which arithmetically assumes **100% take-up** — every one of them
+ * enrols. No enrolment campaign has ever done that, and the first finance
+ * director to work it out in the meeting costs more credibility than stating it
+ * costs.
+ *
+ * These are illustrations, not a forecast. No take-up rate has been measured at
+ * this merchant, so none is assumed; the headline stays the ceiling and these
+ * show what the ceiling is a ceiling over.
+ */
+const TAKE_UP_ILLUSTRATION = [0.1, 0.2] as const;
 
 /**
  * Overview. §5.
@@ -128,8 +146,20 @@ export default async function OverviewPage({
             {/* The hard rule in §5.2, enforced rather than remembered: this tile
                 does not exist unless the correction below it does. */}
             {causal.causal ? (
+              /* ── "is associated with", not "is worth" ────────────────────
+                 The card was arguing with its own page: two scrolls down it
+                 says 97% of this is selection and that you may not use it to
+                 justify the programme. A screenshot of a KPI card travels
+                 without its caption, and this one ends up in a board deck.
+
+                 Leading with +11.1% instead was considered and rejected — a
+                 6.5×-wide interval reads to a finance director as "we do not
+                 know". Replacing the number with the trade at stake was also
+                 rejected: it swaps one caveat-free screenshot-able number for a
+                 larger one. Changing the verb is the smallest edit that stops
+                 the card asserting causation, and it survives the screenshot. */
               <Tile
-                label="A member is worth"
+                label="A member is associated with"
                 value={memberLift >= 1 ? ratio(memberLift) : delta(memberLift)}
                 accent="var(--tier-member)"
                 footnote={
@@ -137,7 +167,7 @@ export default async function OverviewPage({
                     {money(cs.member.spendPerPerson)} against {money(cs.nonMember.spendPerPerson)}
                     <span className="mt-1 block text-ink-muted">
                       Association, not effect. {pct(causal.selectionShare ?? 0, 0)} of this gap was already
-                      there — see below.
+                      there before anybody enrolled — see below.
                     </span>
                   </>
                 }
@@ -150,14 +180,24 @@ export default async function OverviewPage({
                 refused
                 footnote={
                   <span className="text-ink-muted">
-                    <strong className="text-ink-secondary">Not published.</strong> The observed gap is
-                    struck through rather than shown, because nothing in this window separates it from
-                    selection — the within-person estimate needs more people who enrolled mid-window than
-                    this merchant has. A gap that cannot be separated from selection is not a member value.
+                    The observed gap is shown quietly rather than as an answer, because nothing in this
+                    window separates it from selection — the within-person estimate needs more people who
+                    enrolled mid-window than this merchant has. A gap that cannot be separated from
+                    selection is not a measure of what a member is worth, and publishing it as one is how
+                    a loyalty programme gets justified by the behaviour of the people who were always
+                    going to join it.
                   </span>
                 }
               />
             )}
+            {/* The denominator was doing real damage unstated. This rate is
+                over the member orders the card bridge resolved (52,844), not
+                over every member order on the page (62,107) — the same numerator
+                against the latter reads 23.2%, and a reader had no way to know
+                which they were looking at. Both are now on the face.
+
+                "Fixable at the till" has gone. It is head office telling the
+                floor whose fault it is, on a card an area manager sees. */}
             <Tile
               label="Members not recognised"
               value={pct(opp.unscanned.share, 0)}
@@ -166,22 +206,65 @@ export default async function OverviewPage({
                 <>
                   {count(opp.unscanned.orders)} orders · {money(opp.unscanned.revenue)}
                   <span className="mt-1 block text-ink-muted">
-                    Known members&apos; orders with no scan · {win} · fixable at the till
+                    Of {count(opp.unscanned.orders + members.linkage.scannedOrders)} member orders the card
+                    bridge resolved · {pct(opp.unscanned.orders / Math.max(coverage.totals.memberOrders, 1), 1)}{" "}
+                    of all {count(coverage.totals.memberOrders)} member orders · {win}
                   </span>
                 </>
               }
             />
           </div>
 
-          {/* ── §5.3 one sentence ──────────────────────────────────────────── */}
+          {/* ── §5.3 one sentence, and how the four counts nest ──────────────
+              The sentence is the only place on the page carrying the order
+              count, which is the denominator of the recognition tile and the
+              base of the whole Behaviour page, and the only place making the
+              CRM comparison. It stays.
+
+              The nesting note is new. Four population figures appear on this
+              screen — 69,530, 24,906, 4,966 and 19,940 — and nothing told the
+              reader how they sit inside each other. It reads as four unrelated
+              counts, and a reader who cannot nest them cannot check any of
+              them. It also quotes the same rounded figure the tile does: the
+              sentence used to carry the exact 69,529 directly beneath a tile
+              reading 69,530, which is the rounding contract producing a
+              discrepancy in the reader's eye. */}
           <Card>
             <p className="max-w-[100ch] text-[15px] leading-relaxed text-ink">
               Over {win} you served {money(coverage.totals.revenue)} across {count(coverage.totals.orders)}{" "}
               orders, and can put <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> of that
-              revenue against {count(identifiedPeople)} people you could recognise again — where a loyalty
-              CRM, which only sees a scan, would show{" "}
+              revenue against {count(tileCount(identifiedPeople))} people you could recognise again — where
+              a loyalty CRM, which only sees a scan, would show{" "}
               <strong>{attributionPct(cov.scannedRevenueShare)}</strong>.
             </p>
+            <div className="mt-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
+              <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
+                How these four counts nest
+              </p>
+              <ul className="mt-2 flex flex-col gap-1 text-[13px] leading-relaxed text-ink-secondary">
+                <li>
+                  <strong className="tnum text-ink">{count(tileCount(identifiedPeople))}</strong> people
+                  identified at all — everyone seen on a card, however briefly.
+                </li>
+                <li className="pl-4">
+                  ↳ <strong className="tnum text-ink">{count(segments.population)}</strong> of them are
+                  classifiable: enrolled, or seen on a card more than once. A card seen once is a
+                  transaction, not yet a customer.
+                </li>
+                <li className="pl-8">
+                  ↳ <strong className="tnum text-ink">{count(cs.member.people)}</strong> of those have
+                  enrolled, and are the only people who carry a lifecycle verdict.
+                </li>
+                <li className="pl-8">
+                  ↳ <strong className="tnum text-ink">{count(opp.candidates.people)}</strong> of those have
+                  not, and are the enrolment opportunity below.
+                </li>
+              </ul>
+              <p className="mt-2 text-[12px] text-ink-muted">
+                Tiles round to the nearest ten; tables and the grid never round. The exact identified
+                population is {count(identifiedPeople)}.
+              </p>
+            </div>
           </Card>
 
           {/* ── §5.4 where your members stand ────────────────────────────────
@@ -193,7 +276,10 @@ export default async function OverviewPage({
             title="Where your members stand"
             subtitle={`${count(standsTotal)} enrolled people, classified against their own visit cadence. Every row opens the people behind it.`}
           >
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+            {/* Full width. The table was sharing the row with a scatter plotting
+                a different population, which is an instruction to read the two
+                as a pair. */}
+            <div className="flex flex-col gap-6">
               <div>
                 <table className="w-full text-[13px]">
                   <thead>
@@ -250,66 +336,61 @@ export default async function OverviewPage({
                   <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
                     Where the boundaries fall
                   </p>
-                  <dl className="mt-2 grid gap-x-5 gap-y-1.5 text-[12px] sm:grid-cols-2">
+                  {/* ── The rules are ordered, and the order is the point ─────
+                      These were published as six independent definitions and
+                      they are not independent — they are a first-match ladder,
+                      and two of them genuinely overlap. Somebody seen exactly
+                      once, a long time ago, satisfies both "Seen once" and
+                      "Lapsed"; the ladder puts them in Lapsed, and at Coffee
+                      Guru that is every one of the 36 people in it.
+
+                      Published as six unordered rules, that is a contradiction a
+                      reader can find and we cannot answer. Published as a
+                      numbered ladder it is a definition. Same classifier, same
+                      people — the omission was the order. */}
+                  <ol className="mt-2 flex flex-col gap-1.5 text-[12px]">
                     {[
-                      ["Seen once", "exactly one visit in the window"],
-                      ["New", "two visits — one gap is not a habit"],
-                      [
-                        "Regulars",
-                        `ten or more visits, last seen within ${org.calibration.lapsedDays} days`,
-                      ],
-                      ["Established", "three to nine visits, still inside their own usual gap"],
-                      ["Slipping", "more than twice their own usual gap since the last visit"],
-                      ["Lapsed", `no visit for ${org.calibration.lapsedDays} days`],
-                    ].map(([k, v]) => (
-                      <div key={k} className="flex gap-2">
-                        <dt className="shrink-0 font-medium text-ink">{k}</dt>
-                        <dd className="text-ink-secondary">{v}</dd>
-                      </div>
+                      ["Lapsed", `no visit for ${org.calibration.lapsedDays} days, whatever else is true of them`],
+                      ["Seen once", "exactly one visit, and it was recent enough not to be Lapsed"],
+                      ["New", "two visits — one gap is not yet a habit"],
+                      ["Slipping", "three or more visits, and more than twice their own usual gap since the last one"],
+                      ["Regulars", "ten or more visits, still inside their own usual gap"],
+                      ["Established", "everybody else with three or more visits"],
+                    ].map(([k, v], i) => (
+                      <li key={k} className="flex gap-2">
+                        <span className="tnum shrink-0 text-ink-muted">{i + 1}.</span>
+                        <span>
+                          <strong className="text-ink">{k}</strong>{" "}
+                          <span className="text-ink-secondary">— {v}</span>
+                        </span>
+                      </li>
                     ))}
-                  </dl>
+                  </ol>
                   <p className="mt-2.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-muted">
-                    An inferred verdict needs <strong>three visits</strong> minimum: with two you have
-                    exactly one gap, and a broken habit is not estimable from one observation. Slipping and
-                    Lapsed are measured against{" "}
-                    <strong>each guest&apos;s own cadence</strong>, not a rule applied to everybody. Only
-                    enrolled people are classified — a card cannot be told apart from a card that was
-                    reissued, so a lifecycle verdict on one would be a guess, and the field is empty at
-                    source rather than hidden here.
+                    <strong className="text-ink-secondary">Read top to bottom, first match wins.</strong>{" "}
+                    The rules overlap on purpose and the order settles it — at this merchant every one of
+                    the {count(stands.find((s) => s.segment === "lapsed")?.guests ?? 0)} Lapsed people has
+                    exactly one visit, so without the ordering they would be Seen once as well. An inferred
+                    verdict needs <strong>three visits</strong> minimum: with two you have exactly one gap,
+                    and a broken habit is not estimable from one observation. Slipping and Regulars are
+                    measured against <strong>each guest&apos;s own cadence</strong>, not a rule applied to
+                    everybody. Only enrolled people are classified — a card cannot be told apart from a card
+                    that was reissued, so a lifecycle verdict on one would be a guess, and the field is
+                    empty at source rather than hidden here.
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-5">
-                {scatter ? (
-                  <SegmentScatter scatter={scatter} windowLabel={win} />
-                ) : (
-                  <EmptyState
-                    title="No scatter in this snapshot"
-                    body="The per-person plot is extracted separately from the guest grid so it can draw the whole classifiable population. This snapshot predates it."
-                  />
-                )}
-
-                {/* The pairing is the point: a segment that is large in traffic
-                    and small in revenue is visible across two panels and
-                    invisible in either alone. Same colour per segment in both. */}
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <SegmentTreemap
-                    title="Who drives traffic?"
-                    items={stands.map((s) => ({ key: s.segment, label: s.label, value: s.visits }))}
-                    format={(v) => `${count(v)} visits`}
-                    population={`${count(standsVisits)} visits by enrolled people`}
-                    windowLabel={win}
-                  />
-                  <SegmentTreemap
-                    title="Who delivers revenue?"
-                    items={stands.map((s) => ({ key: s.segment, label: s.label, value: s.spend }))}
-                    format={(v) => money(v)}
-                    population={`${money(standsSpend)} from enrolled people`}
-                    windowLabel={win}
-                  />
-                </div>
-              </div>
+              <SegmentGap
+                rows={stands.map((s) => ({
+                  segment: s.segment,
+                  label: s.label,
+                  guests: s.guests,
+                  visits: s.visits,
+                  spend: s.spend,
+                }))}
+                windowLabel={win}
+              />
             </div>
           </Card>
 
@@ -366,13 +447,21 @@ export default async function OverviewPage({
                     </>
                   }
                 />
+                {/* "62% of non-member spend" was true only against *attributed*
+                    non-member spend. Against every non-member dollar the
+                    business took, including the trade no card could be resolved
+                    for, it is 48%. Both denominators are named, because a share
+                    without its denominator is the thing this build exists not
+                    to publish. */}
                 <Tile
                   label="Their trade in the window"
                   value={money(opp.candidates.spend)}
                   accent="var(--accent)"
                   footnote={
                     <>
-                      {pct(opp.candidates.spend / Math.max(cs.nonMember.spend, 1), 0)} of non-member spend
+                      {pct(opp.candidates.spend / Math.max(cs.nonMember.spend, 1), 0)} of{" "}
+                      <em>attributed</em> non-member spend · {pct(opp.candidates.spend / Math.max(coverage.totals.revenue - coverage.totals.memberRevenue, 1), 0)}{" "}
+                      of all non-member trade
                       <span className="mt-1 block text-ink-muted">
                         This is trade at stake, not uplift
                       </span>
@@ -395,9 +484,29 @@ export default async function OverviewPage({
                         {money(opp.uplift.valueLo)} – {money(opp.uplift.valueHi)}
                       </p>
                       <p className="mt-1.5 text-[12px] text-ink-muted">
-                        a quarter · 95% CI on a within-person lift of {delta(opp.uplift.lift, 1)} (
+                        a quarter, <strong className="text-ink-secondary">if every one of them enrolled</strong>{" "}
+                        · 95% CI on a within-person lift of {delta(opp.uplift.lift, 1)} (
                         {delta(opp.uplift.lo, 1)} to {delta(opp.uplift.hi, 1)})
                       </p>
+                      {/* The take-up assumption is on the face because it is the
+                          first thing a finance director will work out, and
+                          working it out for themselves in the meeting costs more
+                          credibility than stating it costs. The band is the full
+                          interval applied to the full trade of everybody in the
+                          population — arithmetically it assumes 100% take-up,
+                          which no enrolment campaign has ever achieved. */}
+                      <div className="mt-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
+                        <p className="text-[12px] leading-relaxed text-ink-secondary">
+                          <strong className="text-ink">That figure assumes every one of the{" "}
+                          {count(opp.candidates.people)} enrols.</strong> At a take-up of{" "}
+                          {TAKE_UP_ILLUSTRATION.map((t) => `${Math.round(t * 100)}%`).join(", ")} it is{" "}
+                          {TAKE_UP_ILLUSTRATION.map(
+                            (t) => `${money(opp.uplift!.valueLo * t)}–${money(opp.uplift!.valueHi * t)}`,
+                          ).join(", ")}{" "}
+                          respectively. No take-up rate is assumed here because none has been measured at
+                          this merchant; the figure above is the ceiling, not the forecast.
+                        </p>
+                      </div>
                       <p className="mt-2.5 max-w-[70ch] text-[12px] leading-relaxed text-ink-secondary">
                         Sized on the within-person uplift, never on the observed gap. The observed gap would
                         put this roughly twenty times higher and every dollar of it would be selection.

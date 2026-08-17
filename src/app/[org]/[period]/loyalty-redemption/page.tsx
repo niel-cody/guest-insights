@@ -2,6 +2,9 @@ import { FlatBars, FlatPanel, FlatTile, Placeholder } from "@/components/shell/P
 
 export const dynamic = "force-static";
 
+/** Named per page: the tab and every screenshot used to read "Guests". */
+export const metadata = { title: "Loyalty Redemption" };
+
 /**
  * Loyalty Redemption. **Production. Not built, not changed, not fixed here.**
  *

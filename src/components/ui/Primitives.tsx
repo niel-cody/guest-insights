@@ -53,15 +53,18 @@ export function Tile({
   /** Always visible. Population, window and denominator live here. */
   footnote?: ReactNode;
   /**
-   * §8 rule 3. **A refused figure renders as a struck-through number with the
-   * reason under it, never as a blank.**
+   * A figure this build declines to publish.
    *
-   * A blank reads as broken and gets raised as a bug; a strike reads as a
-   * decision and gets read. This lives on the component rather than at each
-   * call site because the one place it was done by hand — the member-value tile
-   * at a merchant where the within-person estimate is not estimable — rendered
-   * the words "not published" in the same weight as a real figure, which is
-   * neither a blank nor a strike but a third thing that looks like an answer.
+   * **A refusal is never a blank** — a blank reads as broken and gets raised as
+   * a bug, and its absence would change how the tiles beside it read. So the
+   * tile keeps its slot and says so.
+   *
+   * It is also **not struck through**, which is where this landed first.
+   * Strikethrough is a deletion mark: in every document a reader has ever seen
+   * it means "this was here and we took it away", which invites them to squint
+   * at the number and wonder what it said rather than read why there isn't one.
+   * It is a scar where a sentence belongs. The figure is shown in a quieter
+   * weight, labelled "Not published", with the reason in the footnote.
    */
   refused?: boolean;
 }) {
@@ -71,9 +74,12 @@ export function Tile({
       style={{ borderLeft: `3px solid ${accent}` }}
     >
       <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">{label}</span>
+      {refused && (
+        <div className="mt-1.5 text-[13px] font-semibold text-ink-secondary">Not published</div>
+      )}
       <div
-        className={`tnum mt-1.5 leading-none font-semibold ${
-          refused ? "text-[22px] text-ink-muted line-through decoration-2" : "text-[30px] text-ink"
+        className={`tnum leading-none font-semibold ${
+          refused ? "mt-1 text-[20px] text-ink-muted" : "mt-1.5 text-[30px] text-ink"
         }`}
       >
         {value}

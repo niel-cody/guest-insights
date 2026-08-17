@@ -24,21 +24,24 @@ import { IconChevron, IconX } from "./Icons";
  * Report-specific controls are passed in as `extra` and render **inside this
  * bar** rather than beside it — one row, one mental model.
  *
- * ── Why some controls are inert, and why they are here anyway ──────────────
+ * ── Every control here is wired, and that cost three of them ───────────────
  *
  * §4.7 asks for the production pattern — `View · Group · Date Range · Period ·
  * Locations · Channels · Customers · Clear` — because a reviewer who feels they
  * are looking at something other than Insights gives feedback about the chrome
- * instead of about the content.
+ * rather than about the content.
  *
- * Four of those are real here: Date Range and Period are the card window,
- * Locations is the venue scope, Customers is the identity tier. **View, Group
- * and Channels are not wired**, so they render as marked, non-interactive
- * context rather than as selects that do nothing. That is the same treatment the
- * icon rail already gets, and it follows the standing rule in this codebase: a
- * control is wired or it is not a control. Build v1 shipped roughly twenty
- * affordances with no behaviour behind them and it cost the whole surface its
- * credibility.
+ * The first attempt rendered View, Group and Channels as marked, permanently
+ * disabled controls, on the reasoning that the shape mattered and the marking
+ * made them honest. That was wrong. **A control that is always disabled is not a
+ * control, it is a roadmap statement parked in the operator's workspace** — and
+ * in a filter bar it is the first thing an enterprise buyer looks at. Marking it
+ * "n/a" does not stop it being the first thing they look at.
+ *
+ * So the bar matches the production pattern in shape and carries nothing dead:
+ * Date Range and Period are the card window, Locations is the venue scope,
+ * Customers is the identity tier, Segment is the lifecycle filter. `Group`
+ * survives on Guests, where it is wired to the grid's row grouping.
  *
  * ── The state model ────────────────────────────────────────────────────────
  *
@@ -95,8 +98,16 @@ export function FilterBar({
   return (
     <div className="flex flex-col gap-2 px-6 pb-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Inert label="View" value="Standard" />
-        <Inert label="Group" value="None" />
+        {/* ── View, Group and Channels have gone ───────────────────────────
+            They rendered as marked, permanently disabled controls so the bar
+            matched the production pattern. That was the wrong trade. **A
+            control that is always disabled is not a control — it is a roadmap
+            statement parked in the operator's workspace**, and it is the first
+            thing an enterprise buyer's eye lands on in a filter bar.
+
+            The production pattern is worth matching in shape, not in dead
+            weight. `Group` survives where it does real work: on Guests, wired
+            to the grid's row grouping. */}
 
         {/* Date Range and Period are one control here, and deliberately not a
             date picker: the selectable ranges are the runs of months in which
@@ -117,8 +128,6 @@ export function FilterBar({
           onChange={(venue) => set({ venue })}
           persists={venuePersists}
         />
-
-        <Inert label="Channels" value="All" />
 
         <Select
           label="Customers"
@@ -211,26 +220,6 @@ export function FilterBar({
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * A production control this build does not implement.
- *
- * Rendered rather than omitted so the bar reads as Insights, and marked rather
- * than faked so nobody files feedback against a control that was never going to
- * respond. Not a button, not a select, and not focusable.
- */
-function Inert({ label, value }: { label: string; value: string }) {
-  return (
-    <span
-      className="flex items-center gap-2 rounded-lg border border-dashed border-line px-3 py-1.5 text-[13px] opacity-55"
-      title="Not part of this proof of concept"
-    >
-      <span className="text-ink-muted">{label}</span>
-      <span className="font-medium text-ink-secondary">{value}</span>
-      <span className="text-[10px] tracking-wide text-ink-muted uppercase">n/a</span>
-    </span>
   );
 }
 

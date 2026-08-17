@@ -12,7 +12,21 @@ import { IconChevron } from "../shell/Icons";
  * a shortfall gets the product argued with instead of used. The shortfall is one
  * click away and never more than one click away.
  */
-export function CoverageChip({ state }: { state: CoverageState }) {
+export function CoverageChip({
+  state, scope = "card",
+}: {
+  state: CoverageState;
+  /**
+   * Which tier this page's content is on.
+   *
+   * The chip is a **card-tier** figure. On a page that also carries member-tier
+   * content it was asserting 82.4% above a section covering roughly a fifth of
+   * orders, which is not a caveat problem — it is a wrong number persisting over
+   * content it does not describe. Naming the tier costs three words and stops
+   * the assertion travelling past its own population.
+   */
+  scope?: "card" | "mixed";
+}) {
   const [open, setOpen] = useState(false);
   const complete = state.gaps.length === 0;
 
@@ -25,8 +39,11 @@ export function CoverageChip({ state }: { state: CoverageState }) {
       >
         <span className="flex h-2 w-2 rounded-full" style={{ background: complete ? "var(--good)" : "var(--warning)" }} />
         <span className="font-medium text-ink">
-          Recognising {attributionPct(state.identifiedRevenueShare)} of revenue
+          Card tier: recognising {attributionPct(state.identifiedRevenueShare)} of revenue
         </span>
+        {scope === "mixed" && (
+          <span className="text-[12px] text-ink-muted">· member tier below differs</span>
+        )}
         <IconChevron className={`h-4 w-4 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 

@@ -8,6 +8,9 @@ import { GridControls } from "./GridControls";
 
 export const dynamic = "force-static";
 
+/** Named per page: the tab and every screenshot used to read "Guests". */
+export const metadata = { title: "Guests" };
+
 /**
  * Guests. §7. The slice-and-dice surface.
  *

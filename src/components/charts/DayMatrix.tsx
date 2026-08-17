@@ -46,7 +46,18 @@ export type MatrixCell = {
   label: string;
 };
 
-export type MatrixColumn = { key: string; label: string; sublabel?: string };
+export type MatrixColumn = {
+  key: string;
+  label: string;
+  sublabel?: string;
+  /**
+   * A period the business barely trades in. Kept as a column — a calendar with
+   * days missing is not a calendar — but narrowed, because at a fraction of a
+   * percent of trade the three dead dayparts were occupying 38% of the grid's
+   * width. §8 rule 4: ink proportional to magnitude.
+   */
+  narrow?: boolean;
+};
 
 /** Monday-first, with the `DAYOFWEEK` index the warehouse actually emits. */
 export const WEEKDAYS = [
@@ -76,11 +87,27 @@ function shade(t: number, hue: string): string {
   return `color-mix(in srgb, ${hue} ${(0.08 + clamped * 0.92) * 100}%, transparent)`;
 }
 
+/**
+ * The diverging ramp, for the one view that has a real midpoint.
+ *
+ * Only used where zero means something — revenue share against order share,
+ * where a cell earning exactly its footfall is genuinely neutral. Everywhere
+ * else the quantity has a floor and no meaningful middle, and a diverging scale
+ * would invent one.
+ */
+function shadeDiverging(t: number): string {
+  const clamped = Math.max(-1, Math.min(1, t));
+  const hue = clamped >= 0 ? "var(--good)" : "var(--warning)";
+  return `color-mix(in srgb, ${hue} ${(0.06 + Math.abs(clamped) * 0.94) * 100}%, transparent)`;
+}
+
 export function DayMatrix({
   columns, cells, max, hue = "var(--accent)", population, window: win,
-  rowLabelWidth = 44, cellHeight = 34, footer, compact = false,
+  rowLabelWidth = 44, cellHeight = 34, footer, compact = false, diverging = false,
 }: {
   columns: MatrixColumn[];
+  /** Use the diverging ramp. Only for quantities with a real midpoint at zero. */
+  diverging?: boolean;
   /** Keyed `${dow}|${columnKey}`. Absent keys are blank cells, not zeroes. */
   cells: Map<string, MatrixCell>;
   /** The shared scale. One number for the whole grid — §8 rule 1. */
@@ -111,13 +138,24 @@ export function DayMatrix({
                 <th
                   key={c.key}
                   scope="col"
-                  className="pb-1 text-[11px] leading-tight font-medium text-ink-secondary"
+                  className={`pb-1 text-[11px] leading-tight font-medium ${
+                    c.narrow ? "text-ink-muted" : "text-ink-secondary"
+                  }`}
+                  style={c.narrow ? { width: 26 } : undefined}
                 >
-                  {c.label}
-                  {c.sublabel && (
-                    <span className="tnum block text-[10px] font-normal text-ink-muted">
-                      {c.sublabel}
-                    </span>
+                  {/* A dead period keeps its column and loses its width. The
+                      label rotates so it still says which period it is. */}
+                  {c.narrow ? (
+                    <span className="block text-[9px] whitespace-nowrap">{c.label.slice(0, 4)}</span>
+                  ) : (
+                    <>
+                      {c.label}
+                      {c.sublabel && (
+                        <span className="tnum block text-[10px] font-normal text-ink-muted">
+                          {c.sublabel}
+                        </span>
+                      )}
+                    </>
                   )}
                 </th>
               ))}
@@ -137,7 +175,7 @@ export function DayMatrix({
                   const cell = cells.get(`${d.dow}|${c.key}`);
                   const empty = !cell || cell.value === null;
                   return (
-                    <td key={c.key} className="p-0">
+                    <td key={c.key} className="p-0" style={c.narrow ? { width: 26 } : undefined}>
                       <div
                         // The whole sentence, on the element, so a screen reader
                         // gets the same figure a sighted reader gets from the
@@ -150,7 +188,11 @@ export function DayMatrix({
                           // Blank and zero are different facts and are drawn
                           // differently: a dashed outline is "nothing happened",
                           // the palest fill is "something small happened".
-                          background: empty ? "transparent" : shade(max ? cell!.value! / max : 0, hue),
+                          background: empty
+                            ? "transparent"
+                            : diverging
+                              ? shadeDiverging(max ? cell!.value! / max : 0)
+                              : shade(max ? cell!.value! / max : 0, hue),
                           borderColor: empty ? "var(--line)" : "transparent",
                           borderStyle: empty ? "dashed" : "solid",
                         }}
@@ -168,7 +210,7 @@ export function DayMatrix({
         <p className="text-[12px] leading-relaxed text-ink-secondary">
           <span className="font-medium text-ink">{population}</span> · {win}
         </p>
-        <Legend hue={hue} />
+        <Legend hue={hue} diverging={diverging} />
       </figcaption>
       {footer}
     </figure>
@@ -176,7 +218,7 @@ export function DayMatrix({
 }
 
 /** The ramp, and the two things a reader has to be told apart. */
-function Legend({ hue }: { hue: string }) {
+function Legend({ hue, diverging }: { hue: string; diverging: boolean }) {
   return (
     <div className="flex items-center gap-3 text-[11px] text-ink-muted">
       <span className="flex items-center gap-1.5">
@@ -186,13 +228,23 @@ function Legend({ hue }: { hue: string }) {
         />
         no trade
       </span>
-      <span className="flex items-center gap-1">
-        less
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
-          <span key={t} className="h-3 w-4 rounded-[3px]" style={{ background: shade(t, hue) }} />
-        ))}
-        more
-      </span>
+      {diverging ? (
+        <span className="flex items-center gap-1">
+          smaller basket
+          {[-1, -0.5, 0, 0.5, 1].map((t) => (
+            <span key={t} className="h-3 w-4 rounded-[3px]" style={{ background: shadeDiverging(t) }} />
+          ))}
+          bigger
+        </span>
+      ) : (
+        <span className="flex items-center gap-1">
+          less
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+            <span key={t} className="h-3 w-4 rounded-[3px]" style={{ background: shade(t, hue) }} />
+          ))}
+          more
+        </span>
+      )}
     </div>
   );
 }
