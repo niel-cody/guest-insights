@@ -43,6 +43,40 @@ export const dayLabel = (iso: string) =>
     day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
   });
 
+/**
+ * Recency, anchored to the thing it is actually measured from.
+ *
+ * `daysSince` is measured from the **end of the window**, which is the only
+ * defensible anchor — a guest cannot be observed after the data stops. That was
+ * invisible while the only window ended yesterday, and became a live defect the
+ * moment historical periods became selectable: "last seen 1 days ago" on a
+ * window that closed in December 2024 reads as *yesterday*, twenty months late,
+ * and it is the reader who is wrong rather than the number.
+ *
+ * So recency states its anchor whenever the window is not current. This is the
+ * same rule as everywhere else in this file — a figure never renders without
+ * its basis — applied to a figure that had been getting away with it because
+ * the basis happened to be today.
+ */
+export function recency(days: number, w: AnalysisWindow, today = new Date()): string {
+  const unit = days === 1 ? "day" : "days";
+  const endedDaysAgo = Math.round(
+    (today.getTime() - Date.parse(`${w.end}T00:00:00Z`)) / 86_400_000,
+  );
+  // A window that closed within the last week is "now" for a reader's purposes,
+  // and spelling out the anchor there is noise rather than rigour.
+  if (endedDaysAgo <= 7) return `${count(days)} ${unit} ago`;
+  return `${count(days)} ${unit} before this period closed`;
+}
+
+/** The compact form, for a grid cell. Still never bare when the window is historical. */
+export function recencyShort(days: number, w: AnalysisWindow, today = new Date()): string {
+  const endedDaysAgo = Math.round(
+    (today.getTime() - Date.parse(`${w.end}T00:00:00Z`)) / 86_400_000,
+  );
+  return endedDaysAgo <= 7 ? `${days}d ago` : `${days}d before close`;
+}
+
 /** The window, spelled out. Attaches to every figure that is not self-evident. */
 export const windowLabel = (w: AnalysisWindow) =>
   `${dayLabel(w.start)} – ${dayLabel(w.end)} · ${w.months} complete months`;
@@ -478,9 +512,9 @@ export function memberFlow(lifecycle: LifecycleRow[]): Flow[] {
  * "normally coming every 17 days", which was the org median wearing a personal
  * pronoun.
  */
-export function habit(g: Guest): string | null {
+export function habit(g: Guest, w: AnalysisWindow): string | null {
   if (g.cadenceDays == null || g.visits < 3) return null;
-  return `usually every ${Math.round(g.cadenceDays)}d · last seen ${g.daysSince}d ago`;
+  return `usually every ${Math.round(g.cadenceDays)}d · last seen ${recencyShort(g.daysSince, w)}`;
 }
 
 /** How overdue this guest is against their own cadence, not a fixed rule. */

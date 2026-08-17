@@ -12,7 +12,7 @@
  * badge — see `scripts/verify.ts`.
  */
 import type { Guests, Snapshot } from "./types";
-import { count, money, pairArithmetic, tileCount } from "./metrics";
+import { count, money, pairArithmetic, recency, tileCount } from "./metrics";
 import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
 
 export type Severity = "blocking" | "warning";
@@ -361,6 +361,31 @@ export function runChecks(snap: Snapshot, guests: Guests | null): Check[] {
     `rule refuses at W=92 T=89 and renders at W=730 T=89 · this snapshot: window ${count(win.days)}d, ` +
       `lapse ${org.calibration.lapsedDays}d → ${live.lapse.renders ? "renders" : "refused"}, ` +
       `slipping ${org.calibration.slippingDays ?? "—"}d → ${live.slipping.renders ? "renders" : "refused"}`,
+    "blocking",
+    "unit",
+  ));
+
+  // Recency is measured from the end of the window, so it must say so whenever
+  // the window is not current.
+  //
+  // This shipped wrong: "last seen 1 days ago" on a period that closed in
+  // December 2024, read on a screen in August 2026. The arithmetic was right —
+  // a guest cannot be observed after the data stops — and the sentence was
+  // twenty months out of date. It was invisible while the only selectable window
+  // ended yesterday, and became live the moment historical periods did.
+  //
+  // Asserted in both directions, because a rule that always names its anchor is
+  // as wrong as one that never does: on a current window the caveat is noise.
+  const closedLongAgo = { ...win, end: "2024-12-31" };
+  const closedToday = { ...win, end: new Date().toISOString().slice(0, 10) };
+  const anchorsHistorical = !recency(1, closedLongAgo).includes("ago");
+  const staysQuietWhenCurrent = recency(1, closedToday).includes("ago");
+  checks.push(ok(
+    "recency.statesItsAnchor",
+    "A last-seen figure names what it is measured from whenever the window is not current.",
+    "`Last seen 1 days ago` on the October–December 2024 period, read in August 2026 — arithmetically correct against the window's close and twenty months wrong to the reader.",
+    anchorsHistorical && staysQuietWhenCurrent,
+    `historical window → "${recency(1, closedLongAgo)}" · current window → "${recency(1, closedToday)}"`,
     "blocking",
     "unit",
   ));

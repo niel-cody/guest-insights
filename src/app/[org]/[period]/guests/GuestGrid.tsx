@@ -4,7 +4,9 @@ import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconSearch, IconX } from "@/components/shell/Icons";
 import { Card, EmptyState, Facts, Pill } from "@/components/ui/Primitives";
-import { SEGMENT_LABEL, count, dayLabel, habit, money, overdueRatio, pct } from "@/lib/metrics";
+import {
+  SEGMENT_LABEL, count, dayLabel, habit, money, overdueRatio, pct, recency, recencyShort,
+} from "@/lib/metrics";
 import type { Guest, Guests, Org } from "@/lib/types";
 import { DEFAULT_VIEW, parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
 import { track } from "@/lib/instrument";
@@ -294,7 +296,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
                     {/* Grids never round. */}
                     <td className="tnum px-3 py-2 text-right">{g.visits}</td>
                     <td className="tnum px-3 py-2 text-right">{money(g.spend)}</td>
-                    <td className="tnum px-3 py-2 text-right text-ink-secondary">{g.daysSince}d ago</td>
+                    <td className="tnum px-3 py-2 text-right text-ink-secondary">{recencyShort(g.daysSince, org.window)}</td>
                     <td className="px-3 py-2 text-ink-secondary">
                       {org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—"}
                     </td>
@@ -406,7 +408,7 @@ function Drawer({
   onNext?: () => void;
 }) {
   const oneVisit = g.visits === 1;
-  const rhythm = habit(g);
+  const rhythm = habit(g, org.window);
   const overdue = overdueRatio(g);
 
   return (
@@ -448,7 +450,7 @@ function Drawer({
                 <>
                   <p>
                     Came in on {g.firstSeen ? dayLabel(g.firstSeen) : "—"}, spent {money(g.spend)}, and has not
-                    been back in {g.daysSince} days.
+                    been back in {count(g.daysSince)} days.
                   </p>
                   <p className="mt-2">
                     There is no habit here to be early or late against, so no lifecycle verdict is shown and no
@@ -469,7 +471,7 @@ function Drawer({
                   ["Average per visit", money(g.spend / g.visits)],
                   ...(g.covers > 0 ? ([["Covers recorded", String(g.covers)]] as [string, string][]) : []),
                   ["Usual gap", g.cadenceDays && g.visits >= 3 ? `${Math.round(g.cadenceDays)} days` : "not yet estimable"],
-                  ["Last seen", `${g.daysSince} days ago`],
+                  ["Last seen", `${dayLabel(g.lastSeen ?? org.window.end)} · ${recency(g.daysSince, org.window)}`],
                   ["First seen", g.firstSeen ? dayLabel(g.firstSeen) : "—"],
                   ["Known for", `${g.tenureDays} days`],
                   ["Venues visited", String(g.venues)],
