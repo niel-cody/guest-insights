@@ -66,6 +66,15 @@ export function SegmentGap({
 
   const W = 420;
   const LABEL = 96;
+  /**
+   * Room reserved to the right of the plot for the value labels.
+   *
+   * Without it the largest segment's bar reaches the right edge and its own
+   * label — the numbers that make the bar readable — renders outside the
+   * viewBox and simply disappears. The segment with the biggest mismatch is the
+   * one most worth reading, so it is exactly the wrong one to lose.
+   */
+  const LABEL_ROOM = 96;
   const plot = W - LABEL - 8;
   const x = (share: number) => LABEL + (share / max) * plot;
 
@@ -83,7 +92,7 @@ export function SegmentGap({
         </p>
       </figcaption>
 
-      <svg viewBox={`0 0 ${W} ${points.length * 30 + 26}`} className="w-full" role="img"
+      <svg viewBox={`0 0 ${W + LABEL_ROOM} ${points.length * 30 + 26}`} className="w-full" role="img"
         aria-label={points
           .map((p) => `${p.label}: ${pct(p.visitShare, 1)} of visits, ${pct(p.spendShare, 1)} of revenue`)
           .join(". ")}>
