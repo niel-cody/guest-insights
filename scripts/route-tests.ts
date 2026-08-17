@@ -101,6 +101,21 @@ async function main() {
       cases.push({ param: "venue", query: `venue=${venue}`, predicate: (g) => g.homeStoreId === venue });
     }
 
+    // ── the two parameters that were linked to and never implemented ────────
+    //
+    // Overview's enrolment opportunity links to `?tier=card&minVisits=2` and
+    // the cross-venue panel to `?minVenues=2`. Neither was parsed, so the first
+    // quietly dropped half its predicate and the second filtered nothing at
+    // all — both landed on a population larger than the figure just clicked,
+    // with nothing on screen looking wrong. These two cases exist so that
+    // cannot happen again silently.
+    if (rows.some((g) => g.visits >= 2)) {
+      cases.push({ param: "minVisits", query: "minVisits=2", predicate: (g) => g.visits >= 2 });
+    }
+    if (rows.some((g) => g.venues >= 2)) {
+      cases.push({ param: "minVenues", query: "minVenues=2", predicate: (g) => g.venues >= 2 });
+    }
+
     for (const c of cases) {
       const got = applyView(rows, coldLoad(c.query));
       const want = rows.filter(c.predicate);
@@ -142,6 +157,38 @@ async function main() {
     const byVisits = applyView(rows, coldLoad("sort=visits"));
     check("sort survives a cold load",
       byVisits.length > 1 && byVisits[0].visits >= byVisits[1].visits);
+
+    // ── the venue scope, which persists across all three reports ────────────
+    //
+    // §12: the scope survives a hard reload and follows the reader between
+    // reports. The mechanism is that it lives in the URL and nowhere else, so
+    // the assertion is that a scope-only URL round-trips and selects the same
+    // population regardless of which report constructed it.
+    if (venue) {
+      const scoped = coldLoad(`venue=${venue}`);
+      const reloaded = coldLoad(toQuery(scoped));
+      check(
+        "the Locations scope survives a hard reload",
+        applyView(rows, scoped).length === applyView(rows, reloaded).length &&
+          reloaded.venue.join() === scoped.venue.join(),
+      );
+      const twoVenues = org.venues.slice(0, 2).map((v) => v.id);
+      if (twoVenues.length === 2) {
+        const multi = coldLoad(toQuery({ ...DEFAULT_VIEW, venue: twoVenues }));
+        const got = applyView(rows, multi);
+        check(
+          "a multi-venue scope selects the union, not the intersection",
+          got.every((g) => twoVenues.includes(g.homeStoreId)) &&
+            got.length >= applyView(rows, coldLoad(`venue=${twoVenues[0]}`)).length,
+        );
+      }
+    }
+
+    // ── the drawer tabs were renamed, and the keys moved with them ──────────
+    check("the drawer opens on Who they are by default", coldLoad("guest=abc").tab === "who");
+    check("a named tab survives a cold load", coldLoad("guest=abc&tab=behave").tab === "behave");
+    check("a retired tab key degrades to the default rather than throwing",
+      coldLoad("guest=abc&tab=stats").tab === "who");
 
     // ── the drawer ──────────────────────────────────────────────────────────
     const someone = inSession[0];

@@ -43,6 +43,39 @@ function segmentCase(lapseDays: number) {
     END`;
 }
 
+/**
+ * The classified person, as **one** CTE shared by every query that emits a
+ * segment.
+ *
+ * ── Why this is shared text rather than three similar queries ──────────────
+ *
+ * The segment table, the guest grid and §5.4's scatter all publish a segment,
+ * and they publish it *on the same screen* — the scatter sits beside the table
+ * it is drawn from. Three hand-written copies of "days since, cadence, then the
+ * case" disagreed by three people out of 4,966 the first time this was written,
+ * which is small enough to survive review and large enough to be the exact
+ * defect §9 warns about: **a count on a chart disagreeing with the count in the
+ * table beneath it.** That mismatch is live on the report this one replaces.
+ *
+ * Sharing the text means they cannot drift. The scatter is not "computed the
+ * same way" as the table; it is computed by the same characters.
+ */
+function classified(lapseDays: number) {
+  return `p AS (
+  SELECT person.*, DATEDIFF(day, LAST_SEEN, '@@END@@') AS DAYS_SINCE,
+         NTILE(5) OVER (ORDER BY SPEND) AS VALUE_BAND,
+         CASE WHEN VISITS > 1 THEN TENURE_DAYS / (VISITS - 1) END AS CADENCE_DAYS
+  FROM person JOIN eligible e ON e.PERSON_ID = person.PERSON_ID
+),
+c AS (
+  SELECT *, IFF(TIER = 'member', ${segmentCase(lapseDays)}, NULL) AS SEGMENT FROM p
+)`;
+}
+
+/** The shared CTE, bound to a window. The placeholder keeps the text identical. */
+const classifiedFor = (lapseDays: number, end: string) =>
+  classified(lapseDays).replaceAll("@@END@@", end);
+
 // ── coverage ────────────────────────────────────────────────────────────────
 
 /**
@@ -433,15 +466,7 @@ ORDER BY a.MONTH, a.TIER`;
 export function segmentsQuery({ orgId, w, pairs, lapseDays, cardMonths }: Args) {
   return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
 ${PEOPLE},
-p AS (
-  SELECT person.*, DATEDIFF(day, LAST_SEEN, '${w.end}') AS DAYS_SINCE,
-         NTILE(5) OVER (ORDER BY SPEND) AS VALUE_BAND,
-         CASE WHEN VISITS > 1 THEN TENURE_DAYS / (VISITS - 1) END AS CADENCE_DAYS
-  FROM person JOIN eligible e ON e.PERSON_ID = person.PERSON_ID
-),
-c AS (
-  SELECT *, IFF(TIER = 'member', ${segmentCase(lapseDays)}, NULL) AS SEGMENT FROM p
-)
+${classifiedFor(lapseDays, w.end)}
 SELECT TIER, SEGMENT, VALUE_BAND,
   COUNT(*) AS GUESTS, SUM(VISITS) AS VISITS, SUM(SPEND) AS SPEND,
   MIN(SPEND) AS MIN_SPEND, MAX(SPEND) AS MAX_SPEND,
@@ -459,24 +484,18 @@ FROM c GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`;
 export function guestListQuery({ orgId, w, pairs, lapseDays, cardMonths }: Args, limit = 20000) {
   return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
 ${PEOPLE},
-p AS (
-  SELECT person.*, DATEDIFF(day, LAST_SEEN, '${w.end}') AS DAYS_SINCE,
-         NTILE(5) OVER (ORDER BY SPEND) AS VALUE_BAND,
-         CASE WHEN VISITS > 1 THEN TENURE_DAYS / (VISITS - 1) END AS CADENCE_DAYS
-  FROM person JOIN eligible e ON e.PERSON_ID = person.PERSON_ID
-),
-c AS (
+${classifiedFor(lapseDays, w.end)},
+ranked AS (
   SELECT *,
-    IFF(TIER = 'member', ${segmentCase(lapseDays)}, NULL) AS SEGMENT,
     ROW_NUMBER() OVER (ORDER BY SPEND DESC) AS SPEND_RANK,
     ROW_NUMBER() OVER (ORDER BY HASH(PERSON_ID)) AS SAMPLE_RANK
-  FROM p
+  FROM c
 )
 SELECT PERSON_ID, TIER, SEGMENT, VALUE_BAND, VISITS, VENUES, SPEND, ORDERS, ITEMS,
        SCANNED_ORDERS, COVERS, HOME_DAYPART,
        FIRST_SEEN, LAST_SEEN, DAYS_SINCE, TENURE_DAYS, CADENCE_DAYS,
        HOME_STORE_ID, HOME_STORE, SPEND_RANK
-FROM c
+FROM ranked
 WHERE SPEND_RANK <= ${Math.floor(limit / 4)} OR SAMPLE_RANK <= ${limit - Math.floor(limit / 4)}
 ORDER BY SPEND DESC`;
 }
@@ -883,25 +902,38 @@ SELECT
  * guest who bought two coffees an hour apart has one visit here and one visit
  * on the tile above.
  *
- * **Capped at the most recent `limit` visits per guest.** The uncapped set is
- * 120,337 rows at Coffee Guru and roughly 2MB on the wire, and the tail belongs
- * to a handful of daily regulars whose hundredth-most-recent visit nobody
- * reads. The cap is published on the face rather than applied silently — a
- * truncated series that looks complete is the defect this build exists to
- * avoid, and the guest's *total* visit count comes from the tile, which is
- * never capped.
+ * ── §7.3: the cap is gone, and the grain changed to make that possible ─────
+ *
+ * This used to keep the most recent 60 visits and print *"the timeline is
+ * capped; the total above is not"* on the face. Honest, and an unfinished screen
+ * with good manners. The day grid replaces the dated list, and a grid cannot
+ * carry a truncated series — a blank cell would read as "did not come" when it
+ * meant "we stopped sending".
+ *
+ * Two changes make an uncapped set affordable:
+ *
+ * 1. **The grain is person-day-venue**, matching `visits` exactly. It used to
+ *    collapse a day to one row, which silently disagreed with the visit count on
+ *    the tile for anybody who used two venues in a day — reintroducing "showing
+ *    117 of 118" through the back door. Now `history.length === visits` by
+ *    construction, and the venue ribbon in §7.3 gets the venue per visit it
+ *    needs rather than one venue per day.
+ * 2. **The window is 92 days**, so the ceiling per guest is bounded by the
+ *    calendar rather than by their enthusiasm. `limit` survives as a backstop
+ *    against a pathological row, and `RETURNED` is emitted so a check can assert
+ *    that nobody actually hit it.
  *
  * Dates are emitted as an offset in days from the window start, because an ISO
  * date is ten characters and an offset is two.
  */
-export function visitHistoryQuery({ orgId, w, pairs, cardMonths }: Args, limit = 60) {
+export function visitHistoryQuery({ orgId, w, pairs, cardMonths }: Args, limit = 400) {
   return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
 ${PEOPLE},
 v AS (
-  SELECT PERSON_ID, D, SUM(SPEND) AS SPEND, SUM(ORDERS) AS ORDERS, SUM(ITEMS) AS ITEMS,
-         ANY_VALUE(STORE_ID) AS STORE_ID, MAX_BY(DAYPART, SPEND) AS DAYPART
+  SELECT PERSON_ID, D, STORE_ID, SUM(SPEND) AS SPEND, SUM(ORDERS) AS ORDERS,
+         SUM(ITEMS) AS ITEMS, MAX_BY(DAYPART, SPEND) AS DAYPART
   FROM visits WHERE PERSON_ID IN (SELECT PERSON_ID FROM eligible)
-  GROUP BY PERSON_ID, D
+  GROUP BY PERSON_ID, D, STORE_ID
 ),
 r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY PERSON_ID ORDER BY D DESC) AS RN FROM v)
 SELECT PERSON_ID,
@@ -915,4 +947,106 @@ SELECT PERSON_ID,
        COUNT(*) AS RETURNED
 FROM r WHERE RN <= ${limit}
 GROUP BY PERSON_ID`;
+}
+
+// ── §6.2: the heatmap ───────────────────────────────────────────────────────
+
+/**
+ * Day of week by daypart, at order grain.
+ *
+ * **Both axes are venue-local.** `D` is `CREATED_AT_TZ::DATE` and `DAYPART` is
+ * derived from `CREATED_AT_TZ`, so a Sydney breakfast lands in Breakfast on a
+ * Tuesday. Deriving either from the unlocalised timestamp moves Australian
+ * early-morning trade out of the column carrying 107,718 orders and does it
+ * silently, which is the single largest legibility risk in this report.
+ *
+ * `DAYOFWEEK` returns 0 for Sunday through 6 for Saturday, which is the same
+ * convention `ordersCte` already uses for its weekend flag. The surface reorders
+ * to a Monday-first week; the extract does not, because a rotation is a
+ * presentation choice and this is the measurement.
+ *
+ * Member orders come back per cell so the grid can be shaded three ways — order
+ * density, revenue density and member share — from one query. The member-share
+ * view is where "where your members are not" stops being a table and becomes a
+ * picture.
+ */
+export function dayGridQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)}
+SELECT
+  DAYOFWEEK(D) AS DOW,
+  DAYPART,
+  COUNT(*) AS ORDERS,
+  SUM(TOTAL_PRICE) AS REVENUE,
+  COUNT_IF(TIER = 'member') AS MEMBER_ORDERS,
+  SUM(IFF(TIER = 'member', TOTAL_PRICE, 0)) AS MEMBER_REVENUE,
+  COUNT(DISTINCT D) AS TRADING_DAYS
+FROM base
+GROUP BY 1, 2 ORDER BY 1, 2`;
+}
+
+// ── §6.4: cross-venue, the three views and nothing else ─────────────────────
+
+/**
+ * Per venue: what share of *that venue's* guests also use another venue.
+ *
+ * This is the view a venue manager reads, because it answers whether they are an
+ * island or part of a cluster. It is deliberately **not** a count: raw counts
+ * rank by venue size, so the biggest venues top every list for being big, and a
+ * manager reading such a list learns their own headcount rather than their own
+ * position.
+ *
+ * The denominator is the venue's own countable guests — everybody eligible who
+ * was seen at this venue at all, not only those who call it home. A guest whose
+ * home store is elsewhere is still one of this venue's guests on the day they
+ * walked in, and excluding them would define the crossing away.
+ */
+export function venueCrossShareQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+pv2 AS (
+  SELECT v.PERSON_ID, v.STORE_ID, ANY_VALUE(v.STORE_NAME) AS STORE_NAME
+  FROM visits v JOIN eligible e ON e.PERSON_ID = v.PERSON_ID
+  GROUP BY v.PERSON_ID, v.STORE_ID
+),
+reach AS (
+  SELECT PERSON_ID, COUNT(*) AS VENUES FROM pv2 GROUP BY PERSON_ID
+)
+SELECT
+  p.STORE_ID,
+  ANY_VALUE(p.STORE_NAME) AS STORE_NAME,
+  COUNT(*) AS GUESTS,
+  COUNT_IF(r.VENUES >= 2) AS CROSSING_GUESTS
+FROM pv2 p JOIN reach r ON r.PERSON_ID = p.PERSON_ID
+GROUP BY p.STORE_ID
+ORDER BY CROSSING_GUESTS / NULLIF(COUNT(*), 0) DESC`;
+}
+
+// ── §5.4: the segment scatter ───────────────────────────────────────────────
+
+/**
+ * One row per classifiable person: spend, visits, segment.
+ *
+ * The guest grid ships a bounded working set — the top of the value distribution
+ * in full plus a hash-ordered sample — which is right for a paginated grid and
+ * wrong for a scatter. **§5.4's whole argument is that the plot draws on 24,906
+ * people instead of 3,387**, and drawing it on the 17,022-row working set would
+ * quietly restate the defect it exists to fix.
+ *
+ * Three numbers per person is small enough to ship the whole population: no
+ * identity, no name, no venue, nothing that needs masking, and roughly 250KB
+ * packed. It carries no person id at all, so there is nothing here to join back
+ * to a human even in principle.
+ *
+ * The segment comes from the **same shared CTE** the segment table is built
+ * from — see `classified()`. The scatter sits directly beside that table on
+ * Overview, so a plot that classified even three people differently would put a
+ * chart and its own table out of step, which is the precise defect §9 warns
+ * about and which is live on the report this one replaces.
+ */
+export function scatterQuery({ orgId, w, pairs, lapseDays, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+${classifiedFor(lapseDays, w.end)}
+SELECT ROUND(SPEND, 2) AS SPEND, VISITS, TIER, SEGMENT
+FROM c`;
 }

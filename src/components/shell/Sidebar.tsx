@@ -30,30 +30,41 @@ const RAIL = [
 ];
 
 /**
- * Four surfaces, down from seven.
+ * The Customers section, whole. Five items, and the order is deliberate.
  *
- * Coming back, Growth and Value are absorbed into Overview and Members. The
- * pre-shift Brief moves to Loyalty: Insights reports what happened, Loyalty acts
- * on it, and the segment definitions are published once — here — rather than
- * redefined on both sides of the boundary.
+ * **Overview, then the existing loyalty pair, then the two new ones** — group
+ * level down to the individual. A reviewer clicking down this list is meant to
+ * react to the shape of the section rather than to three reports floating on
+ * their own, which is why the two production reports appear here at all.
+ *
+ * Two of the five are **placeholders**. Loyalty Spend and Loyalty Redemption
+ * exist in production and are not being built, changed or fixed. They are here so
+ * the nav reads correctly, and they are marked so nobody mistakes a stand-in for
+ * a surface this build owns.
+ *
+ * **There is no Customer Report.** It is the thing being replaced, so it does not
+ * appear. There is no sixth item either: coverage is a panel inside Overview, and
+ * a diagnostics report that operators had to be told to open is what it was
+ * before.
  */
-const GROUPS = [
+const CUSTOMERS = [
+  { label: "Overview", href: "overview", placeholder: false },
+  { label: "Loyalty Spend", href: "loyalty-spend", placeholder: true },
+  { label: "Loyalty Redemption", href: "loyalty-redemption", placeholder: true },
+  { label: "Behaviour", href: "behaviour", placeholder: false },
+  { label: "Guests", href: "guests", placeholder: false },
+] as const;
+
+const GROUPS: {
+  label: string;
+  open?: boolean;
+  items: readonly { label: string; href: string; placeholder: boolean }[];
+}[] = [
   { label: "Sales", items: [] },
   { label: "Payments", items: [] },
   { label: "Operations", items: [] },
   { label: "Staff", items: [] },
-  {
-    label: "Customers",
-    open: true,
-    items: [
-      { label: "Overview", href: "overview" },
-      { label: "Members", href: "members" },
-      { label: "Guest list", href: "guests" },
-      { label: "Trade density", href: "trade" },
-      { label: "Venues", href: "venues" },
-      { label: "Coverage", href: "coverage" },
-    ],
-  },
+  { label: "Customers", open: true, items: CUSTOMERS },
   { label: "Admin", items: [] },
 ];
 
@@ -124,13 +135,21 @@ export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }
                       <Link
                         key={item.href}
                         href={href}
-                        className={`ml-2.5 block rounded-lg px-3 py-2 text-[13px] ${
+                        className={`ml-2.5 flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] ${
                           active
                             ? "bg-accent-soft font-semibold text-accent"
                             : "text-ink-secondary hover:bg-surface-hover"
                         }`}
                       >
-                        {item.label}
+                        <span>{item.label}</span>
+                        {/* Marked in the nav, not only on the page. A reviewer
+                            deciding what to click should already know which two
+                            of the five this build does not own. */}
+                        {item.placeholder && (
+                          <span className="rounded-full border border-line px-1.5 py-px text-[10px] font-medium tracking-wide text-ink-muted uppercase">
+                            existing
+                          </span>
+                        )}
                       </Link>
                     );
                   })}

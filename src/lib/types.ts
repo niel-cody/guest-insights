@@ -508,6 +508,133 @@ export type Items = {
   };
 };
 
+// ── §6.2: the heatmap, and §7.3's day grid ──────────────────────────────────
+
+/**
+ * One cell of the trading week. Day of week × daypart, both venue-local.
+ *
+ * `dow` is 0 for Sunday through 6 for Saturday, as the warehouse emits it. The
+ * surface rotates to a Monday-first week; the snapshot does not, because a
+ * rotation is a presentation choice and this is the measurement.
+ */
+export type DayGridCell = {
+  dow: number;
+  daypart: string;
+  orders: number;
+  revenue: number;
+  memberOrders: number;
+  memberRevenue: number;
+  tradingDays: number;
+};
+
+export type DayGrid = {
+  window: AnalysisWindow;
+  cells: DayGridCell[];
+  /** Named so the surface can state that both axes are local rather than imply it. */
+  localised: true;
+};
+
+// ── §6.4: cross-venue, the three views ──────────────────────────────────────
+
+/**
+ * Per venue, the share of its own guests who also use another venue.
+ *
+ * A share, never a count. Raw counts rank by venue size, so the biggest venues
+ * top every list for being big and a manager reads their own headcount rather
+ * than their own position.
+ */
+export type VenueCrossRow = {
+  storeId: string;
+  storeName: string;
+  /** Everybody countable seen at this venue, not only those who call it home. */
+  guests: number;
+  crossingGuests: number;
+  share: number;
+};
+
+// ── §5.4: the scatter ───────────────────────────────────────────────────────
+
+/**
+ * Every classifiable person as three numbers, columnar.
+ *
+ * The guest grid ships a bounded working set, which is right for a paginated grid
+ * and wrong for a scatter: §5.4's argument is that the plot draws on the whole
+ * classifiable population rather than on a sample, and plotting the working set
+ * would quietly restate the defect it exists to fix.
+ *
+ * Carries no person id, so there is nothing here to join back to a human.
+ */
+export type Scatter = {
+  population: number;
+  /** Segment vocabulary; rows carry an index into it, or −1 for the card tier. */
+  segments: string[];
+  /** `[spend, visits, segmentIndex]`. */
+  rows: [number, number, number][];
+};
+
+// ── §6.5: the member cohort lens ────────────────────────────────────────────
+
+/**
+ * A cohort is the calendar month a member is first seen scanning.
+ *
+ * `observableMonths` is how far the window has actually followed this cohort. It
+ * is the censor boundary as data rather than as a caption — §6.5 rule 2 — so the
+ * surface draws the line instead of describing it.
+ */
+export type CohortRow = {
+  cohort: string;
+  members: number;
+  avgTenureDays: number;
+  medianTenureDays: number;
+  avgVisits: number;
+  spend: number;
+  /** Seen within the canonical lapse threshold of the window close. */
+  stillActive: number;
+  observableMonths: number;
+};
+
+export type TriangleCell = { cohort: string; monthsSince: number; active: number; spend: number };
+
+/** Pooled survival, over cohorts the window has actually followed that far. */
+export type SurvivalPoint = {
+  monthsSince: number;
+  cohortsObserved: number;
+  members: number;
+  active: number;
+  s: number;
+};
+
+/**
+ * The member window, graded. §10 reproduced, carried into the snapshot so the
+ * surface states the grading rather than asserting the window.
+ */
+export type MemberGrading = {
+  from: string;
+  to: string;
+  days: number;
+  monthsTested: number;
+  monthsUsable: number;
+  maxTokenShareLo: number;
+  maxTokenShareHi: number;
+  /** §4.3, keyed on the tier. 638 days against 89 renders; 92 days does not. */
+  renders: boolean;
+  thresholdDays: number;
+  requiredDays: number;
+  reproducedAt: string;
+};
+
+export type Cohorts = {
+  window: AnalysisWindow;
+  cohorts: CohortRow[];
+  triangle: TriangleCell[];
+  survival: SurvivalPoint[];
+  gapHistogram: { days: number; n: number }[];
+  gapCapDays: number;
+  /** Monthly member coverage. The confound §6.5 rule 3 refuses to publish without. */
+  coverage: { month: string; orders: number; withMember: number; distinctMembers: number; coverage: number }[];
+  grading: MemberGrading;
+};
+
 export type Snapshot = {
   org: Org;
   coverage: Coverage;
@@ -516,7 +643,12 @@ export type Snapshot = {
   segments: Segments;
   members: Members;
   dayparts: Dayparts;
+  dayGrid: DayGrid | null;
+  venueCross: VenueCrossRow[];
+  scatter: Scatter | null;
   network: Network;
   venueMonthly: VenueMonth[];
   items: Items | null;
+  /** Member tier, 21 months. Loaded per org, not per card period — see §4.3. */
+  cohorts: Cohorts | null;
 };

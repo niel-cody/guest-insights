@@ -1,0 +1,528 @@
+"use client";
+
+import { useState } from "react";
+import { IconX } from "@/components/shell/Icons";
+import { EmptyState, Pill } from "@/components/ui/Primitives";
+import { GuestBasket } from "@/components/ui/GuestBasket";
+import { DayMatrix, type MatrixCell } from "@/components/charts/DayMatrix";
+import { BAND_LABEL, CARD_NOTE, mask } from "./GuestGrid";
+import {
+  SEGMENT_LABEL, count, dayLabel, money, overdueRatio, pct, placeVisit, plural, recency,
+  rhythmShift, visitWeeks,
+} from "@/lib/metrics";
+import type { Guest, Items, Org } from "@/lib/types";
+
+type Tab = "who" | "noticed" | "behave";
+
+/**
+ * The guest drawer. §7.2 and §7.3.
+ *
+ * ── The tabs are named as answers, not as objects ──────────────────────────
+ *
+ * Stats / Commentary / Visits became **Who they are / What we noticed / How they
+ * behave**, so the drawer reads as a person rather than as a record. The URL keys
+ * moved with the names: a link carrying `tab=stats` after the tab stopped being
+ * called Stats is a small lie that outlives everybody who knew about it.
+ */
+export function GuestDrawer({
+  guest: g, org, items, unmasked, crossVenueShare, tab, onTab, onClose, onPrev, onNext,
+}: {
+  guest: Guest;
+  org: Org;
+  items: Items | null;
+  unmasked: boolean;
+  crossVenueShare: number;
+  tab: Tab;
+  onTab: (t: Tab) => void;
+  onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
+      <button type="button" aria-label="Close" onClick={onClose} className="flex-1 bg-black/25" />
+      <aside className="flex w-[520px] max-w-full flex-col overflow-y-auto border-l border-line bg-surface-raised">
+        <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-[17px] font-semibold text-ink">
+                {g.tier === "member" && g.name ? (
+                  unmasked ? g.name : mask(g.name)
+                ) : (
+                  <>
+                    <span className="text-ink-secondary">Card </span>
+                    <code>·{g.id.slice(0, 4).toUpperCase()}</code>
+                  </>
+                )}
+              </h2>
+              <Pill tone={g.tier === "member" ? "member" : "card"}>
+                {g.tier === "member" ? "Member" : "Card"}
+              </Pill>
+            </div>
+            <p className="mt-0.5 text-[12px] text-ink-muted">
+              <code>{g.id}</code> · {g.homeStore}
+              {g.segment ? ` · ${SEGMENT_LABEL[g.segment]}` : ""}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-ink-muted hover:bg-surface-hover">
+            <IconX className="h-4 w-4" />
+          </button>
+        </header>
+
+        <nav className="flex gap-1 border-b border-line px-3" role="tablist">
+          {([
+            ["who", "Who they are"],
+            ["noticed", "What we noticed"],
+            ["behave", "How they behave"],
+          ] as [Tab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => onTab(key)}
+              className={`-mb-px border-b-2 px-3 py-2.5 text-[13px] font-medium ${
+                tab === key ? "border-accent text-accent" : "border-transparent text-ink-secondary hover:text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="flex-1 space-y-5 p-5">
+          {tab === "who" && <WhoTheyAre g={g} org={org} items={items} />}
+          {tab === "noticed" && <WhatWeNoticed g={g} org={org} crossVenueShare={crossVenueShare} />}
+          {tab === "behave" && <HowTheyBehave g={g} org={org} />}
+        </div>
+
+        <footer className="sticky bottom-0 mt-auto flex items-center justify-between gap-2 border-t border-line bg-surface-raised px-5 py-3">
+          <button
+            type="button" onClick={onPrev} disabled={!onPrev}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
+          >
+            ← Previous
+          </button>
+          <button
+            type="button" onClick={onNext} disabled={!onNext}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </footer>
+      </aside>
+    </div>
+  );
+}
+
+/**
+ * §7.2. The fifteen fields, ranked — four shown, the rest disclosed.
+ *
+ * ── The scan line is not a stat, so it does not sit among them ─────────────
+ *
+ * *"Scanned 74 of 355 orders"* used to be the fourteenth row of a fifteen-row
+ * table. It is not a fact about the guest. **It is the error bar on every number
+ * next to it**, and the person reading is about to make a decision on one of
+ * those numbers — so it is rewritten as a sentence and moved above everything it
+ * qualifies.
+ *
+ * ── Every tenure and recency field declares its window ─────────────────────
+ *
+ * "Known for 91 days" and "First seen 1 May" cannot mean what a reader assumes
+ * when the window itself opens on 1 May. An owner who knows a customer has come
+ * in every weekday for six years, and reads a tenure of weeks, does not conclude
+ * the window is short — they conclude the system does not know their business.
+ * So these are floored visibly: the figure, then what it is measured from.
+ */
+function WhoTheyAre({ g, org, items }: { g: Guest; org: Org; items: Items | null }) {
+  const [more, setMore] = useState(false);
+  // Their first visit sits on the window's opening day, so the true first visit
+  // is unknown and everything derived from it is a floor rather than a fact.
+  const clipped = g.firstSeen != null && g.firstSeen <= org.window.start;
+
+  const primary: [string, React.ReactNode][] = [
+    [org.labels.visits[0].toUpperCase() + org.labels.visits.slice(1), String(g.visits)],
+    ["Total spend", money(g.spend)],
+    [
+      "Usual gap",
+      g.cadenceDays && g.visits >= 3 ? plural(Math.round(g.cadenceDays), "day") : "not yet estimable",
+    ],
+    [
+      "Last seen",
+      <>
+        {dayLabel(g.lastSeen ?? org.window.end)}
+        <span className="block text-[11px] font-normal text-ink-muted">
+          {recency(g.daysSince, org.window)}
+        </span>
+      </>,
+    ],
+  ];
+
+  const rest: [string, React.ReactNode][] = [
+    ["Orders", String(g.orders)],
+    ["Items", String(g.items)],
+    ["Average per visit", money(g.spend / Math.max(g.visits, 1))],
+    ["Covers recorded", g.covers > 0 ? String(g.covers) : "none — counter service records no party size"],
+    [
+      "First seen",
+      <>
+        {g.firstSeen ? dayLabel(g.firstSeen) : "—"}
+        <span className="block text-[11px] font-normal text-ink-muted">
+          {clipped
+            ? "the first day of the window — they were here before it, and we cannot see how long"
+            : `inside the window, which opens ${dayLabel(org.window.start)}`}
+        </span>
+      </>,
+    ],
+    [
+      "Known for",
+      <>
+        {clipped ? `at least ${plural(g.tenureDays, "day")}` : plural(g.tenureDays, "day")}
+        <span className="block text-[11px] font-normal text-ink-muted">
+          measured inside a {org.window.days}-day window, so this is a floor and not a total
+        </span>
+      </>,
+    ],
+    ["Venues visited", `${g.venues} of ${org.venues.length}`],
+    ["Usual time of day", org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—"],
+    ["Value band", `${BAND_LABEL[g.valueBand - 1]} fifth of all spend`],
+    [
+      "Scanned",
+      g.tier === "member"
+        ? `${count(g.scannedOrders)} of ${count(g.orders)} orders`
+        : "never — recognised by card only",
+    ],
+  ];
+
+  return (
+    <>
+      {/* The error bar, above the numbers it qualifies. */}
+      {g.tier === "member" && g.orders > 0 && g.scannedOrders < g.orders && (
+        <div className="rounded-lg border px-4 py-3" style={{ borderColor: "var(--warning)" }}>
+          <p className="text-[13px] leading-relaxed text-ink">
+            You saw their card on <strong>{count(g.scannedOrders)} of their {count(g.orders)} orders</strong>{" "}
+            ({pct(g.scannedOrders / g.orders, 0)}). Their true spend is likely higher than{" "}
+            <strong>{money(g.spend)}</strong>.
+          </p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-muted">
+            Every figure below is measured through the payment card, so the visits they did not scan are
+            already counted. What is missing is any order they paid for another way.
+          </p>
+        </div>
+      )}
+      {g.tier === "card" && (
+        <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3">
+          <p className="text-[13px] leading-relaxed text-ink">
+            This person has <strong>never scanned</strong>. Everything below is what their payment card did,
+            and it is a floor: anything they bought with cash or another card is invisible here.
+          </p>
+        </div>
+      )}
+
+      <dl className="grid grid-cols-2 gap-x-5 gap-y-3">
+        {primary.map(([k, v]) => (
+          <div key={k}>
+            <dt className="text-[11px] font-medium tracking-wide text-ink-secondary uppercase">{k}</dt>
+            <dd className="tnum mt-0.5 text-[17px] leading-tight font-semibold text-ink">{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <details open={more} onToggle={(e) => setMore((e.target as HTMLDetailsElement).open)}>
+        <summary className="cursor-pointer list-none text-[13px] font-medium text-accent marker:hidden hover:underline">
+          {more ? "Fewer details" : `Eleven more details`}
+        </summary>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-[13px]">
+          {rest.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="text-ink-secondary">{k}</dt>
+              <dd className="tnum text-right font-medium text-ink">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+
+      <GuestBasket g={g} items={items} org={org} />
+    </>
+  );
+}
+
+/** §7.2. The two prose notes, unchanged in wording and moved intact. */
+function WhatWeNoticed({
+  g, org, crossVenueShare,
+}: {
+  g: Guest;
+  org: Org;
+  crossVenueShare: number;
+}) {
+  const overdue = overdueRatio(g);
+  const notes: React.ReactNode[] = [];
+
+  if (g.visits === 1) {
+    notes.push(
+      <EmptyState
+        key="once"
+        title="Seen once"
+        body={
+          <>
+            <p>
+              Came in on {g.firstSeen ? dayLabel(g.firstSeen) : "—"}, spent {money(g.spend)}, and has not been
+              back in {count(g.daysSince)} days.
+            </p>
+            <p className="mt-2">
+              There is no habit here to be early or late against, so no lifecycle verdict is shown and no
+              usual gap is invented. This is the largest single group in the business and the only useful
+              question about it is whether a second visit can be caused.
+            </p>
+          </>
+        }
+      />,
+    );
+  }
+
+  if (g.visits === 2) {
+    notes.push(
+      <Note key="two" title="Two visits, one gap">
+        A single observed interval is not enough to say whether a habit has formed or broken, so no verdict
+        is shown. A third visit makes them classifiable.
+      </Note>,
+    );
+  }
+
+  if (g.cadenceDays && g.visits >= 3 && overdue !== null && overdue > 1.5) {
+    notes.push(
+      <Note key="overdue" title="Overdue against their own rhythm" tone="var(--warning)">
+        They usually come every {Math.round(g.cadenceDays)} days and it has been {count(g.daysSince)} —{" "}
+        <strong>{overdue.toFixed(1)}× their own usual gap</strong>. Measured against this person&apos;s
+        cadence over {g.visits} {org.labels.visits}, not against a rule applied to everybody.
+      </Note>,
+    );
+  }
+
+  if (g.tier === "card") {
+    notes.push(
+      <Note key="card" title="Recognised, not identified">
+        {CARD_NOTE} There is <strong>no name, email or phone</strong> — which is why this row carries a
+        reference rather than a name, and no lifecycle verdict, because a reissued card looks exactly like a
+        customer who stopped coming. What you can do is recognise them at the counter and ask them to join.
+        That is the whole enrolment opportunity, one guest at a time.
+      </Note>,
+    );
+  }
+
+  if (g.venues > 1) {
+    notes.push(
+      <Note key="venues" title="Uses more than one of your venues">
+        Visits <strong>{g.venues}</strong> of your {org.venues.length}. Guests who cross venues are{" "}
+        {pct(crossVenueShare, 1)} of the countable population here, and they are invisible to a per-venue
+        report.
+      </Note>,
+    );
+  }
+
+  return notes.length ? (
+    <>{notes}</>
+  ) : (
+    <EmptyState
+      title="Nothing stands out"
+      body="No lifecycle flag, no unusual rhythm, no cross-venue pattern. That is a finding rather than an absence — most guests are unremarkable and the ones who are not are worth the attention."
+    />
+  );
+}
+
+function Note({ title, tone, children }: { title: string; tone?: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border px-3.5 py-3" style={{ borderColor: tone ?? "var(--line)" }}>
+      <p className="text-[13px] font-medium text-ink">{title}</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{children}</p>
+    </div>
+  );
+}
+
+/**
+ * §7.3. "How they behave" — the day grid that replaces the visit list.
+ *
+ * ── What was wrong with the list ───────────────────────────────────────────
+ *
+ * It showed the most recent 60 of 118 visits and said so on the face: *"the
+ * timeline is capped; the total above is not."* Honest, and an unfinished screen
+ * with good manners.
+ *
+ * **The grid carries every visit** in roughly the space eight of those rows took,
+ * so the confession has nothing left to confess. It shows which weekdays this
+ * person owns, whether they vanish at weekends, where they doubled up in a day,
+ * and the run of blanks that is the only individual slip signal a 92-day window
+ * can honestly give.
+ *
+ * **It is the same component as the heatmap on Behaviour** — seven rows of
+ * weekday against a time axis, one shared scale, blank where nothing happened.
+ * Built once, used twice.
+ *
+ * ── What is deliberately not here ──────────────────────────────────────────
+ *
+ * A line chart of spend over time. At this cadence, with most guests ordering
+ * the same thing most visits, that is noise dressed as a trend — and a
+ * continuous axis implies a value existed between the points, when what exists
+ * between two visits is nothing at all.
+ */
+function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
+  const [showList, setShowList] = useState(false);
+  const history = g.history ?? [];
+
+  if (!history.length) {
+    return (
+      <EmptyState
+        title="No visit detail"
+        body="Baskets and visits are resolved through the same identity spine as everything else, so an order that could not be attributed to a person carries no visit here either."
+      />
+    );
+  }
+
+  const weeks = visitWeeks(org.window);
+  const cells = new Map<string, MatrixCell>();
+  const venueByDay = new Map<string, number>();
+  let max = 0;
+
+  for (const [offset, orders, spend, venueIdx] of history) {
+    const at = placeVisit(offset, org.window, weeks);
+    if (!at) continue;
+    const key = `${at.dow}|${at.weekKey}`;
+    const prev = cells.get(key);
+    const total = (prev?.value ?? 0) + spend;
+    const prevOrders = prev ? Number(prev.label.split(" ")[0]) || 0 : 0;
+    max = Math.max(max, total);
+    cells.set(key, {
+      value: total,
+      label: `${prevOrders + orders} order${prevOrders + orders === 1 ? "" : "s"} · ${money(total)} · ${dayLabel(at.iso)}`,
+    });
+    if (venueIdx >= 0) venueByDay.set(key, venueIdx);
+  }
+
+  const rhythm = rhythmShift(history);
+  const venuesUsed = [...new Set(history.map((h) => h[3]).filter((i) => i >= 0))];
+  const homeShare = history.filter((h) => org.venues[h[3]]?.id === g.homeStoreId).length / history.length;
+
+  return (
+    <>
+      {/* Three sentences, not tiles. */}
+      <div className="space-y-2 text-[14px] leading-relaxed text-ink">
+        <p>
+          {rhythm ? (
+            <>
+              Their gap between visits is <strong>{rhythm.verdict}</strong> — averaging{" "}
+              {rhythm.firstHalf.toFixed(1)} days across the first half of the window and{" "}
+              {rhythm.secondHalf.toFixed(1)} across the second.
+            </>
+          ) : (
+            <>
+              Too few visits to say whether their rhythm is steady, widening or tightening — that needs four,
+              and they have {g.visits}.
+            </>
+          )}
+        </p>
+        <p>
+          {venuesUsed.length === 1 ? (
+            <>
+              They use <strong>one venue</strong>, {g.homeStore}, and nothing else.
+            </>
+          ) : (
+            <>
+              Mostly <strong>{g.homeStore}</strong> — {pct(homeShare, 0)} of their visits — plus{" "}
+              {venuesUsed.length - 1} other{venuesUsed.length === 2 ? "" : "s"}.
+            </>
+          )}
+        </p>
+        <p>
+          Last seen <strong>{dayLabel(g.lastSeen ?? org.window.end)}</strong>,{" "}
+          {recency(g.daysSince, org.window)}.
+        </p>
+      </div>
+
+      <DayMatrix
+        columns={weeks.map((wk) => ({ key: wk.key, label: wk.label }))}
+        cells={cells}
+        max={max}
+        hue={g.tier === "member" ? "var(--tier-member)" : "var(--tier-card)"}
+        population={`all ${count(g.visits)} ${org.labels.visits}, none omitted`}
+        window={`${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`}
+        cellHeight={26}
+        rowLabelWidth={36}
+        compact
+      />
+
+      {/* The venue ribbon, on the same time axis. For somebody using six of
+          nineteen sites the whole question is whether they are a commuter with a
+          home store and a work store, a genuine rotator, or somebody who moved
+          house in June — and a flat list makes you hold sixty venue names in
+          your head to find out. */}
+      {venuesUsed.length > 1 && (
+        <div>
+          <h3 className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
+            Which venue, week by week
+          </h3>
+          <div className="mt-1.5 flex gap-[3px]">
+            {weeks.map((wk) => {
+              const inWeek = [...venueByDay.entries()].filter(([k]) => k.endsWith(`|${wk.key}`));
+              return (
+                <div key={wk.key} className="flex flex-1 flex-col gap-[2px]">
+                  {inWeek.length === 0 ? (
+                    <div className="h-3 rounded-[2px] border border-dashed border-line" />
+                  ) : (
+                    [...new Set(inWeek.map(([, v]) => v))].map((v) => (
+                      <div
+                        key={v}
+                        className="h-3 rounded-[2px]"
+                        style={{ background: venueColour(v) }}
+                        aria-label={`${wk.label}: ${org.venues[v]?.name}`}
+                      />
+                    ))
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            {venuesUsed.map((v) => (
+              <li key={v} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
+                <span className="h-2.5 w-2.5 rounded-[2px]" style={{ background: venueColour(v) }} />
+                {org.venues[v]?.name ?? "—"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* The dated list is not deleted. It stops being the answer and becomes
+          the receipt. */}
+      <details open={showList} onToggle={(e) => setShowList((e.target as HTMLDetailsElement).open)}>
+        <summary className="cursor-pointer list-none text-[13px] font-medium text-accent marker:hidden hover:underline">
+          {showList ? "Hide the list" : `See all ${count(g.visits)} ${org.labels.visits}`}
+        </summary>
+        <ol className="mt-3 flex flex-col gap-1.5">
+          {[...history]
+            .sort((a, b) => b[0] - a[0])
+            .map(([offset, orders, spend, venueIdx], i) => {
+              const at = placeVisit(offset, org.window, weeks);
+              return (
+                <li
+                  key={`${offset}-${venueIdx}-${i}`}
+                  className="flex items-baseline justify-between gap-3 border-b border-line pb-1.5 text-[12px] last:border-b-0"
+                >
+                  <span className="tnum text-ink">{at ? dayLabel(at.iso) : "—"}</span>
+                  <span className="text-ink-muted">{org.venues[venueIdx]?.name ?? "—"}</span>
+                  <span className="tnum text-ink-secondary">
+                    {orders} {orders === 1 ? "order" : "orders"} · {money(spend)}
+                  </span>
+                </li>
+              );
+            })}
+        </ol>
+      </details>
+    </>
+  );
+}
+
+/** Stable per-venue colours for the ribbon. Hue rotation, so six read apart. */
+function venueColour(i: number): string {
+  return `oklch(0.62 0.13 ${(i * 47) % 360})`;
+}

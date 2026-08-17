@@ -1,0 +1,199 @@
+/**
+ * Layout assertions against the built HTML.
+ *
+ *   npm run build && npm run test:layout
+ *
+ * ── Why these are asserted on the output rather than reviewed ──────────────
+ *
+ * §12's rule is that a box is ticked by looking at the running build, never by
+ * reading the code. These are the display rules that a code review will pass and
+ * a rendered page will fail: a correction that got wrapped in a disclosure
+ * during a refactor, a refusal that became a blank, an info icon that came back.
+ * Each one has a history.
+ *
+ * The geometric half of §5.5 — that the 4.9× and its correction share a viewport
+ * at 1280px and 1920px — needs a browser and is measured there. What this
+ * asserts is the **structure that makes the geometry hold**: the correction is a
+ * sibling of the panels rather than a child of a `<details>`, and nothing
+ * collapsible sits between them. If those hold, the block cannot be pushed off
+ * screen by a future edit without this failing first.
+ */
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
+
+const OUT = join(import.meta.dirname, "..", ".next", "server", "app");
+
+let failures = 0;
+let passes = 0;
+
+function check(name: string, pass: boolean, detail = "") {
+  if (pass) passes++;
+  else {
+    failures++;
+    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+
+/** Every prerendered HTML file under the app output. */
+async function pages(dir: string, acc: string[] = []): Promise<string[]> {
+  for (const e of await readdir(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) await pages(p, acc);
+    else if (e.name.endsWith(".html")) acc.push(p);
+  }
+  return acc;
+}
+
+/** The slice of markup between two indexes, for locality assertions. */
+function between(html: string, from: number, to: number): string {
+  return from >= 0 && to > from ? html.slice(from, to) : "";
+}
+
+async function main() {
+  let files: string[];
+  try {
+    files = await pages(OUT);
+  } catch {
+    console.error("No build output found. Run `npm run build` first.");
+    process.exit(1);
+  }
+
+  console.log(`\n${files.length} prerendered pages`);
+
+  for (const file of files) {
+    const html = await readFile(file, "utf8");
+    const name = file.replace(OUT, "").replace(/\.html$/, "");
+    const isOverview = name.endsWith("/overview");
+    const isPlaceholder = /loyalty-(spend|redemption)$/.test(name);
+    // The org and root routes are redirects with no chrome. Asserting a sidebar
+    // on them would be asserting against a page that has no reader.
+    const isReport =
+      isOverview || isPlaceholder || /\/(behaviour|guests)$/.test(name);
+
+    console.log(`\n${name}`);
+
+    // ── §5.5: the correction cannot be collapsed or separated ──────────────
+    if (isOverview) {
+      const corrIdx = html.indexOf("data-selection-correction");
+      check("the selection correction is present", corrIdx >= 0);
+
+      if (corrIdx >= 0) {
+        const headIdx = html.indexOf("So what is a member worth");
+        check("the 4.9× panel is present", headIdx >= 0);
+
+        // Nothing collapsible between the headline and the correction. A
+        // `<details>` opening in that span is how the correction ends up behind
+        // a click without anybody deciding that it should be.
+        const span = between(html, headIdx, corrIdx);
+        check(
+          "nothing collapsible sits between the 4.9× panel and its correction",
+          !span.includes("<details"),
+          "a <details> opened in the span between them",
+        );
+        check(
+          "the correction follows the panel it corrects",
+          headIdx >= 0 && corrIdx > headIdx,
+          "the correction renders before the figure it corrects",
+        );
+
+        // The correction is not inside any disclosure at all. Counting opens
+        // against closes before it is a cheap and reliable proxy for nesting.
+        const before = html.slice(0, corrIdx);
+        const opens = (before.match(/<details/g) ?? []).length;
+        const closes = (before.match(/<\/details>/g) ?? []).length;
+        check("the correction is not nested inside a disclosure", opens === closes,
+          `${opens - closes} unclosed <details> before it`);
+
+        // §5.2's hard rule: the tile does not exist without the block.
+        check(
+          "the 4.9× tile does not render without the correction",
+          !html.includes("A member is worth") || corrIdx >= 0,
+        );
+      }
+
+      // ── §5.7: coverage is a panel here, not a report ─────────────────────
+      check("the trust panel is inside Overview", html.includes("What this report is standing on"));
+      check("the claim is stated before the price",
+        html.indexOf("What this report can tell you") < html.indexOf("And what it cannot"));
+    }
+
+    // ── §8 rule 3: a refusal is struck through, never blank ────────────────
+    //
+    // Matched on the *rendered figure* — an element whose whole text is the
+    // refusal — rather than on the phrase, which also appears in prose
+    // explaining why something is not published elsewhere.
+    for (const m of html.matchAll(/>(not published|Not published)</g)) {
+      const context = html.slice(Math.max(0, m.index - 260), m.index);
+      check("the refusal renders struck through rather than blank",
+        context.includes("line-through"),
+        `a refusal at offset ${m.index} carries no strike`);
+    }
+
+    // ── §8 rule 7: no info icons ───────────────────────────────────────────
+    //
+    // The prototype shipped four that rendered nothing at all. The mechanism is
+    // gone from `Tile`, so this guards against it being reintroduced.
+    check("no info icon sits beside a tile label",
+      !/uppercase[^>]*>[^<]*<\/span>\s*<span[^>]*cursor-help/.test(html),
+      "a cursor-help element follows a tile label");
+
+    // ── §8 rule 2: no dual vertical axes, ever ─────────────────────────────
+    check("no chart declares a second vertical axis", !html.includes("data-second-axis"));
+
+    // ── §11: the network graph, map and decay model are gone ───────────────
+    for (const gone of ["VenueNetwork", "distance-decay", "decay exponent", "Decay exponent"]) {
+      check(`no trace of "${gone}"`, !html.includes(gone));
+    }
+
+    // ── §3: the placeholders are labelled and carry no data ────────────────
+    if (isPlaceholder) {
+      check("the placeholder is labelled", html.includes("Existing report. Not part of this POC."));
+      check("the placeholder carries no filter bar", !html.includes("Locations"));
+      // OR-1803. The live redemption rate above 100% is not reproduced in any
+      // form, including struck through with a caveat.
+      if (name.endsWith("loyalty-redemption")) {
+        check("the known-bad redemption rate is not reproduced", !html.includes("118.6"));
+      }
+    }
+
+    // ── §2 and §12: five items, no Customer Report, no sixth item ──────────
+    //
+    // Asserted on the hrefs rather than on the labels: "Coverage" and "Venues"
+    // are ordinary words that appear in table headers and prose, and matching
+    // them as text fails on pages that are perfectly correct.
+    if (isReport) {
+      check("the sidebar carries no Customer Report", !html.includes("Customer Report"));
+      for (const retired of ["coverage", "members", "trade", "venues"]) {
+        check(`no nav link points at the retired /${retired} route`,
+          !new RegExp(`href="/[^"]+/${retired}"`).test(html));
+      }
+      for (const item of ["Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Guests"]) {
+        check(`the sidebar carries "${item}"`, html.includes(item));
+      }
+      // Exactly five links under Customers, and not a sixth.
+      const navLinks = [...html.matchAll(/href="\/[^/"]+\/[^/"]+\/([a-z-]+)"/g)].map((m) => m[1]);
+      const unique = [...new Set(navLinks)].sort();
+      check("there is no sixth item in the section",
+        unique.every((h) =>
+          ["overview", "loyalty-spend", "loyalty-redemption", "behaviour", "guests"].includes(h)),
+        `found ${unique.join(", ")}`);
+    }
+
+    // ── §7.3: the truncation confession is gone ────────────────────────────
+    check("no timeline advertises itself as capped",
+      !html.includes("the timeline is capped"));
+
+    // ── §12: nothing exports, downloads, copies or sends ───────────────────
+    check("nothing offers a download", !/<a[^>]+download/.test(html));
+    check("nothing offers an export or CSV", !/>\s*(Export|Download CSV|Copy to clipboard)\s*</.test(html));
+  }
+
+  console.log(`\n${passes} passed, ${failures} failed.`);
+  if (failures) {
+    console.error("A display rule is being broken in the rendered output.");
+    process.exit(1);
+  }
+  console.log("Every display rule holds in the built HTML.");
+}
+
+main();

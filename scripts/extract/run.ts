@@ -24,8 +24,11 @@ import {
   storeMapQuery, parQualityQuery, orderStatusQuery, monthlyOrdersQuery, type StorePair,
 } from "./sql";
 import * as Q from "./queries";
+import * as C from "./cohort";
 import { allRuns, claimLevel, gradeMonth, longestRun, monthsBetween } from "../grade";
 import { packGuests } from "../../src/lib/guest-columns";
+/** One segment vocabulary, shared by the URL contract, the surfaces and the extract. */
+import { SEGMENTS as SEGMENT_KEYS } from "../../src/lib/url-state";
 import {
   detectionCorrect, fitDistanceDecay, kaplanMeier, paired, standardise, wilson,
   type Episode, type PairObservation, type Stratum,
@@ -117,18 +120,36 @@ function periodId(w: { start: string; end: string }): string {
 const MIN_LINES_FOR_INDEX = 200;
 
 /**
- * The most recent visits kept per guest for the drawer timeline.
+ * A backstop, not a cap. §7.3.
  *
- * Uncapped this is 120,337 rows and roughly 2MB on the wire at Coffee Guru, and
- * the tail belongs to a few daily regulars. Sixty covers a year of weekly
- * visits or two months of daily ones. **The cap is stated on the face** — the
- * guest's total visit count comes from the person record and is never capped,
- * so a truncated timeline can never be mistaken for the whole relationship.
+ * The old value was 60, and the drawer printed *"the timeline is capped; the
+ * total above is not"* underneath it. §7.3 replaces the dated list with a 7×14
+ * day grid, and a grid cannot carry a truncated series — a blank cell would read
+ * as "did not come" when it meant "we stopped sending".
+ *
+ * The window is 92 days and the history grain is person-day-venue, so the real
+ * ceiling is set by the calendar rather than by anybody's enthusiasm. This sits
+ * far above it purely so a pathological row cannot blow up the file, and a check
+ * asserts that no guest actually reaches it.
  */
-const VISIT_HISTORY_CAP = 60;
+const VISIT_HISTORY_CAP = 400;
 
 /** The month in progress. Nothing partial is ever counted as a usable month. */
 const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
+
+/**
+ * The inter-visit gap distribution is capped at a year. Beyond that the tail is
+ * a handful of returns and the shape stops being readable; the cap is carried
+ * into the file so the surface states it rather than the extract hiding it.
+ */
+const GAP_CAP_DAYS = 365;
+
+/**
+ * Below this a cohort is a rounding error with a date on it — and on a triangle
+ * it occupies exactly as much ink as a cohort of seven hundred. Coffee Guru has
+ * three months of single-digit cohorts before the feed properly starts.
+ */
+const MIN_COHORT_MEMBERS = 50;
 
 async function extractOrg(org: OrgConfig) {
   const discovery = discoveryWindow();
@@ -249,10 +270,177 @@ async function extractOrg(org: OrgConfig) {
     }),
   );
 
+  // 3b. The member tier, which is a different population on a different clock.
+  //     Written once per org rather than once per card period — filing a
+  //     21-month member window under a 92-day card period is precisely the
+  //     cross-tier read §4.3 exists to stop.
+  await extractCohorts(org);
+
   for (const run of runs) {
     await extractPeriod(org, { start: run.start, end: monthEnd(run.end), months: run.months },
       allCardMonths, graded, pairs, mappedStores, discovery);
   }
+}
+
+/**
+ * §6.5. The member cohort lens, and §10's grading carried with it.
+ *
+ * The grading travels in the same file as the cohorts on purpose. §6.5 rule 3
+ * refuses to publish the falling-cohort-quality trend because coverage rose over
+ * the same period, and a confound that lives in a different file from the trend
+ * it confounds is a confound nobody sees.
+ */
+async function extractCohorts(org: OrgConfig) {
+  const from = "2024-01-01";
+  const to = `${new Date().toISOString().slice(0, 7)}-01`;
+  console.log(`\n  member cohorts  (${from} → ${to}, scan tier)`);
+
+  const [sizeRows, triRows, gapRows, covRows] = await Promise.all([
+    query<Row>(C.cohortSizeQuery(org.id, from, to)),
+    query<Row>(C.cohortTriangleQuery(org.id, from, to)),
+    query<Row>(C.cohortGapQuery(org.id, from, to, GAP_CAP_DAYS)),
+    query<Row>(C.memberCoverageQuery(org.id, from, to)),
+  ]);
+
+  // The grading, re-derived here so the snapshot states the window rather than
+  // asserting it. Same three tests as scripts/grade-members.ts.
+  const coverage = covRows.map((r) => {
+    const orders = num(r.ORDERS);
+    const withMember = num(r.WITH_MEMBER);
+    return {
+      month: day(r.MONTH)!,
+      orders,
+      withMember,
+      distinctMembers: num(r.DISTINCT_MEMBERS),
+      coverage: orders ? r4(withMember / orders) : 0,
+    };
+  });
+
+  // Months carrying a real member population, in an unbroken run reaching the
+  // present. A month with no scans at all is not a quiet month, it is a month
+  // before the feed existed.
+  const live = coverage.filter((m) => m.withMember > 0 && m.distinctMembers >= 100);
+  const usable: typeof live = [];
+  for (const m of live) {
+    const prev = usable.at(-1);
+    const contiguous = !prev || monthsBetween(prev.month, m.month) === 2;
+    if (contiguous) usable.push(m);
+    else usable.splice(0, usable.length, m);
+  }
+  const memberFrom = usable[0]?.month ?? from;
+  const memberTo = usable.at(-1)?.month ?? to;
+  const memberDays = Math.round(
+    (Date.parse(`${memberTo}T00:00:00Z`) - Date.parse(`${memberFrom}T00:00:00Z`)) / 86_400_000,
+  );
+
+  const monthIndex = (m: string) =>
+    Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const lastMonth = coverage.at(-1)?.month ?? to;
+
+  const cohorts = sizeRows
+    .map((r) => {
+      const cohort = day(r.COHORT)!;
+      return {
+        cohort,
+        members: num(r.MEMBERS),
+        avgTenureDays: r2(num(r.AVG_TENURE_DAYS)),
+        medianTenureDays: r2(num(r.MEDIAN_TENURE_DAYS)),
+        avgVisits: r2(num(r.AVG_VISITS)),
+        spend: r2(num(r.SPEND)),
+        stillActive: num(r.STILL_ACTIVE),
+        /**
+         * How far the window has actually followed this cohort. The censor
+         * boundary, as data — §6.5 rule 2. Everything to the right of it is the
+         * window running out, not people leaving, and a surface that has to
+         * infer this from missing cells will eventually infer it wrong.
+         */
+        observableMonths: monthIndex(lastMonth) - monthIndex(cohort),
+      };
+    })
+    // A cohort of a handful of members is a rounding error with a date on it,
+    // and it plots the same size as a cohort of seven hundred.
+    .filter((c) => c.members >= MIN_COHORT_MEMBERS && c.cohort >= memberFrom);
+
+  const cohortById = new Map(cohorts.map((c) => [c.cohort, c]));
+
+  const triangle = triRows
+    .map((r) => ({
+      cohort: day(r.COHORT)!,
+      monthsSince: num(r.MONTHS_SINCE),
+      active: num(r.ACTIVE),
+      spend: r2(num(r.SPEND)),
+    }))
+    .filter((t) => cohortById.has(t.cohort) && t.monthsSince >= 0);
+
+  // Pooled survival, over the cohorts the window has actually followed that far.
+  // A cohort that cannot be observed at k is absent from k's denominator rather
+  // than counted as a loss, which is the difference between a survival curve and
+  // a picture of the window's length.
+  const horizon = Math.max(0, ...cohorts.map((c) => c.observableMonths));
+  const survival: {
+    monthsSince: number; cohortsObserved: number; members: number; active: number; s: number;
+  }[] = [];
+  for (let k = 0; k <= horizon; k++) {
+    const eligible = cohorts.filter((c) => c.observableMonths >= k);
+    if (!eligible.length) break;
+    const members = eligible.reduce((a, c) => a + c.members, 0);
+    const active = eligible.reduce(
+      (a, c) => a + (triangle.find((t) => t.cohort === c.cohort && t.monthsSince === k)?.active ?? 0),
+      0,
+    );
+    survival.push({
+      monthsSince: k,
+      cohortsObserved: eligible.length,
+      members,
+      active,
+      s: members ? r4(active / members) : 0,
+    });
+  }
+
+  const tokenShares = usable.map(() => 0); // measured by grade-members.ts, carried below
+  void tokenShares;
+
+  const dir = join(DATA, org.slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "cohorts.json"),
+    JSON.stringify({
+      window: {
+        start: memberFrom,
+        end: memberTo,
+        months: usable.length,
+        days: memberDays,
+      },
+      cohorts,
+      triangle,
+      survival,
+      gapHistogram: gapRows.map((r) => ({ days: num(r.DAYS), n: num(r.N) })),
+      gapCapDays: GAP_CAP_DAYS,
+      coverage,
+      grading: {
+        from: memberFrom,
+        to: memberTo,
+        days: memberDays,
+        monthsTested: coverage.length,
+        monthsUsable: usable.length,
+        maxTokenShareLo: 0.003,
+        maxTokenShareHi: 0.0139,
+        /**
+         * §4.3, keyed on the tier rather than on a global flag. The card tier
+         * holds 92 days against an 89-day threshold and refuses; this holds
+         * ~607 and renders. Two populations, two clocks, one rule.
+         */
+        renders: memberDays >= CANONICAL_LAPSE_DAYS * 2,
+        thresholdDays: CANONICAL_LAPSE_DAYS,
+        requiredDays: CANONICAL_LAPSE_DAYS * 2,
+        reproducedAt: new Date().toISOString(),
+      },
+    }),
+  );
+  console.log(
+    `      cohorts.json  ${cohorts.length} cohorts · ${usable.length} usable months · ` +
+      `${memberDays}d ${memberDays >= CANONICAL_LAPSE_DAYS * 2 ? "renders" : "refuses"}`,
+  );
 }
 
 /** Last day of the month a run ends in. A run is named by months, measured by days. */
@@ -356,6 +544,13 @@ async function extractPeriod(
     query<Row>(Q.segmentsQuery(calArgs)),
     query<Row>(Q.venueMonthlyQuery(args)),
     query<Row>(Q.guestListQuery(calArgs)),
+  ]);
+
+  console.log("  day grid, cross-venue share, scatter…");
+  const [dayGrid, venueCross, scatterRows] = await Promise.all([
+    query<Row>(Q.dayGridQuery(args)),
+    query<Row>(Q.venueCrossShareQuery(args)),
+    query<Row>(Q.scatterQuery(calArgs)),
   ]);
 
   // Items last: they are the largest join in the extract, and everything above
@@ -751,6 +946,60 @@ async function extractPeriod(
       const we = dpRows.filter((r) => r.weekend).reduce((a, r) => a + r.orders, 0);
       return all ? r4(we / all) : 0;
     })(),
+  });
+
+  // ── §6.2: the heatmap ─────────────────────────────────────────────────────
+  //
+  // Both axes venue-local. Emitted as measured, Sunday-first, because rotating
+  // to a Monday-first week is a presentation choice and belongs on the surface.
+  write(org.slug, period, "dayGrid", {
+    window: { ...w, days: windowDays },
+    localised: true,
+    cells: dayGrid.map((r) => ({
+      dow: num(r.DOW),
+      daypart: String(r.DAYPART),
+      orders: num(r.ORDERS),
+      revenue: r2(num(r.REVENUE)),
+      memberOrders: num(r.MEMBER_ORDERS),
+      memberRevenue: r2(num(r.MEMBER_REVENUE)),
+      tradingDays: num(r.TRADING_DAYS),
+    })),
+  });
+
+  // ── §6.4: view three, the ranked bar ──────────────────────────────────────
+  //
+  // Share, never count. The sort is on the share for the same reason.
+  write(
+    org.slug,
+    period,
+    "venueCross",
+    venueCross
+      .filter((r) => venueIds.has(String(r.STORE_ID)))
+      .map((r) => ({
+        storeId: String(r.STORE_ID),
+        storeName: String(r.STORE_NAME),
+        guests: num(r.GUESTS),
+        crossingGuests: num(r.CROSSING_GUESTS),
+        share: num(r.GUESTS) ? r4(num(r.CROSSING_GUESTS) / num(r.GUESTS)) : 0,
+      }))
+      .sort((a, b) => b.share - a.share),
+  );
+
+  // ── §5.4: the scatter, on the whole classifiable population ───────────────
+  //
+  // The segment vocabulary is carried once and rows index into it. Three numbers
+  // a person, no identity of any kind — there is nothing here to join back to a
+  // human, which is what makes shipping the whole population rather than the
+  // working set safe as well as correct.
+  const scatterSegments: string[] = [...SEGMENT_KEYS];
+  write(org.slug, period, "scatter", {
+    population: scatterRows.length,
+    segments: scatterSegments,
+    rows: scatterRows.map((r): [number, number, number] => [
+      r2(num(r.SPEND)),
+      num(r.VISITS),
+      r.SEGMENT == null ? -1 : scatterSegments.indexOf(String(r.SEGMENT)),
+    ]),
   });
 
   // ── remaining files ───────────────────────────────────────────────────────

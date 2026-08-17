@@ -1,80 +1,54 @@
-"use client";
-
-import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { CoverageChip } from "@/components/ui/CoverageChip";
-import { PeriodPicker } from "@/components/ui/PeriodPicker";
+import { CheckBadge } from "@/components/ui/Primitives";
+import { FilterBar } from "@/components/shell/FilterBar";
 import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
-import { dayLabel } from "@/lib/metrics";
+import type { Check } from "@/lib/checks";
 import type { Org } from "@/lib/types";
-import { IconChevron } from "./Icons";
 
 /**
- * Page header and scope bar.
+ * Page header and the **one** filter bar.
  *
- * Controls appear here only when the page can honour them. A venue selector on a
- * screen that cannot filter by venue is worse than no selector — the operator
- * believes a number that is not the number they asked for.
+ * Every built report renders this, so there is exactly one filter bar in the
+ * product and one implementation of it (§12). Report-specific controls arrive
+ * through `filters` and render *inside* the same bar rather than beside it — the
+ * previous build grew a second control cluster inside the guest grid's card
+ * header, which meant two places to look for the same question.
+ *
+ * The two chips live here because they are chrome rather than content: the check
+ * badge and the recognition share follow the reader between reports, and both
+ * open on click rather than on hover (§8 rule 7 — hover does not exist on touch).
  */
 export function PageHeader({
-  org, orgs, title, coverage, controls, actions, periods, period,
+  org, orgs, title, coverage, filters, actions, periods, period, checks,
 }: {
   org: Org;
   orgs: { slug: string; name: string }[];
   title: string;
   coverage?: CoverageState;
-  controls?: ReactNode;
+  /** Report-specific controls, rendered inside the shared bar. */
+  filters?: ReactNode;
   actions?: ReactNode;
   periods: Periods;
   period: Period;
+  checks?: Check[];
 }) {
-  const router = useRouter();
-
   return (
     <header className="shrink-0 border-b border-line bg-surface">
       <div className="flex items-center justify-between gap-4 px-6 pt-4 pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
-          <span className="text-[13px] text-ink-muted">Guests</span>
+          <span className="text-[13px] text-ink-muted">Customers</span>
         </div>
         <div className="flex items-center gap-2">
           {actions}
+          {checks && <CheckBadge href="#checks" checks={checks} />}
           {coverage && <CoverageChip state={coverage} />}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 px-6 pb-3">
-        <label className="relative flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-[13px] focus-within:border-accent">
-          <span className="text-ink-muted">Organisation</span>
-          <select
-            value={org.slug}
-            onChange={(e) => router.push(`/${e.target.value}`)}
-            className="cursor-pointer appearance-none bg-transparent pr-5 font-medium text-ink outline-none"
-          >
-            {orgs.map((o) => (
-              <option key={o.slug} value={o.slug}>{o.name}</option>
-            ))}
-          </select>
-          <IconChevron className="pointer-events-none absolute right-2 h-4 w-4 text-ink-muted" />
-        </label>
-
-        {/* The period is now a control, because there is now more than one to
-            choose between. It is still not a date picker — see PeriodPicker. */}
-        <PeriodPicker all={periods} current={period} orgSlug={org.slug} />
-
-        <p className="flex items-center gap-2 text-[13px] text-ink-secondary">
-          <span className="tnum">
-            {dayLabel(org.window.start)} – {dayLabel(org.window.end)}
-          </span>
-          <span className="text-ink-muted">·</span>
-          <span>
-            {org.venues.length} {org.venues.length === 1 ? "venue" : "venues"}
-          </span>
-        </p>
-
-        {controls}
-      </div>
+      <FilterBar org={org} orgs={orgs} periods={periods} period={period} extra={filters} />
     </header>
   );
 }

@@ -17,8 +17,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runChecks } from "../src/lib/checks";
-import type { GuestRows, Guests, Snapshot } from "../src/lib/types";
+import type { AnalysisWindow, GuestRows, Guests, Snapshot } from "../src/lib/types";
 import { unpackGuests } from "../src/lib/guest-columns";
+import { windowVerdict } from "../src/lib/window";
 import { claimLevel, gradeMonth, longestRun } from "./grade";
 
 const DATA = join(import.meta.dirname, "..", "data");
@@ -37,18 +38,32 @@ async function periodsOf(slug: string): Promise<string[]> {
 async function load(slug: string, period: string): Promise<Fixture> {
   const read = async <T,>(name: string) =>
     JSON.parse(await readFile(join(DATA, slug, period, `${name}.json`), "utf8")) as T;
-  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, guests, items] =
-    await Promise.all([
-      read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
-      read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
-      read<Snapshot["segments"]>("segments"), read<Snapshot["members"]>("members"),
-      read<Snapshot["dayparts"]>("dayparts"), read<Snapshot["network"]>("network"),
-      read<Snapshot["venueMonthly"]>("venueMonthly"),
-      read<Guests>("guests"),
-      read<Snapshot["items"]>("items"),
-    ]);
+  const orgRead = async <T,>(name: string) =>
+    JSON.parse(await readFile(join(DATA, slug, `${name}.json`), "utf8")) as T;
+
+  const [
+    org, coverage, lifecycle, decomposition, segments, members, dayparts,
+    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, cohorts,
+  ] = await Promise.all([
+    read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
+    read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
+    read<Snapshot["segments"]>("segments"), read<Snapshot["members"]>("members"),
+    read<Snapshot["dayparts"]>("dayparts"),
+    read<Snapshot["dayGrid"]>("dayGrid").catch(() => null),
+    read<Snapshot["venueCross"]>("venueCross").catch(() => []),
+    read<Snapshot["scatter"]>("scatter").catch(() => null),
+    read<Snapshot["network"]>("network"),
+    read<Snapshot["venueMonthly"]>("venueMonthly"),
+    read<Guests>("guests"),
+    read<Snapshot["items"]>("items"),
+    // Org grain, not period grain — the member tier is not a card period. §4.3.
+    orgRead<Snapshot["cohorts"]>("cohorts").catch(() => null),
+  ]);
   return {
-    snap: { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items },
+    snap: {
+      org, coverage, lifecycle, decomposition, segments, members, dayparts,
+      dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+    },
     guests: { sampled: guests.sampled, population: guests.population, rows: unpackGuests(guests) },
   };
 }
@@ -269,8 +284,110 @@ function verifyGrading(): string[] {
   return errors;
 }
 
+/**
+ * §4.3's render rule, unit-tested at both of the cases the spec names.
+ *
+ * The rule is `observation_window >= 2 × threshold`, **keyed on the tier rather
+ * than on a global flag**. The two cases are the two tiers in this build and
+ * they must come out differently: the card tier holds 92 days against an 89-day
+ * threshold and has to refuse; the member tier holds 638 and has to render.
+ *
+ * A global flag would make one of these wrong, and it is the kind of wrong that
+ * looks fine — release blocker B1 was a Lost series that was near-zero *by
+ * construction* because a guest could only be counted lost if last seen in the
+ * first three days of the window. Every number involved was arithmetically
+ * correct and the conclusion a reader drew was false.
+ */
+function verifyRenderRule(): string[] {
+  const errs: string[] = [];
+  const w = (days: number): AnalysisWindow => ({
+    start: "2026-05-01", end: "2026-07-31", months: 3, days,
+  });
+
+  const card = windowVerdict(w(92), 89, "lapse");
+  if (card.renders) errs.push("card tier at (92 days, 89-day threshold) rendered — it must refuse");
+  if (card.required !== 178) errs.push(`card tier required ${card.required} days, expected 178`);
+
+  const member = windowVerdict(w(638), 89, "lapse");
+  if (!member.renders) errs.push("member tier at (638 days, 89-day threshold) refused — it must render");
+
+  // The boundary itself, so the comparison is proven to be `>=` and not `>`.
+  if (!windowVerdict(w(178), 89, "lapse").renders) {
+    errs.push("exactly twice the threshold refused — the rule is >=, not >");
+  }
+  if (windowVerdict(w(177), 89, "lapse").renders) {
+    errs.push("one day short of twice the threshold rendered — the rule is not being applied");
+  }
+
+  // A refusal must carry a reason a reader can act on, never a blank.
+  const refusal = windowVerdict(w(92), 89, "lapse");
+  if (!refusal.renders && (!refusal.statement || !refusal.short)) {
+    errs.push("a refusal rendered without its reason — §8 rule 3 forbids a blank");
+  }
+  return errs;
+}
+
+/**
+ * §7.3. The guest day grid carries every visit, so no history may be truncated.
+ *
+ * The cap used to be 60 and the drawer printed *"the timeline is capped; the
+ * total above is not"*. A grid cannot carry a truncated series — a blank cell
+ * would read as "did not come" when it meant "we stopped sending" — so this
+ * asserts the property the grid depends on rather than trusting the constant.
+ */
+function verifyHistoryComplete(guests: GuestRows): string[] {
+  const truncated = guests.rows.filter((g) => (g.history?.length ?? 0) < g.visits);
+  if (!truncated.length) return [];
+  const worst = truncated.sort((a, b) => b.visits - a.visits)[0];
+  return [
+    `${truncated.length} guests carry fewer history rows than visits — worst is ` +
+      `${worst.history?.length ?? 0} of ${worst.visits}. The day grid would draw blanks for real visits.`,
+  ];
+}
+
+/**
+ * §5.4. The scatter and the segment table sit side by side, so they must agree
+ * exactly — not approximately.
+ *
+ * They disagreed by a handful of people out of 4,966 while running textually
+ * identical SQL, because a `MAX_BY` tie in the card-to-member resolution was
+ * non-deterministic and each query rolled its own dice. That is the trap
+ * register's "a count on a chart disagrees with the count in the table beneath
+ * it", which is live on the report this one replaces.
+ */
+function verifyScatterAgrees(snap: Snapshot): string[] {
+  if (!snap.scatter) return [];
+  const fromTable = new Map<string, number>();
+  for (const r of snap.segments.rows) {
+    if (r.tier !== "member" || !r.segment) continue;
+    fromTable.set(r.segment, (fromTable.get(r.segment) ?? 0) + r.guests);
+  }
+  const fromPlot = new Map<string, number>();
+  for (const [, , seg] of snap.scatter.rows) {
+    if (seg < 0) continue;
+    const key = snap.scatter.segments[seg];
+    fromPlot.set(key, (fromPlot.get(key) ?? 0) + 1);
+  }
+  const errs: string[] = [];
+  for (const [seg, n] of fromTable) {
+    const plotted = fromPlot.get(seg) ?? 0;
+    if (plotted !== n) errs.push(`segment ${seg}: table says ${n}, scatter plots ${plotted}`);
+  }
+  return errs;
+}
+
 async function main() {
   let failures = 0;
+
+  console.log("\nthe render rule (§4.3), unit-tested at both tiers");
+  const ruleErrors = verifyRenderRule();
+  if (ruleErrors.length) {
+    failures += ruleErrors.length;
+    for (const e of ruleErrors) console.log(`  ✗ ${e}`);
+  } else {
+    console.log("  ✓ refuses at (92 days, 89-day threshold), renders at (638, 89), and the");
+    console.log("    boundary at exactly 178 days is inclusive");
+  }
 
   // The grading is verified before the snapshot is read, because everything in
   // the snapshot is downstream of it.
@@ -292,6 +409,17 @@ async function main() {
     for (const period of await periodsOf(slug)) {
     const fixture = await load(slug, period);
     console.log(`\n${slug} · ${period}`);
+
+    // Two properties the surfaces depend on and no data corruption can reach:
+    // the day grid needs every visit, and the scatter has to agree exactly with
+    // the table it sits beside.
+    for (const e of [
+      ...verifyHistoryComplete(fixture.guests),
+      ...verifyScatterAgrees(fixture.snap),
+    ]) {
+      failures++;
+      console.log(`  ✗ ${e}`);
+    }
 
     const live = runChecks(fixture.snap, fixture.guests);
 

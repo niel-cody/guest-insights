@@ -530,6 +530,105 @@ export function overdueRatio(g: Guest): number | null {
   return g.daysSince / g.cadenceDays;
 }
 
+// ── §7.3: the guest's own trading week ──────────────────────────────────────
+
+export type VisitWeek = { key: string; label: string; sublabel?: string; start: string };
+
+/**
+ * The calendar weeks a window spans, Monday-aligned.
+ *
+ * §7.3's day grid is seven rows of weekday against these as columns, which for a
+ * 92-day window is fourteen of them — enough to carry **every** visit a guest
+ * made, so the old *"showing 60 of 118"* confession has nothing left to confess.
+ *
+ * Weeks start on Monday to match the grid rows. The first column is therefore
+ * usually a partial week, and that is correct: the window opens on a real date,
+ * not on a Monday, and padding it to a whole week would draw days the data does
+ * not cover as though nobody came.
+ */
+export function visitWeeks(w: AnalysisWindow): VisitWeek[] {
+  const start = new Date(`${w.start}T00:00:00Z`);
+  const end = new Date(`${w.end}T00:00:00Z`);
+  // Back up to the Monday on or before the window start.
+  const firstMonday = new Date(start);
+  const shift = (start.getUTCDay() + 6) % 7;
+  firstMonday.setUTCDate(firstMonday.getUTCDate() - shift);
+
+  const out: VisitWeek[] = [];
+  for (let d = new Date(firstMonday); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
+    const iso = d.toISOString().slice(0, 10);
+    out.push({
+      key: iso,
+      label: new Date(iso + "T00:00:00Z").toLocaleDateString("en-AU", {
+        day: "numeric", month: "short", timeZone: "UTC",
+      }),
+      start: iso,
+    });
+  }
+  return out;
+}
+
+/** Which week column and weekday row a day-offset from the window start falls in. */
+export function placeVisit(
+  offset: number,
+  w: AnalysisWindow,
+  weeks: VisitWeek[],
+): { weekKey: string; dow: number; iso: string } | null {
+  const d = new Date(`${w.start}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + offset);
+  const iso = d.toISOString().slice(0, 10);
+  const dow = d.getUTCDay();
+  // The Monday of this day's week.
+  const monday = new Date(d);
+  monday.setUTCDate(monday.getUTCDate() - ((dow + 6) % 7));
+  const weekKey = monday.toISOString().slice(0, 10);
+  return weeks.some((x) => x.key === weekKey) ? { weekKey, dow, iso } : null;
+}
+
+/**
+ * Whether a guest's rhythm is steady, widening or tightening.
+ *
+ * §7.3 asks for this as a sentence rather than a tile, and it is computed first
+ * half against second half of their own visits — not against the org median,
+ * which is how a previous build described four guests at 9, 22, 22 and 22 days
+ * as all "normally coming every 17 days".
+ *
+ * Returns null below four visits: three gaps is the fewest that can be split
+ * into two halves and still say anything, and two halves of one gap each is a
+ * comparison between two numbers wearing the clothes of a trend.
+ */
+export function rhythmShift(
+  history: [number, number, number, number][],
+): { verdict: "steady" | "widening" | "tightening"; firstHalf: number; secondHalf: number } | null {
+  if (history.length < 4) return null;
+  // History arrives most-recent first; gaps are easier to read oldest first.
+  const days = [...history].map((h) => h[0]).sort((a, b) => a - b);
+  const gaps: number[] = [];
+  for (let i = 1; i < days.length; i++) gaps.push(days[i] - days[i - 1]);
+  if (gaps.length < 3) return null;
+
+  const mid = Math.floor(gaps.length / 2);
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / (xs.length || 1);
+  const firstHalf = mean(gaps.slice(0, mid));
+  const secondHalf = mean(gaps.slice(gaps.length - mid));
+
+  /**
+   * A verdict needs to clear **both** bars: a fifth in relative terms and a
+   * whole day in absolute ones.
+   *
+   * The relative bar alone is not enough. A daily regular averaging 0.6 days
+   * between visits and then 0.7 has moved 17% and has not changed their
+   * behaviour by any amount a human could notice — but "their rhythm is
+   * widening" is a sentence an operator will act on. The absolute bar is what
+   * stops a tenth of a day being reported as a trend, and it is the reason this
+   * returns "steady" far more often than a purely proportional test would.
+   */
+  const change = firstHalf ? secondHalf / firstHalf - 1 : 0;
+  const material = Math.abs(change) >= 0.2 && Math.abs(secondHalf - firstHalf) >= 1;
+  const verdict = !material ? "steady" : change > 0 ? "widening" : "tightening";
+  return { verdict, firstHalf, secondHalf };
+}
+
 // ── revenue decomposition ───────────────────────────────────────────────────
 
 /**
@@ -623,6 +722,46 @@ export const SEGMENT_LABEL: Record<string, string> = {
 
 export const SEGMENT_ORDER = ["regular", "established", "slipping", "lapsed", "new", "one-visit"] as const;
 
+/**
+ * One colour per segment, declared once.
+ *
+ * §5.4 puts three charts side by side — a scatter and two treemaps — and asks
+ * for the same colour per segment across them. **The pairing of the treemaps is
+ * the whole point**: a segment that is big in traffic and small in revenue is
+ * visible across two panels and invisible in either alone, and that comparison
+ * only works if the eye can carry a colour from one panel to the next.
+ *
+ * The ramp is ordered by health rather than by hue family: the engaged end is
+ * blue, the at-risk end warm, and Seen once is deliberately neutral because it
+ * is not a failure state — it is the largest group in most hospitality
+ * businesses and colouring it red would editorialise the single most common
+ * fact about the estate.
+ */
+export const SEGMENT_COLOUR: Record<string, string> = {
+  regular: "var(--gain-returning)",
+  established: "var(--tier-member)",
+  slipping: "var(--warning)",
+  lapsed: "var(--loss)",
+  new: "var(--gain-reactivated)",
+  "one-visit": "var(--tier-unattributed)",
+};
+
+/**
+ * The two visit thresholds that are actually drawable on a spend-against-visits
+ * plot, and their names.
+ *
+ * The other boundaries — slipping, lapsed — condition on recency against the
+ * guest's *own* cadence, which is not either axis of that chart. §5.4 asks for
+ * the boundaries to render as lines so a reader can see where the cut falls, and
+ * these two can honestly be drawn. The rest are stated beside the chart instead
+ * of being approximated onto it, because a line in the wrong place is worse than
+ * no line: it invites the reader to measure against it.
+ */
+export const VISIT_BOUNDARIES = [
+  { visits: 3, label: "3 visits — below this no lifecycle verdict is given" },
+  { visits: 10, label: "10 visits — Regulars" },
+] as const;
+
 export function rollUpSegments(segments: Segments, tier?: "member" | "card") {
   const rows = tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows;
   const by = new Map<string, { guests: number; visits: number; spend: number; multiVenue: number }>();
@@ -656,6 +795,45 @@ export function valueBands(segments: Segments, tier?: "member" | "card") {
       minSpend: Math.min(...rs.map((r) => r.minSpend)),
       maxSpend: Math.max(...rs.map((r) => r.maxSpend)),
     }));
+}
+
+// ── §5.6: the opportunity, at a size somebody can act on ────────────────────
+
+/**
+ * The enrolment opportunity per venue per week.
+ *
+ * **Nobody can act on a $1.3m estate-wide lottery figure.** A venue manager can
+ * act on a number for their own site this week, and that is the only form of
+ * this figure that ever changes what anyone does on a Tuesday.
+ *
+ * Two quantities come back and they are **never merged**, because they are
+ * different things and the difference is roughly nine to one:
+ *
+ * - `trade` is what these guests already spend. It is what is at stake — the
+ *   revenue that would come onto a name if they enrolled — and it is the figure
+ *   §5.6 quotes at about $5,270.
+ * - `upliftLo`/`upliftHi` are the *additional* spend enrolling would cause,
+ *   sized on the within-person estimate and carried as an interval because a
+ *   point estimate off a +3.0% to +19.3% spread is false precision.
+ *
+ * Publishing the trade alone invites it to be read as uplift, which would
+ * overstate the prize by about nine times. Publishing the uplift alone loses the
+ * thing a manager can actually see on their own floor. Both, labelled.
+ */
+export function opportunityPerVenueWeek(
+  opp: Members["opportunity"],
+  org: Org,
+): { trade: number; upliftLo: number; upliftHi: number; weeks: number; venues: number } {
+  const venues = Math.max(org.venues.length, 1);
+  const weeks = Math.max(Math.round(org.window.days / 7), 1);
+  const per = (v: number) => v / venues / weeks;
+  return {
+    trade: per(opp.candidates.spend),
+    upliftLo: per(opp.uplift?.valueLo ?? 0),
+    upliftHi: per(opp.uplift?.valueHi ?? 0),
+    weeks,
+    venues,
+  };
 }
 
 // ── the basket: what each tier is actually buying ───────────────────────────

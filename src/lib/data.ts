@@ -12,7 +12,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cache } from "react";
-import type { Coverage, Dayparts, GuestRows, Guests, Items, Members, Network, Org, Snapshot } from "./types";
+import type {
+  Cohorts, Coverage, DayGrid, Dayparts, GuestRows, Guests, Items, Members, Network, Org,
+  Scatter, Snapshot, VenueCrossRow,
+} from "./types";
 import { unpackGuests } from "./guest-columns";
 import type { Periods } from "./periods";
 
@@ -57,20 +60,48 @@ export const getOrg = cache(
 );
 
 export const getSnapshot = cache(async (slug: string, period: string): Promise<Snapshot> => {
-  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items] =
-    await Promise.all([
-      read<Snapshot["org"]>(slug, period, "org"),
-      read<Snapshot["coverage"]>(slug, period, "coverage"),
-      read<Snapshot["lifecycle"]>(slug, period, "lifecycle"),
-      read<Snapshot["decomposition"]>(slug, period, "decomposition"),
-      read<Snapshot["segments"]>(slug, period, "segments"),
-      read<Snapshot["members"]>(slug, period, "members"),
-      read<Snapshot["dayparts"]>(slug, period, "dayparts"),
-      read<Snapshot["network"]>(slug, period, "network"),
-      read<Snapshot["venueMonthly"]>(slug, period, "venueMonthly"),
-      read<Items>(slug, period, "items").catch(() => null),
-    ]);
-  return { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items };
+  const [
+    org, coverage, lifecycle, decomposition, segments, members, dayparts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+  ] = await Promise.all([
+    read<Snapshot["org"]>(slug, period, "org"),
+    read<Snapshot["coverage"]>(slug, period, "coverage"),
+    read<Snapshot["lifecycle"]>(slug, period, "lifecycle"),
+    read<Snapshot["decomposition"]>(slug, period, "decomposition"),
+    read<Snapshot["segments"]>(slug, period, "segments"),
+    read<Snapshot["members"]>(slug, period, "members"),
+    read<Snapshot["dayparts"]>(slug, period, "dayparts"),
+    read<DayGrid>(slug, period, "dayGrid").catch(() => null),
+    read<VenueCrossRow[]>(slug, period, "venueCross").catch(() => []),
+    read<Scatter>(slug, period, "scatter").catch(() => null),
+    read<Snapshot["network"]>(slug, period, "network"),
+    read<Snapshot["venueMonthly"]>(slug, period, "venueMonthly"),
+    read<Items>(slug, period, "items").catch(() => null),
+    getCohorts(slug),
+  ]);
+  return {
+    org, coverage, lifecycle, decomposition, segments, members, dayparts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+  };
+});
+
+/**
+ * The member cohort set. **Read from the org directory, not a period directory.**
+ *
+ * That is the §4.3 wall expressed as a file path: the member tier runs 21 months
+ * on the loyalty scan and the card periods run 92 days on the payment reference,
+ * so a cohort file filed under a card period would be one directory listing away
+ * from being read as part of it. It is not in any of them.
+ *
+ * Null on an org extracted before the cohort lens existed, which is why every
+ * consumer guards rather than assuming the file is there.
+ */
+export const getCohorts = cache(async (slug: string): Promise<Cohorts | null> => {
+  try {
+    return JSON.parse(await readFile(join(DATA, slug, "cohorts.json"), "utf8")) as Cohorts;
+  } catch {
+    return null;
+  }
 });
 
 export const getMembers = cache(async (slug: string, period: string): Promise<Members> => read<Members>(slug, period, "members"));

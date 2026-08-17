@@ -31,31 +31,54 @@ export function Card({
 /**
  * A headline figure. Tiles round to the nearest ten by contract — a front page
  * that reads 412 invites an argument about the 2, and the 2 is never the point.
+ *
+ * ── There is no `hint` prop, and that is deliberate ────────────────────────
+ *
+ * This used to take a `hint` string and render an info icon with a `title`
+ * attribute. §8 rule 7 removes the whole mechanism: **hover does not exist on
+ * touch**, a caveat nobody can reach is a caveat nobody reads, and a tile that
+ * needs a tooltip to be understood is not finished. The prototype this replaces
+ * shipped four info icons that rendered nothing at all when clicked.
+ *
+ * Everything a reader needs is in `footnote`, in smaller always-visible type.
+ * That is not a downgrade — it is the caveat arriving without being asked for,
+ * which is the only way it reaches the reader who is in a hurry.
  */
 export function Tile({
-  label, value, hint, accent = "var(--accent)", footnote,
+  label, value, accent = "var(--accent)", footnote, refused = false,
 }: {
   label: string;
   value: string;
-  hint?: string;
   accent?: string;
+  /** Always visible. Population, window and denominator live here. */
   footnote?: ReactNode;
+  /**
+   * §8 rule 3. **A refused figure renders as a struck-through number with the
+   * reason under it, never as a blank.**
+   *
+   * A blank reads as broken and gets raised as a bug; a strike reads as a
+   * decision and gets read. This lives on the component rather than at each
+   * call site because the one place it was done by hand — the member-value tile
+   * at a merchant where the within-person estimate is not estimable — rendered
+   * the words "not published" in the same weight as a real figure, which is
+   * neither a blank nor a strike but a third thing that looks like an answer.
+   */
+  refused?: boolean;
 }) {
   return (
     <div
       className="rounded-xl border border-line bg-surface-raised px-5 py-4"
       style={{ borderLeft: `3px solid ${accent}` }}
     >
-      <div className="flex items-center gap-1.5">
-        <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">{label}</span>
-        {hint && (
-          <span title={hint} className="cursor-help text-ink-muted">
-            <IconInfo />
-          </span>
-        )}
+      <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">{label}</span>
+      <div
+        className={`tnum mt-1.5 leading-none font-semibold ${
+          refused ? "text-[22px] text-ink-muted line-through decoration-2" : "text-[30px] text-ink"
+        }`}
+      >
+        {value}
       </div>
-      <div className="tnum mt-1.5 text-[30px] leading-none font-semibold text-ink">{value}</div>
-      {footnote && <div className="mt-2 text-[12px] text-ink-secondary">{footnote}</div>}
+      {footnote && <div className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{footnote}</div>}
     </div>
   );
 }

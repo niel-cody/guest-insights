@@ -3,30 +3,34 @@
 import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconSearch, IconX } from "@/components/shell/Icons";
-import { Card, EmptyState, Facts, Pill } from "@/components/ui/Primitives";
-import { GuestBasket, GuestHistory } from "@/components/ui/GuestBasket";
-import {
-  SEGMENT_LABEL, count, dayLabel, habit, money, overdueRatio, pct, recency, recencyShort,
-} from "@/lib/metrics";
+import { Card, EmptyState, Pill } from "@/components/ui/Primitives";
+import { GuestDrawer } from "./GuestDrawer";
+import { SaveToList } from "@/components/ui/SaveToList";
+import { SEGMENT_LABEL, count, money, pct, recencyShort } from "@/lib/metrics";
 import type { Guest, Guests, Items, Org } from "@/lib/types";
 import { unpackGuests } from "@/lib/guest-columns";
-import { plural } from "@/lib/metrics";
-import { DEFAULT_VIEW, parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
+import { parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
 import { track } from "@/lib/instrument";
-
-type SortKey = "spend" | "visits" | "daysSince" | "firstSeen";
 
 const PAGE = 100;
 const DEFAULT_SORT: SortKey = "spend";
 
+type SortKey = "spend" | "visits" | "daysSince" | "firstSeen" | "venues";
+
+export const BAND_LABEL = ["Lowest", "Second", "Middle", "Fourth", "Top"];
+
 /**
  * The population a view selects, as a pure function.
  *
- * Exported because this is the thing B2a's route tests have to assert on. The
- * defect that shipped was a parameter that survived in the URL and was then
- * ignored, so a test that checks the parameter round-trips proves nothing —
- * **the assertion has to be on the rendered population.** Keeping the selection
- * here means the test and the grid run identical code rather than similar code.
+ * Exported because this is the thing the route tests assert on. The defect that
+ * shipped was a parameter that survived in the URL and was then ignored, so a
+ * test that checks the parameter round-trips proves nothing — **the assertion
+ * has to be on the rendered population.** Keeping the selection here means the
+ * test and the grid run identical code rather than similar code.
+ *
+ * `minVisits` and `minVenues` were being linked to from Overview and Behaviour
+ * and were not implemented here at all, so both links landed on a larger
+ * population than the figure the reader had just clicked.
  */
 export function applyView(rows: Guest[], view: View): Guest[] {
   const needle = view.q.trim().toLowerCase();
@@ -37,6 +41,8 @@ export function applyView(rows: Guest[], view: View): Guest[] {
       (!view.segment || g.segment === view.segment) &&
       (view.band == null || g.valueBand === view.band) &&
       (!view.daypart || g.homeDaypart === view.daypart) &&
+      (view.minVisits == null || g.visits >= view.minVisits) &&
+      (view.minVenues == null || g.venues >= view.minVenues) &&
       (!view.venue.length || view.venue.includes(g.homeStoreId)) &&
       (!needle || (g.name ?? "").toLowerCase().includes(needle) || g.id.includes(needle)),
   );
@@ -46,37 +52,28 @@ export function applyView(rows: Guest[], view: View): Guest[] {
     return dir * (Number(b[sort]) - Number(a[sort]));
   });
 }
-const BAND_LABEL = ["Lowest", "Second", "Middle", "Fourth", "Top"];
 
-/**
- * Names are masked by default.
- *
- * The previous build rendered unmasked full names beside spend, last-seen and
- * home venue, with no role gate, no export control and no audit. The names in
- * this snapshot are synthetic, which is a reason the demo is safe to show and
- * not a reason the pattern is safe to ship — so the surface behaves the way the
- * real one has to.
- */
-function mask(name: string): string {
-  const parts = name.split(" ");
-  return parts
+/** Names are masked by default. The reveal is role-gated and logged in production. */
+export function mask(name: string): string {
+  return name
+    .split(" ")
     .map((p, i) => (i === 0 ? p : /^[A-Z0-9]{4}$/.test(p) ? p : `${p[0]}.`))
     .join(" ");
 }
 
-const CARD_TITLE =
+export const CARD_NOTE =
   "A payment card seen more than once. Oolio holds no name, email or phone for this person — " +
   "the reference is ours, generated from the card, and is not the card's number.";
 
 /**
  * How a person is labelled.
  *
- * Members get a name because the business has one. **Card-recognised guests get a
- * reference, because it does not.** Rendering a first and last name against a card
- * makes the two rows read as the same kind of object, and an operator scanning the
- * grid concludes they can contact both. They can contact one.
+ * Members get a name because the business has one. **Card-recognised guests get
+ * a reference, because it does not.** Rendering a first and last name against a
+ * card makes the two rows read as the same kind of object, and an operator
+ * scanning the grid concludes they can contact both. They can contact one.
  */
-function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
+export function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
   if (g.tier === "member" && g.name) {
     return (
       <>
@@ -86,7 +83,7 @@ function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
     );
   }
   return (
-    <span className="inline-flex items-baseline gap-1.5" title={CARD_TITLE}>
+    <span className="inline-flex items-baseline gap-1.5">
       <span className="text-[12px] text-ink-muted">Card</span>
       <code className="font-medium text-ink-secondary">·{g.id.slice(0, 4).toUpperCase()}</code>
       <code className="text-[11px] text-ink-muted">{g.id.slice(0, 8)}</code>
@@ -94,66 +91,68 @@ function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
   );
 }
 
+type ColKey =
+  | "guest" | "tier" | "segment" | "band" | "visits" | "spend" | "lastSeen" | "daypart" | "venue";
+
+type Column = { key: ColKey; label: string; fixed?: boolean; numeric?: boolean };
+
 /**
- * The guest grid and drawer.
- *
- * The grid works on a bounded sample and paginates it; the tiles above always
- * report the true population. That distinction is stated rather than implied.
+ * §7.1's columns. `guest` is fixed — a grid whose identity column can be hidden
+ * is a spreadsheet of numbers with no rows.
  */
-export function GuestGrid({ guests, org, items, crossVenueShare }: {
+const COLUMNS: Column[] = [
+  { key: "guest", label: "Guest", fixed: true },
+  { key: "tier", label: "Tier" },
+  { key: "segment", label: "Segment" },
+  { key: "band", label: "Value band" },
+  { key: "visits", label: "Visits", numeric: true },
+  { key: "spend", label: "Spend", numeric: true },
+  { key: "lastSeen", label: "Last seen", numeric: true },
+  { key: "daypart", label: "Usual time" },
+  { key: "venue", label: "Home venue" },
+];
+
+/** What the `Group` control in the filter bar groups by. */
+const GROUPS = {
+  none: { label: "None", of: () => "" },
+  tier: { label: "Tier", of: (g: Guest) => (g.tier === "member" ? "Members" : "Card only") },
+  segment: { label: "Segment", of: (g: Guest) => (g.segment ? SEGMENT_LABEL[g.segment] : "No verdict — card tier") },
+  band: { label: "Value band", of: (g: Guest) => `${BAND_LABEL[g.valueBand - 1]} fifth` },
+  venue: { label: "Home venue", of: (g: Guest) => g.homeStore },
+} as const;
+
+export type GroupKey = keyof typeof GROUPS;
+
+export function GuestGrid({
+  guests, org, items, period, crossVenueShare, group,
+}: {
   guests: Guests;
   org: Org;
   items: Items | null;
+  period: string;
   crossVenueShare: number;
+  group: GroupKey;
 }) {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
   /**
-   * B2. **The view is derived from the URL on every render. It is never copied
-   * into state.**
-   *
-   * What shipped was `useState(sp.get("tier") ?? "all")` — the URL read once at
-   * mount and then abandoned. That is two sources of truth reconciled at exactly
-   * one moment, and it is why `?daypart=lunch` showed Daypart = All and 17,015
-   * matches on a cold load and Lunch and 3,148 on a soft one. Both renders were
-   * running different code paths over the same parameter.
-   *
-   * There is no local filter state below, so there is no second source to
-   * diverge from. Adding one would reintroduce the defect, which is the reason
-   * this is spelled out rather than left to be inferred.
+   * The view is derived from the URL on every render and never copied into
+   * state. What shipped once was `useState(sp.get("tier") ?? "all")` — the URL
+   * read at mount and then abandoned — which is two sources of truth reconciled
+   * at exactly one moment, and why `?daypart=lunch` showed different populations
+   * on a cold and a warm load. There is no local filter state below, so there is
+   * no second source to diverge from.
    */
-  const view = useMemo(
-    () => parseView(Object.fromEntries(sp.entries()) as SearchParams),
-    [sp],
-  );
+  const view = useMemo(() => parseView(Object.fromEntries(sp.entries()) as SearchParams), [sp]);
 
-  /**
-   * Every filter change writes to the URL. B2b: without this, no view can be
-   * shared or bookmarked, which is the half of the defect that was invisible
-   * because nothing on screen was wrong.
-   *
-   * `replace`, not `push`: changing a filter is refining one question, not
-   * navigating, and a Back button that walks a user through nine intermediate
-   * filter states is its own defect. `scroll: false` keeps the grid still.
-   */
   const setView = useCallback(
     (patch: Partial<View>) => {
-      // Any change to the population resets to the first page, otherwise a
-      // narrower filter lands the reader on an empty page 4 and reads as "no
-      // matches". An explicit page in the patch wins.
       const changesPopulation = Object.keys(patch).some(
-        (k) => k !== "page" && k !== "guest" && k !== "sort" && k !== "dir",
+        (k) => k !== "page" && k !== "guest" && k !== "sort" && k !== "dir" && k !== "tab",
       );
-      const next: View = {
-        ...view,
-        ...(changesPopulation ? { page: 1 } : {}),
-        ...patch,
-      };
-      // R-189. The control that moved, never the value chosen — knowing the
-      // daypart filter was used answers the question; knowing which daypart
-      // starts describing the operator's own trade back to whoever reads it.
+      const next: View = { ...view, ...(changesPopulation ? { page: 1 } : {}), ...patch };
       for (const key of Object.keys(patch)) {
         track(key === "guest" ? "drawer.open" : "filter.change", "guests", key);
       }
@@ -163,16 +162,16 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
   );
 
   /**
-   * The reveal is deliberately *not* in the URL.
-   *
-   * Every other control here is shareable because sharing a view is the point.
-   * Unmasking names is a privacy action, role-gated and audit-logged in
-   * production, and a link that silently unmasks on someone else's screen would
-   * make one person's authorisation travel to another person's browser.
+   * The reveal is deliberately not in the URL. Every other control here is
+   * shareable because sharing a view is the point; unmasking is a privacy action
+   * that is role-gated and audit-logged in production, and a link that silently
+   * unmasked on somebody else's screen would make one person's authorisation
+   * travel to another person's browser.
    */
   const [unmasked, setUnmasked] = useState(false);
+  const [hidden, setHidden] = useState<Set<ColKey>>(new Set());
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The set arrives columnar and is expanded once here. See lib/guest-columns.
   const rows = useMemo(() => unpackGuests(guests), [guests]);
   const filtered = useMemo(() => applyView(rows, view), [rows, view]);
 
@@ -180,21 +179,38 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
   const safePage = Math.min(Math.max(view.page - 1, 0), pages - 1);
   const shown = filtered.slice(safePage * PAGE, safePage * PAGE + PAGE);
 
-  // The open guest is resolved from the URL, so a drawer can be sent. A guest id
-  // that is no longer in the filtered set opens nothing rather than throwing —
-  // a link that has been through a mail client should degrade, not break.
   const open = view.guest ? (filtered.find((g) => g.id === view.guest) ?? null) : null;
   const index = open ? filtered.findIndex((g) => g.id === open.id) : -1;
 
-  const sort = (view.sort ?? DEFAULT_SORT) as SortKey;
+  const visible = COLUMNS.filter((c) => c.fixed || !hidden.has(c.key));
 
-  const dayparts = org.dayparts.filter((d) => rows.some((g) => g.homeDaypart === d.key));
+  // The SUM row is over **the whole filtered population**, not the page. A total
+  // that silently describes 100 of 17,000 rows is the kind of number that gets
+  // quoted in a meeting.
+  const sums = useMemo(
+    () => ({
+      people: filtered.length,
+      visits: filtered.reduce((a, g) => a + g.visits, 0),
+      spend: filtered.reduce((a, g) => a + g.spend, 0),
+    }),
+    [filtered],
+  );
+
+  const grouped = useMemo(() => {
+    if (group === "none") return null;
+    const by = new Map<string, Guest[]>();
+    for (const g of shown) {
+      const k = GROUPS[group].of(g);
+      by.set(k, [...(by.get(k) ?? []), g]);
+    }
+    return [...by.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [shown, group]);
 
   return (
     <>
       <Card
         title={`${org.labels.guests[0].toUpperCase()}${org.labels.guests.slice(1)}`}
-        subtitle={`${count(filtered.length)} match · ${count(guests.sampled)} in the working set · ${count(guests.population)} known in total`}
+        subtitle={`${count(filtered.length)} match · ${count(guests.sampled)} in the working set · ${count(guests.population)} classifiable in total`}
         padded={false}
         right={
           <div className="flex flex-wrap items-center gap-2">
@@ -207,53 +223,55 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
                 className="w-28 bg-transparent text-[13px] outline-none placeholder:text-ink-muted"
               />
             </label>
-            <Choice label="Tier" value={view.tier ?? "all"} onChange={(v) => setView({ tier: v === "all" ? null : (v as View["tier"]), segment: v === "card" ? null : view.segment })} options={[
-              { value: "all", label: "All" },
-              { value: "member", label: "Members" },
-              { value: "card", label: "Card only" },
-            ]} />
-            <Choice
-              label="Segment"
-              value={view.segment ?? "all"}
-              onChange={(v) => setView({ segment: v === "all" ? null : (v as View["segment"]) })}
-              disabled={view.tier === "card"}
-              hint={view.tier === "card" ? "Only members carry a lifecycle verdict" : undefined}
-              options={[
-                { value: "all", label: "All" },
-                ...Object.entries(SEGMENT_LABEL).map(([value, label]) => ({ value, label })),
-              ]}
-            />
-            <Choice label="Value" value={view.band == null ? "all" : String(view.band)} onChange={(v) => setView({ band: v === "all" ? null : Number(v) })} options={[
-              { value: "all", label: "All" },
-              ...BAND_LABEL.map((l, i) => ({ value: String(i + 1), label: `${l} fifth` })),
-            ]} />
-            {dayparts.length > 1 && (
-              <Choice label="Daypart" value={view.daypart ?? "all"} onChange={(v) => setView({ daypart: v === "all" ? null : v })} options={[
-                { value: "all", label: "All" },
-                ...dayparts.map((d) => ({ value: d.key, label: d.label })),
-              ]} />
-            )}
-            {org.venues.length > 1 && (
-              <Choice label="Venue" value={view.venue[0] ?? "all"} onChange={(v) => setView({ venue: v === "all" ? [] : [v] })} options={[
-                { value: "all", label: "All" },
-                ...org.venues.map((v) => ({ value: v.id, label: v.name })),
-              ]} />
-            )}
-            <Choice label="Sort" value={sort} onChange={(v) => setView({ sort: v })} options={[
-              { value: "spend", label: "Spend" },
-              { value: "visits", label: org.labels.visits },
-              { value: "daysSince", label: "Time away" },
-              { value: "firstSeen", label: "First seen" },
-            ]} />
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setPickerOpen((o) => !o)}
+                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium text-ink-secondary hover:bg-surface-hover"
+              >
+                Columns
+                {hidden.size > 0 && <span className="ml-1.5 text-ink-muted">({visible.length})</span>}
+              </button>
+              {pickerOpen && (
+                <div className="absolute top-full right-0 z-30 mt-1 w-[200px] rounded-xl border border-line bg-surface-raised p-2 shadow-lg">
+                  {COLUMNS.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      disabled={c.fixed}
+                      onClick={() =>
+                        setHidden((h) => {
+                          const next = new Set(h);
+                          if (next.has(c.key)) next.delete(c.key);
+                          else next.add(c.key);
+                          return next;
+                        })
+                      }
+                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
+                        c.fixed ? "opacity-45" : "text-ink-secondary hover:bg-surface-hover"
+                      }`}
+                    >
+                      {c.label}
+                      {(c.fixed || !hidden.has(c.key)) && <span className="text-[11px]">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <SaveToList view={view} rows={filtered} org={org} period={period} />
+
             <button
               type="button"
               onClick={() => setUnmasked((v) => !v)}
               aria-pressed={unmasked}
-              title="In production this view is role-gated and every reveal is audit-logged"
-              className={`rounded-lg border px-2.5 py-1.5 text-[13px] font-medium ${
-                unmasked ? "border-warning bg-surface-sunken text-ink" : "border-line text-ink-secondary hover:bg-surface-hover"
-              }`}
-              style={unmasked ? { borderColor: "var(--warning)" } : undefined}
+              className="rounded-lg border px-2.5 py-1.5 text-[13px] font-medium"
+              style={
+                unmasked
+                  ? { borderColor: "var(--warning)", background: "var(--surface-sunken)", color: "var(--ink)" }
+                  : { borderColor: "var(--line)", color: "var(--ink-secondary)" }
+              }
             >
               {unmasked ? "Names shown" : "Names masked"}
             </button>
@@ -269,80 +287,99 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
             <table className="w-full min-w-[900px] text-[13px]">
               <thead className="sticky top-0 z-10 bg-surface-raised">
                 <tr className="border-b border-line text-left text-[12px] text-ink-secondary">
-                  <th className="px-5 py-2 font-medium">{org.labels.guest}</th>
-                  <th className="px-3 py-2 font-medium">Tier</th>
-                  <th className="px-3 py-2 font-medium">Segment</th>
-                  <th className="px-3 py-2 font-medium">Value</th>
-                  <th className="px-3 py-2 text-right font-medium">{org.labels.visits}</th>
-                  <th className="px-3 py-2 text-right font-medium">Spend</th>
-                  <th className="px-3 py-2 text-right font-medium">Last seen</th>
-                  <th className="px-3 py-2 font-medium">Usual time</th>
-                  <th className="px-5 py-2 font-medium">Home venue</th>
+                  {visible.map((c) => (
+                    <th
+                      key={c.key}
+                      className={`px-3 py-2 font-medium ${c.numeric ? "text-right" : ""} ${
+                        c.key === "guest" ? "pl-5" : ""
+                      }`}
+                    >
+                      {c.label === "Visits" ? org.labels.visits : c.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody>
-                {shown.map((g) => (
-                  <tr
-                    key={g.id}
-                    onClick={() => setView({ guest: g.id })}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-hover"
-                  >
-                    <td className="px-5 py-2">
-                      <Identity g={g} unmasked={unmasked} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Pill tone={g.tier === "member" ? "member" : "card"}>
-                        {g.tier === "member" ? "Member" : "Card"}
-                      </Pill>
-                    </td>
-                    <td className="px-3 py-2 text-ink-secondary">
-                      {g.segment ? SEGMENT_LABEL[g.segment] : <span className="text-ink-muted">—</span>}
-                    </td>
-                    <td className="px-3 py-2 text-ink-secondary">{BAND_LABEL[g.valueBand - 1]}</td>
-                    {/* Grids never round. */}
-                    <td className="tnum px-3 py-2 text-right">{g.visits}</td>
-                    <td className="tnum px-3 py-2 text-right">{money(g.spend)}</td>
-                    <td className="tnum px-3 py-2 text-right text-ink-secondary">{recencyShort(g.daysSince, org.window)}</td>
-                    <td className="px-3 py-2 text-ink-secondary">
-                      {org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—"}
-                    </td>
-                    <td className="px-5 py-2 text-ink-secondary">
-                      {g.homeStore}
-                      {g.venues > 1 && (
-                        <span className="ml-1.5 text-[11px] text-ink-muted" title={`Visits ${g.venues} venues`}>
-                          +{g.venues - 1}
+
+              {grouped ? (
+                grouped.map(([key, gs]) => (
+                  <tbody key={key}>
+                    <tr className="bg-surface-sunken">
+                      <th
+                        scope="colgroup"
+                        colSpan={visible.length}
+                        className="px-5 py-1.5 text-left text-[12px] font-semibold text-ink"
+                      >
+                        {key}
+                        <span className="tnum ml-2 font-normal text-ink-muted">
+                          {count(gs.length)} · {money(gs.reduce((a, g) => a + g.spend, 0))}
                         </span>
-                      )}
+                      </th>
+                    </tr>
+                    {gs.map((g) => (
+                      <Row key={g.id} g={g} org={org} visible={visible} unmasked={unmasked} onOpen={() => setView({ guest: g.id })} />
+                    ))}
+                  </tbody>
+                ))
+              ) : (
+                <tbody>
+                  {shown.map((g) => (
+                    <Row key={g.id} g={g} org={org} visible={visible} unmasked={unmasked} onOpen={() => setView({ guest: g.id })} />
+                  ))}
+                </tbody>
+              )}
+
+              {/* The SUM row, over the whole filtered population. */}
+              <tfoot className="sticky bottom-0 border-t border-line-strong bg-surface-sunken">
+                <tr className="text-[13px] font-semibold text-ink">
+                  {visible.map((c) => (
+                    <td
+                      key={c.key}
+                      className={`px-3 py-2 ${c.numeric ? "tnum text-right" : ""} ${
+                        c.key === "guest" ? "pl-5" : ""
+                      }`}
+                    >
+                      {c.key === "guest"
+                        ? `${count(sums.people)} ${org.labels.guests}`
+                        : c.key === "visits"
+                          ? count(sums.visits)
+                          : c.key === "spend"
+                            ? money(sums.spend)
+                            : ""}
                     </td>
-                  </tr>
-                ))}
-              </tbody>
+                  ))}
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
-          <p className="max-w-[70ch] text-[12px] leading-relaxed text-ink-muted">
-            The grid works on a {count(guests.sampled)}-row working set of the {count(guests.population)} known{" "}
-            {org.labels.guests} — the top of the value distribution in full, plus a deterministic hash-ordered
-            sample of the rest. Every figure above the grid is computed on the whole population, never on this
-            set. Names are masked by default; in production the reveal is role-gated and audit-logged, and every
-            export carries the same control.
+          {/* §7.1: the grid states its true size and its true method, and
+              confirms that the figures above it are not computed on this set. */}
+          <p className="max-w-[80ch] text-[12px] leading-relaxed text-ink-muted">
+            The grid works on a {count(guests.sampled)}-row working set of the{" "}
+            {count(guests.population)} classifiable {org.labels.guests} — the top of the value distribution
+            in full, plus a deterministic hash-ordered sample of the rest, so it looks like the real
+            population rather than a leaderboard. The totals in this footer are over every row the current
+            filter selects, not this page.{" "}
+            <strong className="text-ink-secondary">
+              Every figure on Overview and Behaviour is computed on the whole population, never on this set.
+            </strong>{" "}
+            Names are masked by default; in production the reveal is role-gated and audit-logged. Nothing
+            here exports, downloads, copies or sends.
           </p>
           {pages > 1 && (
             <div className="flex items-center gap-2">
               <button
                 type="button" disabled={safePage === 0} onClick={() => setView({ page: safePage })}
-                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
+                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
               >
                 ←
               </button>
-              <span className="tnum text-[12px] text-ink-secondary">
-                {safePage + 1} of {pages}
-              </span>
+              <span className="tnum text-[12px] text-ink-secondary">{safePage + 1} of {pages}</span>
               <button
                 type="button" disabled={safePage >= pages - 1} onClick={() => setView({ page: safePage + 2 })}
-                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
+                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
               >
                 →
               </button>
@@ -352,7 +389,7 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
       </Card>
 
       {open && (
-        <Drawer
+        <GuestDrawer
           guest={open}
           org={org}
           items={items}
@@ -362,293 +399,62 @@ export function GuestGrid({ guests, org, items, crossVenueShare }: {
           crossVenueShare={crossVenueShare}
           onClose={() => setView({ guest: null })}
           onPrev={index > 0 ? () => setView({ guest: filtered[index - 1].id }) : undefined}
-          onNext={
-            index >= 0 && index < filtered.length - 1
-              ? () => setView({ guest: filtered[index + 1].id })
-              : undefined
-          }
+          onNext={index >= 0 && index < filtered.length - 1 ? () => setView({ guest: filtered[index + 1].id }) : undefined}
         />
       )}
     </>
   );
 }
 
-function Choice({
-  label, value, onChange, options, disabled, hint,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  disabled?: boolean;
-  hint?: string;
-}) {
-  return (
-    <label
-      title={hint}
-      className={`flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[13px] ${
-        disabled ? "opacity-45" : ""
-      }`}
-    >
-      <span className="text-ink-muted">{label}</span>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="cursor-pointer bg-transparent font-medium text-ink outline-none disabled:cursor-not-allowed"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-type Tab = "stats" | "commentary" | "history";
-
-function Drawer({
-  guest: g, org, items, unmasked, crossVenueShare, tab, onTab, onClose, onPrev, onNext,
-}: {
-  guest: Guest;
-  org: Org;
-  items: Items | null;
-  unmasked: boolean;
-  crossVenueShare: number;
-  tab: Tab;
-  onTab: (t: Tab) => void;
-  onClose: () => void;
-  onPrev?: () => void;
-  onNext?: () => void;
-}) {
-  const oneVisit = g.visits === 1;
-  const rhythm = habit(g, org.window);
-  const overdue = overdueRatio(g);
-
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Close" onClick={onClose} className="flex-1 bg-black/25" />
-      <aside className="flex w-[440px] max-w-full flex-col overflow-y-auto border-l border-line bg-surface-raised">
-        <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-[17px] font-semibold text-ink">
-                {g.tier === "member" && g.name ? (
-                  unmasked ? g.name : mask(g.name)
-                ) : (
-                  <span title={CARD_TITLE}>
-                    <span className="text-ink-secondary">Card </span>
-                    <code>·{g.id.slice(0, 4).toUpperCase()}</code>
-                  </span>
-                )}
-              </h2>
-              <Pill tone={g.tier === "member" ? "member" : "card"}>
-                {g.tier === "member" ? "Member" : "Card"}
-              </Pill>
-            </div>
-            <p className="mt-0.5 text-[12px] text-ink-muted">
-              <code>{g.id}</code> · {g.homeStore}
-              {g.segment ? ` · ${SEGMENT_LABEL[g.segment]}` : ""}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-ink-muted hover:bg-surface-hover">
-            <IconX className="h-4 w-4" />
-          </button>
-        </header>
-
-        {/* Three tabs, and every one of the fifteen fields and both prose notes
-            survive the split — this is a reorganisation, not a redesign. Stats
-            answers "what do they do", Commentary answers "what does that mean",
-            and neither was readable while they were interleaved down one
-            scroll. The open tab is in the URL, because "look at what this
-            person buys" is a thing one operator sends another. */}
-        <nav className="flex gap-1 border-b border-line px-3" role="tablist">
-          {([
-            ["stats", "Stats"],
-            ["commentary", "Commentary"],
-            ["history", `${org.labels.visits[0].toUpperCase()}${org.labels.visits.slice(1)}`],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              onClick={() => onTab(key)}
-              className={`-mb-px border-b-2 px-3 py-2.5 text-[13px] font-medium ${
-                tab === key
-                  ? "border-accent text-accent"
-                  : "border-transparent text-ink-secondary hover:text-ink"
-              }`}
-            >
-              {label}
-              {key === "history" && g.history?.length ? (
-                <span className="ml-1.5 text-[11px] text-ink-muted">{count(g.visits)}</span>
-              ) : null}
-            </button>
-          ))}
-        </nav>
-
-        <div className="space-y-5 p-5">
-          {tab === "history" ? (
-            <GuestHistory g={g} org={org} />
-          ) : tab === "commentary" ? (
-            <Commentary
-              g={g} org={org} crossVenueShare={crossVenueShare} oneVisit={oneVisit}
-              rhythm={rhythm} overdue={overdue}
-            />
-          ) : oneVisit ? (
-            <EmptyState
-              title="Seen once"
-              body={
-                <>
-                  <p>
-                    Came in on {g.firstSeen ? dayLabel(g.firstSeen) : "—"}, spent {money(g.spend)}, and has not
-                    been back in {count(g.daysSince)} days.
-                  </p>
-                  <p className="mt-2">
-                    There is no habit here to be early or late against, so no lifecycle verdict is shown and no
-                    usual gap is invented. This is the largest single group in the business and the only useful
-                    question about it is whether a second visit can be caused.
-                  </p>
-                </>
-              }
-            />
-          ) : (
-            <>
-              <Facts
-                rows={[
-                  [`${org.labels.visits[0].toUpperCase()}${org.labels.visits.slice(1)}`, String(g.visits)],
-                  ["Orders", String(g.orders)],
-                  ["Items", String(g.items)],
-                  ["Total spend", money(g.spend)],
-                  ["Average per visit", money(g.spend / g.visits)],
-                  ...(g.covers > 0 ? ([["Covers recorded", String(g.covers)]] as [string, string][]) : []),
-                  ["Usual gap", g.cadenceDays && g.visits >= 3 ? plural(Math.round(g.cadenceDays), "day") : "not yet estimable"],
-                  ["Last seen", `${dayLabel(g.lastSeen ?? org.window.end)} · ${recency(g.daysSince, org.window)}`],
-                  ["First seen", g.firstSeen ? dayLabel(g.firstSeen) : "—"],
-                  ["Known for", plural(g.tenureDays, "day")],
-                  ["Venues visited", String(g.venues)],
-                  ["Usual time of day", org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—"],
-                  ["Value band", `${BAND_LABEL[g.valueBand - 1]} fifth`],
-                  ...(g.tier === "member"
-                    ? ([["Scanned", `${g.scannedOrders} of ${g.orders} orders`]] as [string, string][])
-                    : []),
-                ]}
-              />
-            </>
-          )}
-
-          {tab === "stats" && <GuestBasket g={g} items={items} org={org} />}
-        </div>
-
-        <footer className="mt-auto flex items-center justify-between gap-2 border-t border-line px-5 py-3">
-          <button
-            type="button" onClick={onPrev} disabled={!onPrev}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
-          >
-            ← Previous
-          </button>
-          <button
-            type="button" onClick={onNext} disabled={!onNext}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
-          >
-            Next →
-          </button>
-        </footer>
-      </aside>
-    </div>
-  );
-}
-
-/**
- * The prose notes, unchanged in wording and moved intact.
- *
- * These are the part of the drawer both reviews singled out, so the rule for
- * this tab is that nothing here is rewritten, softened or given a number it did
- * not have — it is the same text with room to be read.
- */
-function Commentary({
-  g, org, crossVenueShare, oneVisit, rhythm, overdue,
+function Row({
+  g, org, visible, unmasked, onOpen,
 }: {
   g: Guest;
   org: Org;
-  crossVenueShare: number;
-  oneVisit: boolean;
-  rhythm: string | null;
-  overdue: number | null;
+  visible: Column[];
+  unmasked: boolean;
+  onOpen: () => void;
 }) {
+  const cell: Record<ColKey, React.ReactNode> = {
+    guest: <Identity g={g} unmasked={unmasked} />,
+    tier: <Pill tone={g.tier === "member" ? "member" : "card"}>{g.tier === "member" ? "Member" : "Card"}</Pill>,
+    // A card cannot be told apart from a card that was reissued, so no lifecycle
+    // verdict is shown for one. The dash is the honest answer, not a gap.
+    segment: g.segment ? SEGMENT_LABEL[g.segment] : <span className="text-ink-muted">—</span>,
+    band: BAND_LABEL[g.valueBand - 1],
+    visits: g.visits,
+    spend: money(g.spend),
+    lastSeen: recencyShort(g.daysSince, org.window),
+    daypart: org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—",
+    venue: (
+      <>
+        {g.homeStore}
+        {g.venues > 1 && <span className="ml-1.5 text-[11px] text-ink-muted">+{g.venues - 1}</span>}
+      </>
+    ),
+  };
+
   return (
-    <>
-      {oneVisit && (
-        <EmptyState
-          title="Seen once"
-          body={
-            <>
-              <p>
-                Came in on {g.firstSeen ? dayLabel(g.firstSeen) : "—"}, spent {money(g.spend)}, and has not
-                been back in {count(g.daysSince)} days.
-              </p>
-              <p className="mt-2">
-                There is no habit here to be early or late against, so no lifecycle verdict is shown and no
-                usual gap is invented. This is the largest single group in the business and the only useful
-                question about it is whether a second visit can be caused.
-              </p>
-            </>
-          }
-        />
-      )}
-
-      {rhythm && (
-        <div className="rounded-lg border border-line p-3">
-          <p className="text-[13px] leading-relaxed text-ink">
-            {rhythm}
-            {overdue !== null && overdue > 1.5 && (
-              <>
-                {" "}— <strong>{overdue.toFixed(1)}× their own usual gap</strong>.
-              </>
-            )}
-          </p>
-          <p className="mt-1 text-[12px] text-ink-muted">
-            Measured against this person&apos;s own cadence over {g.visits} {org.labels.visits}, not
-            against a rule applied to everybody.
-          </p>
-        </div>
-      )}
-
-      {g.visits === 2 && (
-            <div className="rounded-lg border border-line bg-surface-sunken p-3">
-              <p className="text-[13px] font-medium text-ink">Two visits, one gap</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-                A single observed interval is not enough to say whether a habit has formed or broken, so no
-                verdict is shown. A third visit makes them classifiable.
-              </p>
-            </div>
-          )}
-
-          {g.tier === "card" && (
-            <div className="rounded-lg border border-line bg-surface-sunken p-3">
-              <p className="text-[13px] font-medium text-ink">Recognised, not identified</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-                This is a payment card that has been seen more than once, not a person the business knows.
-                There is <strong>no name, email or phone</strong> — which is why this row carries a reference
-                rather than a name, and no lifecycle verdict, because a reissued card looks exactly like a
-                customer who stopped coming. What you can do is recognise them at the counter and ask them to
-                join. That is the whole enrolment opportunity, one guest at a time.
-              </p>
-            </div>
-          )}
-
-      {g.venues > 1 && (
-            <div className="rounded-lg border border-line p-3">
-              <p className="text-[13px] leading-relaxed text-ink">
-                Visits <strong>{g.venues}</strong> of your venues. Guests who cross venues are{" "}
-                {pct(crossVenueShare, 1)} of the identified population here, and they are invisible to a
-                per-venue report.
-              </p>
-            </div>
-          )}
-    </>
+    <tr onClick={onOpen} className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-hover">
+      {visible.map((c) => (
+        <td
+          key={c.key}
+          className={`px-3 py-2 ${c.numeric ? "tnum text-right" : ""} ${
+            c.key === "guest" ? "pl-5" : "text-ink-secondary"
+          }`}
+        >
+          {cell[c.key]}
+        </td>
+      ))}
+    </tr>
   );
 }
 
+export { GROUPS };
+export function GroupOptions() {
+  return Object.entries(GROUPS).map(([value, g]) => ({ value, label: g.label }));
+}
 
+export function shareOf(part: number, whole: number) {
+  return pct(part / Math.max(whole, 1), 1);
+}

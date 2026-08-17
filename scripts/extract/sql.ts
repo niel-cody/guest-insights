@@ -255,9 +255,31 @@ link AS (
   FROM carded WHERE PAR IS NOT NULL AND MEMBER_ID IS NOT NULL
   GROUP BY 1, 2
 ),
+/* ── Ties are broken on the member id, and that is load-bearing ─────────────
+   This was MAX_BY(MEMBER_ID, N), which is non-deterministic when a card has
+   served two members the same number of times. 292 of Coffee Guru's cards sit on
+   more than one member, so on every run a handful of them resolved to a
+   different person — and PERSON_ID is the spine, so a flip moved that human's
+   visits, spend and lifecycle verdict wholesale.
+
+   It surfaced as the segment table and the segment scatter disagreeing by a few
+   people out of 4,966 while running identical SQL: two queries, two independent
+   evaluations, two different coin flips. That is the trap register's "a count on
+   a chart disagrees with the count in the table beneath it", arriving by a route
+   nobody was looking down, and it also meant no two extracts of the same window
+   were reproducible.
+
+   ORDER BY N DESC, MEMBER_ID makes the dominant member win as before and makes
+   the tie resolve the same way every time, everywhere. */
 par_member AS (
-  SELECT PAR, MAX_BY(MEMBER_ID, N) AS MEMBER_ID, COUNT(*) AS MEMBERS_ON_CARD
-  FROM link GROUP BY PAR
+  SELECT PAR, MEMBER_ID, MEMBERS_ON_CARD
+  FROM (
+    SELECT PAR, MEMBER_ID,
+           COUNT(*) OVER (PARTITION BY PAR) AS MEMBERS_ON_CARD,
+           ROW_NUMBER() OVER (PARTITION BY PAR ORDER BY N DESC, MEMBER_ID) AS RN
+    FROM link
+  )
+  WHERE RN = 1
 ),
 base AS (
   SELECT
@@ -284,10 +306,14 @@ person_orders AS (
   FROM base
   WHERE TIER <> 'unattributed'
 ),
+/* Every argmax below breaks ties on a stable key. See the note on par_member:
+   an unbroken tie makes the snapshot unreproducible, and these ones drive the
+   daypart and venue filters that the route tests assert a population against. A
+   flaky filter is a flaky test, and a flaky test gets deleted. */
 visits AS (
   SELECT PERSON_ID, ANY_VALUE(TIER) AS TIER, D, STORE_ID,
          ANY_VALUE(STORE_NAME) AS STORE_NAME,
-         MAX_BY(DAYPART, TOTAL_PRICE) AS DAYPART,
+         MAX_BY(DAYPART, TOTAL_PRICE * 1000 + HASH(DAYPART) % 1000) AS DAYPART,
          BOOLOR_AGG(IS_WEEKEND) AS IS_WEEKEND,
          SUM(TOTAL_PRICE) AS SPEND, SUM(ITEMS_COUNT) AS ITEMS,
          SUM(COVERS) AS COVERS, COUNT(*) AS ORDERS,
@@ -295,7 +321,32 @@ visits AS (
   FROM person_orders
   GROUP BY PERSON_ID, D, STORE_ID
 ),
-person AS (
+/* Home venue and home daypart, resolved deterministically.
+   MAX_BY(STORE_ID, D) picked whichever venue a guest used on their last day,
+   with the tie between two venues on the same day broken arbitrarily; MODE
+   did the same for the daypart. Both feed filters, so both are settled here on
+   an explicit ordering rather than on evaluation order. */
+home AS (
+  SELECT PERSON_ID, STORE_ID AS HOME_STORE_ID, STORE_NAME AS HOME_STORE
+  FROM (
+    SELECT PERSON_ID, STORE_ID, ANY_VALUE(STORE_NAME) AS STORE_NAME,
+           ROW_NUMBER() OVER (
+             PARTITION BY PERSON_ID ORDER BY COUNT(*) DESC, MAX(D) DESC, STORE_ID
+           ) AS RN
+    FROM visits GROUP BY PERSON_ID, STORE_ID
+  )
+  WHERE RN = 1
+),
+home_daypart AS (
+  SELECT PERSON_ID, DAYPART AS HOME_DAYPART
+  FROM (
+    SELECT PERSON_ID, DAYPART,
+           ROW_NUMBER() OVER (PARTITION BY PERSON_ID ORDER BY COUNT(*) DESC, DAYPART) AS RN
+    FROM visits GROUP BY PERSON_ID, DAYPART
+  )
+  WHERE RN = 1
+),
+person_agg AS (
   SELECT
     PERSON_ID,
     ANY_VALUE(TIER) AS TIER,
@@ -313,12 +364,15 @@ person AS (
     SUM(COVERS) AS COVERS,
     MIN(D) AS FIRST_SEEN,
     MAX(D) AS LAST_SEEN,
-    DATEDIFF(day, MIN(D), MAX(D)) AS TENURE_DAYS,
-    MODE(DAYPART) AS HOME_DAYPART,
-    MAX_BY(STORE_ID, D) AS HOME_STORE_ID,
-    MAX_BY(STORE_NAME, D) AS HOME_STORE
+    DATEDIFF(day, MIN(D), MAX(D)) AS TENURE_DAYS
   FROM visits
   GROUP BY PERSON_ID
+),
+person AS (
+  SELECT pa.*, h.HOME_STORE_ID, h.HOME_STORE, hd.HOME_DAYPART
+  FROM person_agg pa
+  JOIN home h ON h.PERSON_ID = pa.PERSON_ID
+  JOIN home_daypart hd ON hd.PERSON_ID = pa.PERSON_ID
 )`;
 }
 

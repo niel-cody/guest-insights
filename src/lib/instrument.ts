@@ -38,7 +38,9 @@ export type EventName =
   | "surface.scrollDepth"
   | "drawer.open"
   | "filter.change"
+  | "filter.clear"
   | "scope.change"
+  | "list.save"
   | "slider.change"
   | "method.reveal"
   | "refusal.reveal";
