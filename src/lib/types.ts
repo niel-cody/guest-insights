@@ -212,9 +212,31 @@ export type Guest = {
   homeStoreId: string;
   homeStore: string;
   spendRank: number;
+  /** Top three products as [productIndex, visitsBoughtOn]. Indexes `items.products`. */
+  top: [number, number][];
+  /** Top three categories as [categoryIndex, visits, spend]. Indexes `items.categories`. */
+  cats: [number, number, number][];
+  /** Distinct products ever bought. Three across thirty visits is a habit; forty is a browser. */
+  repertoire: number;
+  /** Share of their visits carrying their single most-bought product. */
+  topShare: number | null;
+  /**
+   * Most recent visits as [dayOffsetFromWindowStart, orders, spend, venueIndex],
+   * capped. `visits` above is the uncapped total, so a truncated timeline can
+   * never be mistaken for the whole relationship.
+   */
+  history: [number, number, number, number][];
 };
 
-export type Guests = { sampled: number; population: number; rows: Guest[] };
+/**
+ * The guest working set as it sits on disk and crosses the wire: columnar, so
+ * the twenty-five field names are carried once rather than seventeen thousand
+ * times. `unpackGuests` turns it back into rows. See `lib/guest-columns.ts`.
+ */
+export type Guests = { sampled: number; population: number; fields: string[]; rows: unknown[][] };
+
+/** The same set, expanded. What every consumer actually works with. */
+export type GuestRows = { sampled: number; population: number; rows: Guest[] };
 
 // ── the member value model ──────────────────────────────────────────────────
 
@@ -436,6 +458,56 @@ export type VenueMonth = {
   discount: number;
 };
 
+/**
+ * Items, categories and the basket.
+ *
+ * Products and categories are dictionaries; guest rows carry integer indexes
+ * into them. `integrity` is the three traps measured at extract time so the
+ * checks have something to assert against.
+ */
+export type Items = {
+  window: AnalysisWindow;
+  products: {
+    name: string;
+    categoryId: string | null;
+    category: string | null;
+    type: string | null;
+    lines: number;
+    revenue: number;
+  }[];
+  categories: { id: string; name: string; type: string | null }[];
+  categoryMix: {
+    categoryId: string;
+    category: string;
+    type: string | null;
+    member: { lines: number; revenue: number; people: number };
+    nonMember: { lines: number; revenue: number; people: number };
+    memberShare: number;
+    nonMemberShare: number;
+    /** Member share over non-member share. Null below the evidence floor. */
+    index: number | null;
+    lines: number;
+  }[];
+  totals: { memberProductLines: number; nonMemberProductLines: number; minLinesForIndex: number };
+  integrity: {
+    /** Orders carrying at least one paid line. The figure the mix depends on. */
+    ordersWithItems: number;
+    orders: number;
+    allLines: number;
+    completedLines: number;
+    paidLines: number;
+    productLines: number;
+    modifierLines: number;
+    maxQuantityAnywhere: number;
+    maxQuantityOnPaid: number;
+    categoryIds: number;
+    categoryNames: number;
+    categoryIdsRenamed: number;
+    paidRevenue: number;
+    orderRevenue: number;
+  };
+};
+
 export type Snapshot = {
   org: Org;
   coverage: Coverage;
@@ -446,4 +518,5 @@ export type Snapshot = {
   dayparts: Dayparts;
   network: Network;
   venueMonthly: VenueMonth[];
+  items: Items | null;
 };

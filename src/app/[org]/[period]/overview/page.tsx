@@ -5,7 +5,7 @@ import { IconArrow } from "@/components/shell/Icons";
 import { GuestFlowChart } from "@/components/charts/GuestFlowChart";
 import { GrowthWaterfall, RealVsPriceBar } from "@/components/charts/GrowthWaterfall";
 import { Constraint, WindowNote } from "@/components/ui/WindowNote";
-import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
 import { derivedFromDisplayed } from "@/lib/checks";
 import { windowRules } from "@/lib/window";
@@ -19,7 +19,7 @@ export const dynamic = "force-static";
 export default async function OverviewPage({ params }: { params: Promise<{ org: string; period: string }> }) {
   const { org: slug, period } = await params;
   const snap = await getSnapshot(slug, period);
-  const guests = await getGuests(slug, period);
+  const guests = await getGuestRows(slug, period);
   const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { BasketMix } from "@/components/ui/BasketMix";
 import { Card, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives";
 import { IconAlert, IconArrow, IconCheck, IconInfo } from "@/components/shell/Icons";
 import { getPeriods, getAllOrgs, getSnapshot } from "@/lib/data";
 import {
-  causalReading, count, coverageState, delta, money, monthLabel, pct, ratio, valueClaims, windowShort, attributionPct, scanRatePct} from "@/lib/metrics";
+  causalReading, count, coverageState, delta, money, monthLabel, pct, ratio, valueClaims, windowShort, basketMix, basketStory, attributionPct, scanRatePct} from "@/lib/metrics";
 import type { ValueClaim } from "@/lib/metrics";
 
 export const dynamic = "force-static";
@@ -73,6 +74,10 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
   const { org, members: m } = snap;
   const cov = coverageState(org, snap.coverage);
   const claims = valueClaims(m, org);
+  // Null on a snapshot extracted before item data existed, which is why every
+  // consumer guards rather than assuming the file is there.
+  const mix = snap.items ? basketMix(snap.items) : null;
+  const story = mix ? basketStory(mix) : null;
   const causal = causalReading(m);
   const cs = m.crossSection;
   const w = m.window;
@@ -152,6 +157,42 @@ export default async function MembersPage({ params }: { params: Promise<{ org: s
           >
             {claims.map((c) => <ClaimRow key={c.key} claim={c} />)}
           </Card>
+
+          {/* ── what the two sides are actually buying ────────────────────────
+              This sits directly under the six figures because it explains one
+              of them. The per-visit spend gap has been published unexplained:
+              standardising for daypart moved it by less than two points, so
+              *when* members come is not the reason their basket is smaller.
+              Category mix is. */}
+          {mix && story && (
+            <Card
+              title="Members and everyone else are not buying the same things"
+              subtitle={`Reporting group, ${windowShort(org.window)}. Both sides are person-grain identified trade, so a member who forgot to scan is still counted as a member.`}
+            >
+              <p className="mb-4 max-w-[92ch] text-[15px] leading-relaxed text-ink">
+                Members buy <strong>{story.over.label}</strong> at{" "}
+                <strong>{story.over.index!.toFixed(2)}×</strong> the rate everybody else does, and{" "}
+                <strong>{story.under.label}</strong> at{" "}
+                <strong>{story.under.index!.toFixed(2)}×</strong>.{" "}
+                {cs.lifts.spendPerVisit < 0 ? (
+                  <>
+                    This is the missing half of the {delta(cs.lifts.spendPerVisit)} per-visit gap above.
+                    Standardising for daypart moved that gap by{" "}
+                    {delta(m.standardisedBasket.lift - m.standardisedBasket.crude.lift)}, so <em>when</em>{" "}
+                    members come is not the reason their basket is smaller.{" "}
+                    <strong>What they put in it is.</strong> A member is a coffee run; a non-member is more
+                    often a coffee and something from the cabinet.
+                  </>
+                ) : (
+                  <>
+                    The two baskets differ by composition as well as by size, so a single per-visit average
+                    describes neither side well.
+                  </>
+                )}
+              </p>
+              <BasketMix rows={mix} minLines={snap.items!.totals.minLinesForIndex} />
+            </Card>
+          )}
 
           {/* ── association vs effect ─────────────────────────────────────── */}
           <Card

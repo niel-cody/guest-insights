@@ -17,13 +17,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runChecks } from "../src/lib/checks";
-import type { Guests, Snapshot } from "../src/lib/types";
+import type { GuestRows, Guests, Snapshot } from "../src/lib/types";
+import { unpackGuests } from "../src/lib/guest-columns";
 import { claimLevel, gradeMonth, longestRun } from "./grade";
 
 const DATA = join(import.meta.dirname, "..", "data");
 const SLUGS = ["coffee-guru", "meat-flour-wine"];
 
-type Fixture = { snap: Snapshot; guests: Guests };
+type Fixture = { snap: Snapshot; guests: GuestRows };
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 async function periodsOf(slug: string): Promise<string[]> {
@@ -36,7 +37,7 @@ async function periodsOf(slug: string): Promise<string[]> {
 async function load(slug: string, period: string): Promise<Fixture> {
   const read = async <T,>(name: string) =>
     JSON.parse(await readFile(join(DATA, slug, period, `${name}.json`), "utf8")) as T;
-  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, guests] =
+  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, guests, items] =
     await Promise.all([
       read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
       read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
@@ -44,10 +45,11 @@ async function load(slug: string, period: string): Promise<Fixture> {
       read<Snapshot["dayparts"]>("dayparts"), read<Snapshot["network"]>("network"),
       read<Snapshot["venueMonthly"]>("venueMonthly"),
       read<Guests>("guests"),
+      read<Snapshot["items"]>("items"),
     ]);
   return {
-    snap: { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly },
-    guests,
+    snap: { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items },
+    guests: { sampled: guests.sampled, population: guests.population, rows: unpackGuests(guests) },
   };
 }
 
@@ -156,6 +158,22 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
   "estimate.coverBasisMissingness": (f) => {
     f.snap.members.coverBasis.member.coverage = 0.38;
     f.snap.members.coverBasis.nonMember.coverage = 0.97;
+  },
+  // A till keying a code into the quantity field, which is what produced the
+  // 4,654,648 line — reaching a row the product actually counts.
+  "items.quantityNotRanked": (f) => {
+    if (f.snap.items) f.snap.items.integrity.maxQuantityOnPaid = 4_654_648;
+  },
+  // The modifier split losing money: paid lines stop reconciling to the order
+  // total, which is what happens when a filter drops paid modifiers.
+  "items.productLinesSeparated": (f) => {
+    // A join that quietly covers four orders in five: the mix still renders and
+    // describes a subset while reading as the whole business.
+    if (f.snap.items) f.snap.items.integrity.ordersWithItems = Math.round(f.snap.items.integrity.orders * 0.8);
+  },
+  // Two categories sharing a name, so grouping on the name merges them.
+  "items.categoryKeyedOnId": (f) => {
+    if (f.snap.items) f.snap.items.integrity.categoryNames = f.snap.items.integrity.categoryIds + 3;
   },
   // A pair count that does not reconcile against the venues on the map.
   "venue.pairArithmetic": (f) => {

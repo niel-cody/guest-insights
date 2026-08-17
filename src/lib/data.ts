@@ -12,7 +12,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cache } from "react";
-import type { Coverage, Dayparts, Guests, Members, Network, Org, Snapshot } from "./types";
+import type { Coverage, Dayparts, GuestRows, Guests, Items, Members, Network, Org, Snapshot } from "./types";
+import { unpackGuests } from "./guest-columns";
 import type { Periods } from "./periods";
 
 const DATA = join(process.cwd(), "data");
@@ -56,7 +57,7 @@ export const getOrg = cache(
 );
 
 export const getSnapshot = cache(async (slug: string, period: string): Promise<Snapshot> => {
-  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly] =
+  const [org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items] =
     await Promise.all([
       read<Snapshot["org"]>(slug, period, "org"),
       read<Snapshot["coverage"]>(slug, period, "coverage"),
@@ -67,13 +68,24 @@ export const getSnapshot = cache(async (slug: string, period: string): Promise<S
       read<Snapshot["dayparts"]>(slug, period, "dayparts"),
       read<Snapshot["network"]>(slug, period, "network"),
       read<Snapshot["venueMonthly"]>(slug, period, "venueMonthly"),
+      read<Items>(slug, period, "items").catch(() => null),
     ]);
-  return { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly };
+  return { org, coverage, lifecycle, decomposition, segments, members, dayparts, network, venueMonthly, items };
 });
 
 export const getMembers = cache(async (slug: string, period: string): Promise<Members> => read<Members>(slug, period, "members"));
 export const getDayparts = cache(async (slug: string, period: string): Promise<Dayparts> => read<Dayparts>(slug, period, "dayparts"));
 export const getNetwork = cache(async (slug: string, period: string): Promise<Network> => read<Network>(slug, period, "network"));
+
+/**
+ * Expanded rows, for anything that runs on the server — the checks in
+ * particular. The client gets the packed form and expands it itself, because
+ * expanding here would put the field names back on the wire.
+ */
+export const getGuestRows = cache(async (slug: string, period: string): Promise<GuestRows> => {
+  const g = await getGuests(slug, period);
+  return { sampled: g.sampled, population: g.population, rows: unpackGuests(g) };
+});
 
 /** Large; only the guest list and the Brief pull this. */
 export const getGuests = cache(async (slug: string, period: string): Promise<Guests> => read<Guests>(slug, period, "guests"));

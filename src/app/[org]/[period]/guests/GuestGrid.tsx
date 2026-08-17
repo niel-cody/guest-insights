@@ -4,10 +4,13 @@ import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconSearch, IconX } from "@/components/shell/Icons";
 import { Card, EmptyState, Facts, Pill } from "@/components/ui/Primitives";
+import { GuestBasket, GuestHistory } from "@/components/ui/GuestBasket";
 import {
   SEGMENT_LABEL, count, dayLabel, habit, money, overdueRatio, pct, recency, recencyShort,
 } from "@/lib/metrics";
-import type { Guest, Guests, Org } from "@/lib/types";
+import type { Guest, Guests, Items, Org } from "@/lib/types";
+import { unpackGuests } from "@/lib/guest-columns";
+import { plural } from "@/lib/metrics";
 import { DEFAULT_VIEW, parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
 import { track } from "@/lib/instrument";
 
@@ -97,9 +100,10 @@ function Identity({ g, unmasked }: { g: Guest; unmasked: boolean }) {
  * The grid works on a bounded sample and paginates it; the tiles above always
  * report the true population. That distinction is stated rather than implied.
  */
-export function GuestGrid({ guests, org, crossVenueShare }: {
+export function GuestGrid({ guests, org, items, crossVenueShare }: {
   guests: Guests;
   org: Org;
+  items: Items | null;
   crossVenueShare: number;
 }) {
   const sp = useSearchParams();
@@ -168,7 +172,9 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
    */
   const [unmasked, setUnmasked] = useState(false);
 
-  const filtered = useMemo(() => applyView(guests.rows, view), [guests.rows, view]);
+  // The set arrives columnar and is expanded once here. See lib/guest-columns.
+  const rows = useMemo(() => unpackGuests(guests), [guests]);
+  const filtered = useMemo(() => applyView(rows, view), [rows, view]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
   const safePage = Math.min(Math.max(view.page - 1, 0), pages - 1);
@@ -182,7 +188,7 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
 
   const sort = (view.sort ?? DEFAULT_SORT) as SortKey;
 
-  const dayparts = org.dayparts.filter((d) => guests.rows.some((g) => g.homeDaypart === d.key));
+  const dayparts = org.dayparts.filter((d) => rows.some((g) => g.homeDaypart === d.key));
 
   return (
     <>
@@ -349,6 +355,9 @@ export function GuestGrid({ guests, org, crossVenueShare }: {
         <Drawer
           guest={open}
           org={org}
+          items={items}
+          tab={view.tab}
+          onTab={(tab) => setView({ tab })}
           unmasked={unmasked}
           crossVenueShare={crossVenueShare}
           onClose={() => setView({ guest: null })}
@@ -396,13 +405,18 @@ function Choice({
   );
 }
 
+type Tab = "stats" | "commentary" | "history";
+
 function Drawer({
-  guest: g, org, unmasked, crossVenueShare, onClose, onPrev, onNext,
+  guest: g, org, items, unmasked, crossVenueShare, tab, onTab, onClose, onPrev, onNext,
 }: {
   guest: Guest;
   org: Org;
+  items: Items | null;
   unmasked: boolean;
   crossVenueShare: number;
+  tab: Tab;
+  onTab: (t: Tab) => void;
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
@@ -442,8 +456,47 @@ function Drawer({
           </button>
         </header>
 
+        {/* Three tabs, and every one of the fifteen fields and both prose notes
+            survive the split — this is a reorganisation, not a redesign. Stats
+            answers "what do they do", Commentary answers "what does that mean",
+            and neither was readable while they were interleaved down one
+            scroll. The open tab is in the URL, because "look at what this
+            person buys" is a thing one operator sends another. */}
+        <nav className="flex gap-1 border-b border-line px-3" role="tablist">
+          {([
+            ["stats", "Stats"],
+            ["commentary", "Commentary"],
+            ["history", `${org.labels.visits[0].toUpperCase()}${org.labels.visits.slice(1)}`],
+          ] as [Tab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => onTab(key)}
+              className={`-mb-px border-b-2 px-3 py-2.5 text-[13px] font-medium ${
+                tab === key
+                  ? "border-accent text-accent"
+                  : "border-transparent text-ink-secondary hover:text-ink"
+              }`}
+            >
+              {label}
+              {key === "history" && g.history?.length ? (
+                <span className="ml-1.5 text-[11px] text-ink-muted">{count(g.visits)}</span>
+              ) : null}
+            </button>
+          ))}
+        </nav>
+
         <div className="space-y-5 p-5">
-          {oneVisit ? (
+          {tab === "history" ? (
+            <GuestHistory g={g} org={org} />
+          ) : tab === "commentary" ? (
+            <Commentary
+              g={g} org={org} crossVenueShare={crossVenueShare} oneVisit={oneVisit}
+              rhythm={rhythm} overdue={overdue}
+            />
+          ) : oneVisit ? (
             <EmptyState
               title="Seen once"
               body={
@@ -470,10 +523,10 @@ function Drawer({
                   ["Total spend", money(g.spend)],
                   ["Average per visit", money(g.spend / g.visits)],
                   ...(g.covers > 0 ? ([["Covers recorded", String(g.covers)]] as [string, string][]) : []),
-                  ["Usual gap", g.cadenceDays && g.visits >= 3 ? `${Math.round(g.cadenceDays)} days` : "not yet estimable"],
+                  ["Usual gap", g.cadenceDays && g.visits >= 3 ? plural(Math.round(g.cadenceDays), "day") : "not yet estimable"],
                   ["Last seen", `${dayLabel(g.lastSeen ?? org.window.end)} · ${recency(g.daysSince, org.window)}`],
                   ["First seen", g.firstSeen ? dayLabel(g.firstSeen) : "—"],
-                  ["Known for", `${g.tenureDays} days`],
+                  ["Known for", plural(g.tenureDays, "day")],
                   ["Venues visited", String(g.venues)],
                   ["Usual time of day", org.dayparts.find((d) => d.key === g.homeDaypart)?.label ?? "—"],
                   ["Value band", `${BAND_LABEL[g.valueBand - 1]} fifth`],
@@ -482,26 +535,87 @@ function Drawer({
                     : []),
                 ]}
               />
-              {rhythm && (
-                <div className="rounded-lg border border-line p-3">
-                  <p className="text-[13px] leading-relaxed text-ink">
-                    {rhythm}
-                    {overdue !== null && overdue > 1.5 && (
-                      <>
-                        {" "}— <strong>{overdue.toFixed(1)}× their own usual gap</strong>.
-                      </>
-                    )}
-                  </p>
-                  <p className="mt-1 text-[12px] text-ink-muted">
-                    Measured against this person&apos;s own cadence over {g.visits} {org.labels.visits}, not
-                    against a rule applied to everybody.
-                  </p>
-                </div>
-              )}
             </>
           )}
 
-          {g.visits === 2 && (
+          {tab === "stats" && <GuestBasket g={g} items={items} org={org} />}
+        </div>
+
+        <footer className="mt-auto flex items-center justify-between gap-2 border-t border-line px-5 py-3">
+          <button
+            type="button" onClick={onPrev} disabled={!onPrev}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
+          >
+            ← Previous
+          </button>
+          <button
+            type="button" onClick={onNext} disabled={!onNext}
+            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
+          >
+            Next →
+          </button>
+        </footer>
+      </aside>
+    </div>
+  );
+}
+
+/**
+ * The prose notes, unchanged in wording and moved intact.
+ *
+ * These are the part of the drawer both reviews singled out, so the rule for
+ * this tab is that nothing here is rewritten, softened or given a number it did
+ * not have — it is the same text with room to be read.
+ */
+function Commentary({
+  g, org, crossVenueShare, oneVisit, rhythm, overdue,
+}: {
+  g: Guest;
+  org: Org;
+  crossVenueShare: number;
+  oneVisit: boolean;
+  rhythm: string | null;
+  overdue: number | null;
+}) {
+  return (
+    <>
+      {oneVisit && (
+        <EmptyState
+          title="Seen once"
+          body={
+            <>
+              <p>
+                Came in on {g.firstSeen ? dayLabel(g.firstSeen) : "—"}, spent {money(g.spend)}, and has not
+                been back in {count(g.daysSince)} days.
+              </p>
+              <p className="mt-2">
+                There is no habit here to be early or late against, so no lifecycle verdict is shown and no
+                usual gap is invented. This is the largest single group in the business and the only useful
+                question about it is whether a second visit can be caused.
+              </p>
+            </>
+          }
+        />
+      )}
+
+      {rhythm && (
+        <div className="rounded-lg border border-line p-3">
+          <p className="text-[13px] leading-relaxed text-ink">
+            {rhythm}
+            {overdue !== null && overdue > 1.5 && (
+              <>
+                {" "}— <strong>{overdue.toFixed(1)}× their own usual gap</strong>.
+              </>
+            )}
+          </p>
+          <p className="mt-1 text-[12px] text-ink-muted">
+            Measured against this person&apos;s own cadence over {g.visits} {org.labels.visits}, not
+            against a rule applied to everybody.
+          </p>
+        </div>
+      )}
+
+      {g.visits === 2 && (
             <div className="rounded-lg border border-line bg-surface-sunken p-3">
               <p className="text-[13px] font-medium text-ink">Two visits, one gap</p>
               <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
@@ -524,7 +638,7 @@ function Drawer({
             </div>
           )}
 
-          {g.venues > 1 && (
+      {g.venues > 1 && (
             <div className="rounded-lg border border-line p-3">
               <p className="text-[13px] leading-relaxed text-ink">
                 Visits <strong>{g.venues}</strong> of your venues. Guests who cross venues are{" "}
@@ -533,23 +647,8 @@ function Drawer({
               </p>
             </div>
           )}
-        </div>
-
-        <footer className="mt-auto flex items-center justify-between gap-2 border-t border-line px-5 py-3">
-          <button
-            type="button" onClick={onPrev} disabled={!onPrev}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
-          >
-            ← Previous
-          </button>
-          <button
-            type="button" onClick={onNext} disabled={!onNext}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] font-medium disabled:opacity-40 hover:bg-surface-hover"
-          >
-            Next →
-          </button>
-        </footer>
-      </aside>
-    </div>
+    </>
   );
 }
+
+

@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { applyView } from "../src/app/[org]/[period]/guests/GuestGrid";
 import { DEFAULT_VIEW, parseView, toQuery, type View } from "../src/lib/url-state";
 import type { Guest, Guests, Org } from "../src/lib/types";
+import { unpackGuests } from "../src/lib/guest-columns";
 
 const DATA = join(import.meta.dirname, "..", "data");
 const SLUGS = ["coffee-guru", "meat-flour-wine"];
@@ -64,7 +65,7 @@ async function main() {
       readFile(join(DATA, slug, period, "guests.json"), "utf8").then((t) => JSON.parse(t) as Guests),
       readFile(join(DATA, slug, period, "org.json"), "utf8").then((t) => JSON.parse(t) as Org),
     ]);
-    const rows = guests.rows;
+    const rows: Guest[] = unpackGuests(guests);
     console.log(`\n${slug} · ${period}`);
 
     const all = applyView(rows, DEFAULT_VIEW);

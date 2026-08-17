@@ -2,7 +2,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, CheckBadge, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives";
 import { IconAlert, IconCheck, IconInfo } from "@/components/shell/Icons";
 import { CoverageTrendChart } from "@/components/charts/CoverageTrendChart";
-import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
 import { runChecks, type Check } from "@/lib/checks";
 import { detectAnomalies, groupByVenue } from "@/lib/anomalies";
 import { qualityFindings } from "@/lib/quality";
@@ -42,7 +42,7 @@ function CheckRow({ c }: { c: Check }) {
 export default async function CoveragePage({ params }: { params: Promise<{ org: string; period: string }> }) {
   const { org: slug, period } = await params;
   const snap = await getSnapshot(slug, period);
-  const guests = await getGuests(slug, period);
+  const guests = await getGuestRows(slug, period);
   const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;

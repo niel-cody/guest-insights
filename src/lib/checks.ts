@@ -11,8 +11,8 @@
  * `npm run verify`. A check with no failing fixture does not count toward the
  * badge — see `scripts/verify.ts`.
  */
-import type { Guests, Snapshot } from "./types";
-import { count, money, pairArithmetic, recency, tileCount } from "./metrics";
+import type { GuestRows, Snapshot } from "./types";
+import { count, money, pairArithmetic, pct, recency, tileCount } from "./metrics";
 import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
 
 export type Severity = "blocking" | "warning";
@@ -52,7 +52,7 @@ export function derivedFromDisplayed(a: number, b: number, op: (x: number, y: nu
   return op(tileCount(a), tileCount(b));
 }
 
-export function runChecks(snap: Snapshot, guests: Guests | null): Check[] {
+export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   const { org, coverage, segments, members, dayparts } = snap;
   const t = coverage.totals;
   const win = org.window;
@@ -339,6 +339,84 @@ export function runChecks(snap: Snapshot, guests: Guests | null): Check[] {
       `${count(pairs.pairsSuppressed)} below the ${pairs.minShared}-guest floor + ${count(pairs.pairsMeasurable)} measurable · ` +
       `${pairs.venuesPlaced} of ${pairs.venues} venues placed`,
   ));
+
+  // ── items: the three traps that would have made the basket work wrong ─────
+
+  const items = snap.items;
+  if (items) {
+    const it = items.integrity;
+
+    // 1. QUANTITY is not trustworthy and nothing may rank on it.
+    //
+    // One Coffee Guru line carries QUANTITY = 4,654,648, and "Frothy" — a milk
+    // texture with zero revenue across 66 lines — sums to 5,177,296 units in
+    // three months. Ranked by summed quantity it is the single most popular
+    // product in the business, and it would have been the top of every guest's
+    // favourites.
+    //
+    // The assertion is on the filter rather than on the absence of the value:
+    // the corrupt rows still exist in the warehouse and always will. What must
+    // hold is that no line the product counts carries an implausible quantity,
+    // which is what TOTAL_PRICE > 0 buys.
+    const worstOnPaid = it.maxQuantityOnPaid;
+    checks.push(ok(
+      "items.quantityNotRanked",
+      "No line the basket work counts carries an implausible quantity, and popularity is never summed from QUANTITY.",
+      "One line at QUANTITY 4,654,648, and a milk texture summing to 5,177,296 units — which ranked first in the business on any quantity-based popularity measure.",
+      worstOnPaid > 0 && worstOnPaid < 1000,
+      `worst quantity on a counted line ${count(worstOnPaid)} · worst anywhere in the raw feed ${count(it.maxQuantityAnywhere)} · ` +
+        `popularity counted in lines and visits, never quantity`,
+    ));
+
+    // 2. Modifiers are a third of all lines and are separated from products.
+    //
+    // MODIFIER_GROUP_NAME does not reliably mark them — "1 Sugar" appears
+    // 25,981 times with only 2,480 flagged — so the two populations are held
+    // apart by what they are used for: products for a favourites list, paid
+    // lines for category spend, and the paid total has to reconcile to the
+    // order total or the split has lost money somewhere.
+    // The load-bearing assertion is **coverage**, not the revenue tie.
+    //
+    // A category mix is only a mix of the whole population if essentially every
+    // order carries lines; one that silently covered 80% would describe a
+    // subset and read as the business. The revenue tie is reported beside it
+    // and deliberately not asserted tightly: order-level discounts and
+    // surcharges are applied at order grain and cannot be distributed to lines,
+    // and the size of that gap is a property of how a merchant configures its
+    // till — 0.02% at Coffee Guru, 1.8% at Meat Flour Wine. Asserting a tight
+    // tie would be asserting a formula that happens to fit two merchants.
+    const orderCoverage = it.orders ? it.ordersWithItems / it.orders : 0;
+    const revenueGap = it.orderRevenue
+      ? Math.abs(it.paidRevenue - it.orderRevenue) / it.orderRevenue
+      : 1;
+    checks.push(ok(
+      "items.productLinesSeparated",
+      "Product lines and paid lines are counted separately, and essentially every order carries lines so the mix describes the whole population.",
+      "A favourites list reading Skim, 1 Sugar, Extra Shot — a third of all lines are modifiers, and the field that marks them misses 90% of one of them.",
+      it.productLines > 0 && it.productLines < it.paidLines && orderCoverage >= 0.99 && revenueGap < 0.05,
+      `${count(it.productLines)} product lines within ${count(it.paidLines)} paid lines of ${count(it.completedLines)} completed · ` +
+        `${pct(orderCoverage, 1)} of orders carry lines · ` +
+        `item revenue ${money(it.paidRevenue)} against order revenue ${money(it.orderRevenue)}, ` +
+        `${(revenueGap * 100).toFixed(2)}% apart on order-grain discounts and surcharges that do not distribute to lines`,
+    ));
+
+    // 3. Category is keyed on the id, never the name.
+    //
+    // The same slowly-changing-attribute trap that invented a phantom Braeside
+    // venue out of three successive store names. Where names outnumber ids
+    // nothing is wrong; where ids outnumber names, two categories share a name
+    // and grouping on it would merge them.
+    const merged = it.categoryIds - it.categoryNames;
+    checks.push(ok(
+      "items.categoryKeyedOnId",
+      "Categories are grouped on the category id, and the count of ids that have been renamed is published.",
+      "Five Coffee Guru category names carrying more than one id — the same trap that merged three store names into a phantom venue with 6,799 orders.",
+      items.categories.every((c) => Boolean(c.id)) && it.categoryIds >= it.categoryNames,
+      `${count(it.categoryIds)} category ids against ${count(it.categoryNames)} distinct names · ` +
+        `${merged > 0 ? `${merged} name${merged === 1 ? "" : "s"} shared by more than one id — grouping on the name would merge them` : "no shared names"} · ` +
+        `${count(it.categoryIdsRenamed)} ids have traded under more than one name`,
+    ));
+  }
 
   // ── the window's authority over the figures that depend on it ─────────────
 

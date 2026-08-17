@@ -649,3 +649,270 @@ GROUP BY 1, 2
 HAVING COUNT(*) >= 50
 ORDER BY 1, 2`;
 }
+
+// ── items, categories and the basket ────────────────────────────────────────
+
+/**
+ * What a guest actually bought.
+ *
+ * ── Three traps, and they are why this is one shared definition ────────────
+ *
+ * **1. `QUANTITY` is not trustworthy.** One Coffee Guru line carries
+ * `QUANTITY = 4,654,648`, and "Frothy" — a milk texture with zero revenue and
+ * 66 lines — sums to 5,177,296 units across three months. Ranking anything by
+ * summed quantity puts a milk texture at the top of every guest's favourites.
+ * **Nothing here reads QUANTITY.** Popularity is counted in lines and in orders
+ * containing the product, both of which are one-per-row and cannot be inflated
+ * by a mis-keyed till.
+ *
+ * **2. A third of all lines are modifiers**, and `MODIFIER_GROUP_NAME` does not
+ * reliably mark them — "1 Sugar" appears 25,981 times, only 2,480 of them
+ * flagged. So two different filters are used for two different questions, and
+ * conflating them is the error:
+ *
+ *   - **`product_line`** — paid, non-modifier. "A thing the guest chose to buy."
+ *     This is what a favourites list and a repertoire are counted on.
+ *   - **`paid_line`** — paid, modifiers included. This is what category *spend*
+ *     is counted on, because a paid modifier is real money and dropping it
+ *     stops the category mix reconciling to revenue.
+ *
+ * `TOTAL_PRICE > 0` is doing the heavy lifting in both: it removes every
+ * absurd-quantity line, every wrapper row such as `HOT.` (14,063 lines, zero
+ * revenue, not flagged as a modifier), and reconciles to the order total within
+ * 0.02%.
+ *
+ * **3. The category name is not the key.** Five Coffee Guru category names
+ * carry more than one id. This is the same slowly-changing-attribute trap that
+ * invented a phantom Braeside venue out of three successive store names, so
+ * categories are grouped on `PRODUCT_CATEGORY_ID` and the current name is
+ * resolved once and applied to all history — exactly as venues are.
+ */
+const ITEMS = "OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.ORDER_ITEMS";
+
+function itemsCte(orgId: string, w: Window) {
+  return `item_raw AS (
+  SELECT
+    ORDER_ID,
+    PRODUCT_ID, PRODUCT_NAME,
+    NULLIF(TRIM(PRODUCT_CATEGORY_ID), '') AS CATEGORY_ID,
+    NULLIF(TRIM(PRODUCT_CATEGORY_NAME), '') AS CATEGORY_NAME,
+    NULLIF(TRIM(PRODUCT_TYPE_NAME), '') AS TYPE_NAME,
+    TOTAL_PRICE,
+    CREATED_AT_TZ AS TS,
+    /* Never QUANTITY. See the note above: one line carries 4,654,648. */
+    IFF(NULLIF(TRIM(MODIFIER_GROUP_NAME), '') IS NULL, TRUE, FALSE) AS IS_PRODUCT
+  FROM ${ITEMS}
+  WHERE ORGANIZATION_ID = '${orgId}'
+    AND CREATED_AT_TZ >= '${w.start}' AND CREATED_AT_TZ < DATEADD(day, 1, '${w.end}')
+    AND STATUS = 'COMPLETED'
+    AND TOTAL_PRICE > 0
+),
+/* One current name per category id, applied across all history. */
+cat AS (
+  SELECT CATEGORY_ID, MAX_BY(CATEGORY_NAME, TS) AS CATEGORY_NAME,
+         COUNT(DISTINCT CATEGORY_NAME) AS NAMES_SEEN
+  FROM item_raw WHERE CATEGORY_ID IS NOT NULL GROUP BY CATEGORY_ID
+),
+prod AS (
+  SELECT PRODUCT_ID, MAX_BY(PRODUCT_NAME, TS) AS PRODUCT_NAME,
+         MAX_BY(CATEGORY_ID, TS) AS CATEGORY_ID, MAX_BY(TYPE_NAME, TS) AS TYPE_NAME
+  FROM item_raw WHERE PRODUCT_ID IS NOT NULL GROUP BY PRODUCT_ID
+),
+paid_line AS (
+  SELECT i.* EXCLUDE (CATEGORY_NAME), c.CATEGORY_NAME
+  FROM item_raw i LEFT JOIN cat c ON c.CATEGORY_ID = i.CATEGORY_ID
+),
+product_line AS (SELECT * FROM paid_line WHERE IS_PRODUCT)`;
+}
+
+/**
+ * The category mix of member and non-member trade, side by side.
+ *
+ * This is the object that explains the basket gap the product already
+ * publishes. Members are a coffee habit and non-members are a food occasion, so
+ * a member's basket is smaller — and the crude −13.5% gap, which daypart
+ * standardisation only moved by +1.9%, has been sitting unexplained.
+ *
+ * Both sides are **person-grain identified trade**, not scanned orders: the card
+ * is the spine, so a member who forgot to scan is still a member here. Counting
+ * on scans instead would measure the scan rate as much as the mix.
+ */
+export function categoryMixQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${itemsCte(orgId, w)},
+${PEOPLE},
+tier AS (
+  SELECT DISTINCT po.ORDER_ID, po.PERSON_ID, po.TIER
+  FROM person_orders po JOIN eligible e ON e.PERSON_ID = po.PERSON_ID
+),
+lines AS (
+  SELECT t.TIER, p.CATEGORY_ID, p.CATEGORY_NAME, p.TYPE_NAME, p.TOTAL_PRICE, p.IS_PRODUCT,
+         t.PERSON_ID, p.ORDER_ID
+  FROM paid_line p JOIN tier t ON t.ORDER_ID = p.ORDER_ID
+)
+SELECT
+  COALESCE(CATEGORY_ID, '(uncategorised)') AS CATEGORY_ID,
+  COALESCE(MAX(CATEGORY_NAME), 'Uncategorised') AS CATEGORY_NAME,
+  MAX(TYPE_NAME) AS TYPE_NAME,
+  TIER,
+  COUNT_IF(IS_PRODUCT) AS PRODUCT_LINES,
+  COUNT(*) AS PAID_LINES,
+  SUM(TOTAL_PRICE) AS REVENUE,
+  COUNT(DISTINCT PERSON_ID) AS PEOPLE,
+  COUNT(DISTINCT ORDER_ID) AS ORDERS
+FROM lines
+GROUP BY CATEGORY_ID, TIER
+ORDER BY REVENUE DESC`;
+}
+
+/**
+ * Per-guest item behaviour, compact enough to ship in the snapshot.
+ *
+ * Returns one row per guest carrying their top products as an array, their
+ * category mix, and two measures of how fixed their habit is:
+ *
+ *   - **`TOP_PRODUCT_VISIT_SHARE`** — the share of their visits on which they
+ *     bought their single most-frequent product. This is the "same thing every
+ *     time" score, and it is counted per *visit* rather than per line because
+ *     buying two coffees on one morning is one decision, not two.
+ *   - **`REPERTOIRE`** — how many distinct products they have ever bought. Three
+ *     across thirty visits is a creature of habit; forty is a browser.
+ */
+export function guestItemsQuery({ orgId, w, pairs, cardMonths }: Args, topN = 5) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${itemsCte(orgId, w)},
+${PEOPLE},
+/* Visit grain, so a product bought twice in one morning counts once. */
+person_line AS (
+  SELECT po.PERSON_ID, po.D, pl.PRODUCT_ID, pl.CATEGORY_ID, pl.TOTAL_PRICE
+  FROM person_orders po
+  JOIN eligible e ON e.PERSON_ID = po.PERSON_ID
+  JOIN product_line pl ON pl.ORDER_ID = po.ORDER_ID
+  WHERE pl.PRODUCT_ID IS NOT NULL
+),
+per_product AS (
+  SELECT PERSON_ID, PRODUCT_ID,
+         COUNT(DISTINCT D) AS VISITS_WITH,
+         SUM(TOTAL_PRICE) AS SPEND
+  FROM person_line GROUP BY 1, 2
+),
+ranked AS (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY PERSON_ID ORDER BY VISITS_WITH DESC, SPEND DESC) AS RN
+  FROM per_product
+),
+tops AS (
+  SELECT PERSON_ID,
+         ARRAY_AGG(OBJECT_CONSTRUCT('p', PRODUCT_ID, 'v', VISITS_WITH, 's', ROUND(SPEND, 2)))
+           WITHIN GROUP (ORDER BY RN) AS TOP_PRODUCTS,
+         MAX_BY(VISITS_WITH, IFF(RN = 1, 1, 0)) AS TOP_VISITS
+  FROM ranked WHERE RN <= ${topN} GROUP BY PERSON_ID
+),
+per_cat AS (
+  SELECT PERSON_ID, CATEGORY_ID, COUNT(DISTINCT D) AS VISITS_WITH, SUM(TOTAL_PRICE) AS SPEND
+  FROM person_line WHERE CATEGORY_ID IS NOT NULL GROUP BY 1, 2
+),
+cat_ranked AS (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY PERSON_ID ORDER BY SPEND DESC) AS RN FROM per_cat
+),
+cats AS (
+  SELECT PERSON_ID,
+         ARRAY_AGG(OBJECT_CONSTRUCT('c', CATEGORY_ID, 'v', VISITS_WITH, 's', ROUND(SPEND, 2)))
+           WITHIN GROUP (ORDER BY RN) AS TOP_CATEGORIES
+  FROM cat_ranked WHERE RN <= 4 GROUP BY PERSON_ID
+),
+totals AS (
+  SELECT PERSON_ID, COUNT(DISTINCT PRODUCT_ID) AS REPERTOIRE, COUNT(DISTINCT D) AS VISITS_WITH_ITEMS
+  FROM person_line GROUP BY 1
+)
+SELECT t.PERSON_ID, t.REPERTOIRE, t.VISITS_WITH_ITEMS,
+       tp.TOP_PRODUCTS, tp.TOP_VISITS,
+       c.TOP_CATEGORIES,
+       ROUND(tp.TOP_VISITS / NULLIF(t.VISITS_WITH_ITEMS, 0), 4) AS TOP_PRODUCT_VISIT_SHARE
+FROM totals t
+LEFT JOIN tops tp ON tp.PERSON_ID = t.PERSON_ID
+LEFT JOIN cats c ON c.PERSON_ID = t.PERSON_ID`;
+}
+
+/** The product dictionary, so per-guest rows can carry ids rather than names. */
+export function productDictQuery({ orgId, w }: Args) {
+  return `WITH ${itemsCte(orgId, w)}
+SELECT p.PRODUCT_ID, p.PRODUCT_NAME, p.CATEGORY_ID, c.CATEGORY_NAME, p.TYPE_NAME,
+       COUNT(*) AS LINES, SUM(pl.TOTAL_PRICE) AS REVENUE
+FROM product_line pl
+JOIN prod p ON p.PRODUCT_ID = pl.PRODUCT_ID
+LEFT JOIN cat c ON c.CATEGORY_ID = p.CATEGORY_ID
+GROUP BY 1, 2, 3, 4, 5
+ORDER BY LINES DESC`;
+}
+
+/**
+ * The quantity trap, measured rather than asserted.
+ *
+ * The extract publishes what it found so the check on the other side has
+ * something to assert against, and so nobody has to take "we do not use
+ * QUANTITY" on trust.
+ */
+export function itemIntegrityQuery({ orgId, w }: Args) {
+  return `WITH ${itemsCte(orgId, w)},
+raw AS (
+  SELECT QUANTITY, TOTAL_PRICE, NULLIF(TRIM(MODIFIER_GROUP_NAME), '') AS MOD, STATUS
+  FROM ${ITEMS}
+  WHERE ORGANIZATION_ID = '${orgId}'
+    AND CREATED_AT_TZ >= '${w.start}' AND CREATED_AT_TZ < DATEADD(day, 1, '${w.end}')
+)
+SELECT
+  (SELECT COUNT(DISTINCT ORDER_ID) FROM paid_line) AS ORDERS_WITH_ITEMS,
+  (SELECT COUNT(*) FROM raw) AS ALL_LINES,
+  (SELECT COUNT(*) FROM raw WHERE STATUS = 'COMPLETED') AS COMPLETED_LINES,
+  (SELECT COUNT(*) FROM paid_line) AS PAID_LINES,
+  (SELECT COUNT(*) FROM product_line) AS PRODUCT_LINES,
+  (SELECT COUNT(*) FROM raw WHERE STATUS = 'COMPLETED' AND MOD IS NOT NULL) AS MODIFIER_LINES,
+  (SELECT MAX(QUANTITY) FROM raw) AS MAX_QUANTITY_ANYWHERE,
+  (SELECT MAX(QUANTITY) FROM raw WHERE STATUS = 'COMPLETED' AND TOTAL_PRICE > 0) AS MAX_QUANTITY_ON_PAID,
+  (SELECT COUNT(*) FROM cat) AS CATEGORY_IDS,
+  (SELECT COUNT(DISTINCT CATEGORY_NAME) FROM cat) AS CATEGORY_NAMES,
+  (SELECT COUNT(*) FROM cat WHERE NAMES_SEEN > 1) AS CATEGORY_IDS_RENAMED,
+  (SELECT SUM(TOTAL_PRICE) FROM paid_line) AS PAID_REVENUE
+`;
+}
+
+/**
+ * Visit history, for the drawer's timeline.
+ *
+ * A visit is a person-day at a venue — the same grain as everywhere else, so a
+ * guest who bought two coffees an hour apart has one visit here and one visit
+ * on the tile above.
+ *
+ * **Capped at the most recent `limit` visits per guest.** The uncapped set is
+ * 120,337 rows at Coffee Guru and roughly 2MB on the wire, and the tail belongs
+ * to a handful of daily regulars whose hundredth-most-recent visit nobody
+ * reads. The cap is published on the face rather than applied silently — a
+ * truncated series that looks complete is the defect this build exists to
+ * avoid, and the guest's *total* visit count comes from the tile, which is
+ * never capped.
+ *
+ * Dates are emitted as an offset in days from the window start, because an ISO
+ * date is ten characters and an offset is two.
+ */
+export function visitHistoryQuery({ orgId, w, pairs, cardMonths }: Args, limit = 60) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+v AS (
+  SELECT PERSON_ID, D, SUM(SPEND) AS SPEND, SUM(ORDERS) AS ORDERS, SUM(ITEMS) AS ITEMS,
+         ANY_VALUE(STORE_ID) AS STORE_ID, MAX_BY(DAYPART, SPEND) AS DAYPART
+  FROM visits WHERE PERSON_ID IN (SELECT PERSON_ID FROM eligible)
+  GROUP BY PERSON_ID, D
+),
+r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY PERSON_ID ORDER BY D DESC) AS RN FROM v)
+SELECT PERSON_ID,
+       ARRAY_AGG(OBJECT_CONSTRUCT(
+         'd', DATEDIFF(day, '${w.start}', D),
+         'o', ORDERS,
+         's', ROUND(SPEND, 2),
+         'v', STORE_ID,
+         'p', DAYPART
+       )) WITHIN GROUP (ORDER BY D DESC) AS VISITS,
+       COUNT(*) AS RETURNED
+FROM r WHERE RN <= ${limit}
+GROUP BY PERSON_ID`;
+}

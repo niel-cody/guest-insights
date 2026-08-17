@@ -25,6 +25,7 @@ import {
 } from "./sql";
 import * as Q from "./queries";
 import { allRuns, claimLevel, gradeMonth, longestRun, monthsBetween } from "../grade";
+import { packGuests } from "../../src/lib/guest-columns";
 import {
   detectionCorrect, fitDistanceDecay, kaplanMeier, paired, standardise, wilson,
   type Episode, type PairObservation, type Stratum,
@@ -105,6 +106,27 @@ function periodId(w: { start: string; end: string }): string {
 }
 
 // ── the run ─────────────────────────────────────────────────────────────────
+/**
+ * Below this many product lines on a side, an over-index is noise.
+ *
+ * A category with eleven member lines and nine non-member lines produces a
+ * confident-looking 1.2× that moves to 0.8× on a different fortnight. The index
+ * is withheld and the row still renders its counts, in the same pattern as the
+ * venue pairs below the shared-guest floor.
+ */
+const MIN_LINES_FOR_INDEX = 200;
+
+/**
+ * The most recent visits kept per guest for the drawer timeline.
+ *
+ * Uncapped this is 120,337 rows and roughly 2MB on the wire at Coffee Guru, and
+ * the tail belongs to a few daily regulars. Sixty covers a year of weekly
+ * visits or two months of daily ones. **The cap is stated on the face** — the
+ * guest's total visit count comes from the person record and is never capped,
+ * so a truncated timeline can never be mistaken for the whole relationship.
+ */
+const VISIT_HISTORY_CAP = 60;
+
 /** The month in progress. Nothing partial is ever counted as a usable month. */
 const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
 
@@ -334,6 +356,17 @@ async function extractPeriod(
     query<Row>(Q.segmentsQuery(calArgs)),
     query<Row>(Q.venueMonthlyQuery(args)),
     query<Row>(Q.guestListQuery(calArgs)),
+  ]);
+
+  // Items last: they are the largest join in the extract, and everything above
+  // is independent of them, so a failure here does not cost the rest of the run.
+  console.log("  items, categories, baskets…");
+  const [catMix, productDict, guestItems, itemIntegrity, visitHistory] = await Promise.all([
+    query<Row>(Q.categoryMixQuery(args)),
+    query<Row>(Q.productDictQuery(args)),
+    query<Row>(Q.guestItemsQuery(args)),
+    query<Row>(Q.itemIntegrityQuery(args)),
+    query<Row>(Q.visitHistoryQuery(args, VISIT_HISTORY_CAP)),
   ]);
 
   // ── shape ─────────────────────────────────────────────────────────────────
@@ -836,7 +869,197 @@ async function extractPeriod(
     tradingDays: num(r.TRADING_DAYS), discount: num(r.DISCOUNT),
   })));
 
-  write(org.slug, period, "guests", { sampled: guests.length, population: truePopulation, rows: guests });
+  // ── items ─────────────────────────────────────────────────────────────────
+  //
+  // Products are shipped as a dictionary plus integer references rather than
+  // repeated names. Coffee Guru has 1,164 products against 17,024 guests, so
+  // carrying the name on every guest's top five would multiply a 30-byte
+  // reference into a 250-byte string five times over for no gain.
+  /** Snowflake hands ARRAY_AGG back parsed or as JSON depending on inferred type. */
+  const parseArr = (v: unknown): Record<string, unknown>[] => {
+    if (Array.isArray(v)) return v as Record<string, unknown>[];
+    if (typeof v === "string") { try { return JSON.parse(v) as Record<string, unknown>[]; } catch { return []; } }
+    return [];
+  };
+
+  const productIndex = new Map<string, number>();
+  const products = productDict.map((r, i) => {
+    productIndex.set(String(r.PRODUCT_ID), i);
+    return {
+      name: String(r.PRODUCT_NAME),
+      categoryId: r.CATEGORY_ID == null ? null : String(r.CATEGORY_ID),
+      category: r.CATEGORY_NAME == null ? null : String(r.CATEGORY_NAME),
+      type: r.TYPE_NAME == null ? null : String(r.TYPE_NAME),
+      lines: num(r.LINES),
+      revenue: r2(num(r.REVENUE)),
+    };
+  });
+
+  // Categories are indexed for the same reason products are, and it matters
+  // more here: a category id is a 36-character UUID, and four of them on every
+  // one of 17,024 guests is 2.4MB of repeated key before any figure is carried.
+  const categoryIndex = new Map<string, number>();
+  const catRows = catMix.map((r) => ({
+    categoryId: String(r.CATEGORY_ID),
+    category: String(r.CATEGORY_NAME),
+    type: r.TYPE_NAME == null ? null : String(r.TYPE_NAME),
+    tier: String(r.TIER) as "member" | "card",
+    productLines: num(r.PRODUCT_LINES),
+    paidLines: num(r.PAID_LINES),
+    revenue: r2(num(r.REVENUE)),
+    people: num(r.PEOPLE),
+    orders: num(r.ORDERS),
+  }));
+  for (const c of catRows) if (!categoryIndex.has(c.categoryId)) categoryIndex.set(c.categoryId, categoryIndex.size);
+
+  // The comparison the whole thing is for: what each tier's basket is made of,
+  // and where they differ. Shares are of *product lines* within the tier, so a
+  // tier that simply buys more does not index high on everything.
+  const mixByCategory = [...new Set(catRows.map((c) => c.categoryId))].map((id) => {
+    const rows = catRows.filter((c) => c.categoryId === id);
+    const side = (t: "member" | "card") => {
+      const r = rows.find((x) => x.tier === t);
+      return { lines: r?.productLines ?? 0, revenue: r?.revenue ?? 0, people: r?.people ?? 0 };
+    };
+    return {
+      categoryId: id,
+      category: rows[0].category,
+      type: rows[0].type,
+      member: side("member"),
+      nonMember: side("card"),
+    };
+  });
+  const memberLines = mixByCategory.reduce((a, c) => a + c.member.lines, 0);
+  const cardLines = mixByCategory.reduce((a, c) => a + c.nonMember.lines, 0);
+
+  const categoryMix = mixByCategory
+    .map((c) => {
+      const memberShare = memberLines ? c.member.lines / memberLines : 0;
+      const nonMemberShare = cardLines ? c.nonMember.lines / cardLines : 0;
+      return {
+        ...c,
+        memberShare: r4(memberShare),
+        nonMemberShare: r4(nonMemberShare),
+        // Over-index. 1.0 means members buy this in exactly the proportion
+        // everybody else does — which is the answer for most categories, and
+        // saying so is the point. Null below the evidence floor rather than a
+        // confident ratio computed on forty lines.
+        index:
+          c.member.lines >= MIN_LINES_FOR_INDEX && c.nonMember.lines >= MIN_LINES_FOR_INDEX &&
+          nonMemberShare > 0 && memberShare > 0
+            ? r2(memberShare / nonMemberShare)
+            : null,
+        lines: c.member.lines + c.nonMember.lines,
+      };
+    })
+    .sort((a, b) => b.lines - a.lines);
+
+  const integrity = itemIntegrity[0] ?? {};
+
+  const categories = [...categoryIndex.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([id]) => {
+      const row = catRows.find((c) => c.categoryId === id)!;
+      return { id, name: row.category, type: row.type };
+    });
+
+  write(org.slug, period, "items", {
+    window: { ...w, days: windowDays },
+    products,
+    categories,
+    categoryMix,
+    totals: {
+      memberProductLines: memberLines,
+      nonMemberProductLines: cardLines,
+      // Below this many lines on a side, an index is noise. Stated so the
+      // surface can grey the row rather than the extract silently dropping it.
+      minLinesForIndex: MIN_LINES_FOR_INDEX,
+    },
+    /**
+     * The three traps, measured. Published so the checks on the other side have
+     * something to assert against and nobody has to take "we do not read
+     * QUANTITY" on trust.
+     */
+    integrity: {
+      ordersWithItems: num(integrity.ORDERS_WITH_ITEMS),
+      orders: totals.orders,
+      allLines: num(integrity.ALL_LINES),
+      completedLines: num(integrity.COMPLETED_LINES),
+      paidLines: num(integrity.PAID_LINES),
+      productLines: num(integrity.PRODUCT_LINES),
+      modifierLines: num(integrity.MODIFIER_LINES),
+      maxQuantityAnywhere: num(integrity.MAX_QUANTITY_ANYWHERE),
+      maxQuantityOnPaid: num(integrity.MAX_QUANTITY_ON_PAID),
+      categoryIds: num(integrity.CATEGORY_IDS),
+      categoryNames: num(integrity.CATEGORY_NAMES),
+      categoryIdsRenamed: num(integrity.CATEGORY_IDS_RENAMED),
+      paidRevenue: r2(num(integrity.PAID_REVENUE)),
+      orderRevenue: r2(totals.revenue),
+    },
+  });
+
+  // Per-guest item behaviour, attached to the guests file so the drawer needs
+  // one fetch rather than two.
+  const itemsByPerson = new Map<string, {
+    top: [number, number][];
+    cats: [number, number, number][];
+    repertoire: number;
+    topShare: number | null;
+  }>();
+  for (const r of guestItems) {
+    // Top three, and visits rather than spend: "bought on 66 of their 115
+    // visits" is the sentence that answers "is this their usual", and carrying
+    // per-product spend as well doubled the file for a figure nothing reads.
+    const top = parseArr(r.TOP_PRODUCTS)
+      .slice(0, 3)
+      .map((o): [number, number] => [productIndex.get(String(o.p)) ?? -1, num(o.v)])
+      .filter(([i]) => i >= 0);
+    const cats = parseArr(r.TOP_CATEGORIES)
+      .slice(0, 3)
+      .map((o): [number, number, number] => [
+        categoryIndex.get(String(o.c)) ?? -1, num(o.v), r2(num(o.s)),
+      ])
+      .filter(([i]) => i >= 0);
+    // Keyed on the pseudonym, the same one the guest rows carry, so no raw
+    // person id travels beside the basket.
+    itemsByPerson.set(pseudonymise(String(r.PERSON_ID)), {
+      top,
+      cats,
+      repertoire: num(r.REPERTOIRE),
+      topShare: r.TOP_PRODUCT_VISIT_SHARE == null ? null : r4(num(r.TOP_PRODUCT_VISIT_SHARE)),
+    });
+  }
+
+  const venueOrder = new Map(venueList.map((v, i) => [v.id, i]));
+  const historyByPerson = new Map<string, [number, number, number, number][]>();
+  for (const r of visitHistory) {
+    historyByPerson.set(
+      pseudonymise(String(r.PERSON_ID)),
+      parseArr(r.VISITS).map((o): [number, number, number, number] => [
+        num(o.d), num(o.o), r2(num(o.s)), venueOrder.get(String(o.v)) ?? -1,
+      ]),
+    );
+  }
+
+  const guestsWithItems = guests.map((g) => {
+    const it = itemsByPerson.get(g.id);
+    return {
+      ...g,
+      top: it?.top ?? [],
+      cats: it?.cats ?? [],
+      repertoire: it?.repertoire ?? 0,
+      /** Share of their visits carrying their single most-bought product. */
+      topShare: it?.topShare ?? null,
+      /** Most recent visits as [dayOffsetFromWindowStart, orders, spend, venueIndex]. */
+      history: historyByPerson.get(g.id) ?? [],
+    };
+  });
+
+  write(org.slug, period, "guests", {
+    sampled: guests.length,
+    population: truePopulation,
+    ...packGuests(guestsWithItems as unknown as Record<string, unknown>[]),
+  });
 
   console.log(
     `  ✓ ${totals.orders.toLocaleString()} orders · ` +

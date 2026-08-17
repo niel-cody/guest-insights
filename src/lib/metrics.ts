@@ -10,7 +10,7 @@
  */
 import type {
   AnalysisWindow, Coverage, DaypartRow, Dayparts, DecompositionRow, Guest, LifecycleRow,
-  Members, Network, Org, SegmentRow, Segments,
+  Items, Members, Network, Org, SegmentRow, Segments,
 } from "./types";
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -59,15 +59,22 @@ export const dayLabel = (iso: string) =>
  * the basis happened to be today.
  */
 export function recency(days: number, w: AnalysisWindow, today = new Date()): string {
-  const unit = days === 1 ? "day" : "days";
   const endedDaysAgo = Math.round(
     (today.getTime() - Date.parse(`${w.end}T00:00:00Z`)) / 86_400_000,
   );
+  const current = endedDaysAgo <= 7;
+  // Zero is the common case for a daily regular and "0 days ago" is not a
+  // sentence anybody writes.
+  if (days === 0) return current ? "today" : "on the last day of the period";
   // A window that closed within the last week is "now" for a reader's purposes,
   // and spelling out the anchor there is noise rather than rigour.
-  if (endedDaysAgo <= 7) return `${count(days)} ${unit} ago`;
-  return `${count(days)} ${unit} before this period closed`;
+  return current
+    ? `${plural(days, "day")} ago`
+    : `${plural(days, "day")} before this period closed`;
 }
+
+/** `1 day`, `2 days`. A figure that reads as a typo reads as carelessness. */
+export const plural = (n: number, unit: string) => `${count(n)} ${unit}${n === 1 ? "" : "s"}`;
 
 /** The compact form, for a grid cell. Still never bare when the window is historical. */
 export function recencyShort(days: number, w: AnalysisWindow, today = new Date()): string {
@@ -649,4 +656,103 @@ export function valueBands(segments: Segments, tier?: "member" | "card") {
       minSpend: Math.min(...rs.map((r) => r.minSpend)),
       maxSpend: Math.max(...rs.map((r) => r.maxSpend)),
     }));
+}
+
+// ── the basket: what each tier is actually buying ───────────────────────────
+
+export type MixRow = {
+  key: string;
+  label: string;
+  memberLines: number;
+  nonMemberLines: number;
+  memberShare: number;
+  nonMemberShare: number;
+  memberRevenue: number;
+  nonMemberRevenue: number;
+  /** Member share over non-member share. Null below the evidence floor. */
+  index: number | null;
+  lines: number;
+};
+
+/**
+ * The member and non-member basket, side by side, rolled up to the reporting
+ * group.
+ *
+ * ── Why the rollup, and why the index ──────────────────────────────────────
+ *
+ * Coffee Guru carries 62 categories and 33 of them fall below the evidence
+ * floor, so a category-grain table is mostly suppressed rows. The reporting
+ * group is the level the question is actually asked at — *are members buying
+ * food or coffee* — and it is the level the answer survives at.
+ *
+ * The **index** is the object with information in it, not the top list. A top
+ * list of what regulars buy is the top list of what everybody buys, because
+ * popular things are popular; the operator already knows it and it tells them
+ * nothing. What they cannot see without this is that members buy wraps at
+ * **0.47×** the rate everybody else does.
+ *
+ * Shares are of each tier's own product lines, so a tier that simply buys more
+ * does not index above 1.0 on everything.
+ *
+ * **This is association, not effect.** People who drink a coffee every morning
+ * are the people who enrol; the mix does not say enrolment changed anyone's
+ * basket. It is the same distinction as the 4.9× cross-sectional gap, and it
+ * travels with the same caveat.
+ */
+export function basketMix(items: Items, level: "type" | "category" = "type"): MixRow[] {
+  const by = new Map<string, { label: string; m: number; n: number; mr: number; nr: number }>();
+  for (const c of items.categoryMix) {
+    const key = level === "type" ? (c.type ?? "(no reporting group)") : c.categoryId;
+    const label = level === "type" ? (c.type ?? "No reporting group") : c.category;
+    const g = by.get(key) ?? { label, m: 0, n: 0, mr: 0, nr: 0 };
+    g.m += c.member.lines;
+    g.n += c.nonMember.lines;
+    g.mr += c.member.revenue;
+    g.nr += c.nonMember.revenue;
+    by.set(key, g);
+  }
+  const M = items.totals.memberProductLines || 1;
+  const N = items.totals.nonMemberProductLines || 1;
+  const floor = items.totals.minLinesForIndex;
+
+  return [...by.entries()]
+    .map(([key, g]) => {
+      const memberShare = g.m / M;
+      const nonMemberShare = g.n / N;
+      return {
+        key,
+        label: g.label,
+        memberLines: g.m,
+        nonMemberLines: g.n,
+        memberShare,
+        nonMemberShare,
+        memberRevenue: g.mr,
+        nonMemberRevenue: g.nr,
+        // Withheld rather than guessed below the floor, in the same pattern as
+        // a venue pair below the shared-guest bar.
+        index: g.m >= floor && g.n >= floor && nonMemberShare > 0 ? memberShare / nonMemberShare : null,
+        lines: g.m + g.n,
+      };
+    })
+    .sort((a, b) => b.lines - a.lines);
+}
+
+/**
+ * The sentence the mix supports, or null when it does not support one.
+ *
+ * The build's standing rule is that a claim carries its basis, so the headline
+ * is generated from the measured extremes rather than written once and left to
+ * drift away from the data behind it.
+ */
+export function basketStory(
+  mix: MixRow[],
+): { over: MixRow; under: MixRow; spread: number } | null {
+  const ranked = mix.filter((r) => r.index != null).sort((a, b) => b.index! - a.index!);
+  if (ranked.length < 3) return null;
+  const over = ranked[0];
+  const under = ranked[ranked.length - 1];
+  // A spread this small is two tiers buying the same things, which is a real
+  // and publishable answer — but it is not the sentence below.
+  if (over.index! / under.index! < 1.3) return null;
+  return { over, under, spread: over.index! / under.index! };
 }

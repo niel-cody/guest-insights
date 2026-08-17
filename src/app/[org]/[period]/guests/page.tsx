@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { Page, PageHeader } from "@/components/shell/PageHeader";
 import { CheckBadge, Tile } from "@/components/ui/Primitives";
-import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { getPeriods, getAllOrgs, getGuestRows, getGuests, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
 import { count, coverageState, money, pct, tileCount, windowShort } from "@/lib/metrics";
 import { GuestGrid } from "./GuestGrid";
@@ -10,13 +10,19 @@ export const dynamic = "force-static";
 
 export default async function GuestsPage({ params }: { params: Promise<{ org: string; period: string }> }) {
   const { org: slug, period } = await params;
-  const [snap, guests, orgs] = await Promise.all([getSnapshot(slug, period), getGuests(slug, period), getAllOrgs()]);
+  // Both shapes: the packed set goes to the client, which expands it there, and
+  // the expanded rows stay on the server for the checks. Expanding here would
+  // put the twenty-five field names back on the wire, which is the thing the
+  // packing exists to avoid.
+  const [snap, guests, guestRows, orgs] = await Promise.all([
+    getSnapshot(slug, period), getGuests(slug, period), getGuestRows(slug, period), getAllOrgs(),
+  ]);
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
   const { org, coverage, segments, members } = snap;
 
   const cov = coverageState(org, coverage);
-  const checks = runChecks(snap, guests);
+  const checks = runChecks(snap, guestRows);
   const cs = members.crossSection;
 
   // Cohort figures come from the population source and are computed over that
@@ -82,7 +88,7 @@ export default async function GuestsPage({ params }: { params: Promise<{ org: st
           </div>
 
           <Suspense fallback={null}>
-            <GuestGrid guests={guests} org={org} crossVenueShare={crossVenue} />
+            <GuestGrid guests={guests} org={org} items={snap.items} crossVenueShare={crossVenue} />
           </Suspense>
         </div>
       </Page>

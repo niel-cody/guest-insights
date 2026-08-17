@@ -56,6 +56,12 @@ export type View = {
   band: number | null;
   /** The guest whose drawer is open. In the URL so a drawer can be sent. */
   guest: string | null;
+  /**
+   * Which drawer tab is open. In the URL for the same reason the drawer itself
+   * is: "look at what this person buys" is a thing one operator sends another,
+   * and it should land on the tab that makes the point.
+   */
+  tab: "stats" | "commentary" | "history";
   /** Free-text search over the guest grid. */
   q: string;
   page: number;
@@ -65,7 +71,7 @@ export type View = {
 
 export const DEFAULT_VIEW: View = {
   venue: [], compare: null, segment: null, tier: null, daypart: null,
-  band: null, guest: null, q: "", page: 1, sort: null, dir: "desc",
+  band: null, guest: null, tab: "stats", q: "", page: 1, sort: null, dir: "desc",
 };
 
 /** What Next.js hands a server component. A repeated parameter arrives as an array. */
@@ -112,6 +118,7 @@ export function parseView(sp: SearchParams | undefined): View {
     daypart: first(sp.daypart)?.trim() || null,
     band,
     guest: first(sp.guest)?.trim() || null,
+    tab: oneOf(first(sp.tab), ["stats", "commentary", "history"] as const) ?? "stats",
     q,
     page,
     sort: first(sp.sort)?.trim() || null,
@@ -136,6 +143,7 @@ export function toQuery(view: Partial<View>): string {
   if (v.daypart) p.set("daypart", v.daypart);
   if (v.band != null) p.set("band", String(v.band));
   if (v.guest) p.set("guest", v.guest);
+  if (v.guest && v.tab !== "stats") p.set("tab", v.tab);
   if (v.q) p.set("q", v.q);
   if (v.page > 1) p.set("page", String(v.page));
   if (v.sort) p.set("sort", v.sort);

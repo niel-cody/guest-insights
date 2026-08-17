@@ -5,7 +5,7 @@ import { Card, CheckBadge, EmptyState, Facts, Tile } from "@/components/ui/Primi
 import { IconArrow, IconInfo } from "@/components/shell/Icons";
 import { VenueNetwork } from "@/components/charts/VenueNetwork";
 import { VenueLeague } from "@/components/ui/VenueLeague";
-import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
 import { runChecks } from "@/lib/checks";
 import { count, coverageState, delta, money, pct, windowShort, pairArithmetic} from "@/lib/metrics";
 
@@ -17,7 +17,7 @@ const ordinal = (n: number) => ORDINALS[n] ?? `${n}th`;
 export default async function VenuesPage({ params }: { params: Promise<{ org: string; period: string }> }) {
   const { org: slug, period } = await params;
   const snap = await getSnapshot(slug, period);
-  const guests = await getGuests(slug, period);
+  const guests = await getGuestRows(slug, period);
   const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
