@@ -145,8 +145,8 @@ export function GuestBasket({ g, items, org }: { g: Guest; items: Items | null; 
             </tbody>
           </table>
           <p className="mt-2 text-[12px] text-ink-muted">
-            Top {g.cats.length} categories by spend, keyed on the category id rather than its name — five
-            Coffee Guru names carry more than one id, and grouping on the name merges them.
+            Top {g.cats.length} categories by spend, keyed on the category id rather than its name — some
+            names carry more than one id, and grouping on the name merges them.
           </p>
         </div>
       )}

@@ -66,7 +66,12 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   checks.push(ok(
     "card.maxTokenShare",
     "No month in the analysis window has more than 10% of its card transactions on one reference.",
-    "All ten corrupt months at Coffee Guru, which sat at 100% and passed every non-null coverage test.",
+    // The merchant is not named. This register renders inside every
+    // organisation's report, and the passwords now go to two different
+    // customers — so a worked example naming one of them is a disclosure to the
+    // other. The defect class is the useful part; whose data it happened to was
+    // never load-bearing.
+    "All ten corrupt months at one organisation in this dataset, which sat at 100% and passed every non-null coverage test.",
     admitted.length > 0 && worstToken < 0.1,
     admitted.length
       ? `worst admitted month ${(worstToken * 100).toFixed(2)}% · rejected ${org.cardTier.quality.filter((q) => !q.ok).length} of ${org.cardTier.quality.length}`
@@ -268,7 +273,7 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   checks.push(ok(
     "venue.resolution",
     "Every guest's home venue resolves to a venue in the venue list, by id.",
-    "74 guests carrying a home venue of `Meat Flour Wine` or `Meat Flour Wine Store` — Braeside's own former names, which also invented a phantom third venue of 6,799 orders.",
+    "74 guests carrying a home venue matching a venue's own former trading names, which also invented a phantom third venue of 6,799 orders.",
     orphanGuests.length === 0,
     orphanGuests.length
       ? `${orphanGuests.length} guests on ${orphanNames.length} unmapped venues: ${orphanNames.slice(0, 3).join(", ")}`
@@ -423,7 +428,7 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
     checks.push(ok(
       "items.categoryKeyedOnId",
       "Categories are grouped on the category id, and the count of ids that have been renamed is published.",
-      "Five Coffee Guru category names carrying more than one id — the same trap that merged three store names into a phantom venue with 6,799 orders.",
+      "Five category names carrying more than one id — the same trap that merged three store names into a phantom venue with 6,799 orders.",
       items.categories.every((c) => Boolean(c.id)) && it.categoryIds >= it.categoryNames,
       `${count(it.categoryIds)} category ids against ${count(it.categoryNames)} distinct names · ` +
         `${merged > 0 ? `${merged} name${merged === 1 ? "" : "s"} shared by more than one id — grouping on the name would merge them` : "no shared names"} · ` +

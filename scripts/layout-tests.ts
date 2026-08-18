@@ -49,7 +49,44 @@ function between(html: string, from: number, to: number): string {
   return from >= 0 && to > from ? html.slice(from, to) : "";
 }
 
+/**
+ * Organisation identities, for the cross-organisation disclosure check.
+ *
+ * Venue names are included because they are the other half of the leak: a
+ * report that never says "Meat Flour Wine" but does say "Braeside" has still
+ * told the reader who the other customer is.
+ */
+async function orgIdentities(): Promise<{ slug: string; name: string; venues: string[] }[]> {
+  const DATA = join(import.meta.dirname, "..", "data");
+  const out: { slug: string; name: string; venues: string[] }[] = [];
+  for (const slug of await readdir(DATA, { withFileTypes: true })) {
+    if (!slug.isDirectory()) continue;
+    for (const period of await readdir(join(DATA, slug.name), { withFileTypes: true })) {
+      if (!period.isDirectory()) continue;
+      try {
+        const org = JSON.parse(
+          await readFile(join(DATA, slug.name, period.name, "org.json"), "utf8"),
+        ) as { slug: string; name: string; venues: { name: string }[] };
+        out.push({
+          slug: org.slug,
+          name: org.name,
+          venues: org.venues.map((v) => v.name),
+        });
+        break;
+      } catch {
+        // No org.json in this directory; try the next period.
+      }
+    }
+  }
+  return out;
+}
+
+let ORGS: { slug: string; name: string; venues: string[] }[] = [];
+/** So the skipped-venue note prints once per org rather than once per page. */
+const ambiguousLogged = new Set<string>();
+
 async function main() {
+  ORGS = await orgIdentities();
   let files: string[];
   try {
     files = await pages(OUT);
@@ -241,6 +278,61 @@ async function main() {
       check("the member-tier wall still declares the clock change",
         html.includes("runs on a different clock"),
         "the wall no longer says the population changed");
+    }
+
+    // ── No organisation's page names another organisation ─────────────────
+    //
+    // Passwords now go to two different merchants who compete in the same
+    // market, so a page belonging to one must not disclose that the other is a
+    // customer — let alone name their venues.
+    //
+    // This is asserted on the **prerendered HTML**, which is the only place it
+    // could be checked, because that is where the leak was: the organisation
+    // switcher rendered an `<option>` for every org in the dataset and hid the
+    // wrong ones client-side, and the check register carried worked examples
+    // naming a specific merchant. Neither leaked a figure. Both leaked a
+    // customer list, which is its own kind of confidential and is the sort of
+    // thing that ends a lighthouse relationship badly.
+    //
+    // Runs on the report pages only: the index and the org landing pages are
+    // redirects with no content, and `/login` deliberately says nothing at all.
+    if (isReport && !isPlaceholder) {
+      const mine = name.split("/").filter(Boolean)[0];
+      for (const other of ORGS.filter((o) => o.slug !== mine)) {
+        /**
+         * The organisation's name and slug are checked unconditionally. They
+         * are unambiguous, and they are where both real leaks were.
+         *
+         * **Venue names are checked only when they are distinctive.** The guest
+         * rows carry pseudonymised people, and a single-word suburb is also a
+         * perfectly ordinary given name or surname: this check first fired on
+         * "Casey", which is a Coffee Guru venue *and* the first name of three
+         * Meat Flour Wine guests. Asserting on it would have been a permanent
+         * false alarm, and a test that cries wolf gets deleted.
+         *
+         * The skipped names are logged rather than dropped quietly, because a
+         * bounded check that does not say what it did not cover reads as
+         * complete when it is not.
+         */
+        const distinctive = other.venues.filter((v) => v.trim().includes(" "));
+        const ambiguous = other.venues.filter((v) => !v.trim().includes(" "));
+
+        for (const needle of [other.name, other.slug, ...distinctive]) {
+          if (!needle) continue;
+          check(
+            `does not name another organisation (${needle})`,
+            !html.includes(needle),
+            `"${needle}" appears in ${mine}'s prerendered HTML`,
+          );
+        }
+        if (ambiguous.length && !ambiguousLogged.has(other.slug)) {
+          ambiguousLogged.add(other.slug);
+          console.log(
+            `  · ${ambiguous.length} single-word venue names on ${other.slug} are not asserted ` +
+              `(they collide with pseudonymised guest names): ${ambiguous.join(", ")}`,
+          );
+        }
+      }
     }
 
     // ── Every in-page anchor resolves to something (C-4) ──────────────────

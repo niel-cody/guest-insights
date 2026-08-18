@@ -2,12 +2,89 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.6.0`** — the version and commit render in the app header on every
+**Current: `v0.7.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.7.0 — the access gate, and two customers who must not see each other
+
+The report is going to lighthouse customers. One password opens Coffee Guru, one
+opens Meat Flour Wine, one opens both for Oolio.
+
+**That is not "keep strangers out". It is tenant isolation between two merchants
+who compete in the same market**, and the design follows from one rule:
+
+> Entitlement is enforced on the request path in `src/proxy.ts`, before any page
+> renders. Everywhere else it appears is convenience.
+
+### Why it cannot be a React check
+
+Every report page is `force-static`. The guest rows, segment totals and cohort
+figures are prerendered into HTML at build time, so a check in a layout or a
+client component decides whether to *display* a document that already contains
+the data — available in view-source, in the RSC payload, and to anything that
+speaks HTTP but not JavaScript. Proxy runs before Next.js serves anything,
+including a prerendered page off the CDN.
+
+It is `proxy.ts` and not `middleware.ts`: **`middleware` is deprecated in
+Next.js 16** and renamed. Same behaviour, different file and export.
+
+### What was found on the way
+
+Two leaks that only an end-to-end check would catch. Neither exposed a figure;
+both exposed **that the other customer exists**, which is its own kind of
+confidential.
+
+- **The organisation switcher rendered every org server-side** and hid the wrong
+  ones after hydration. `view-source` on a Meat Flour Wine page named Coffee Guru.
+  The prerendered HTML now contains only the organisation whose page it is;
+  anything else this session may open is added from the session cookie after
+  mount.
+- **The check register named a merchant in three of its worked examples** — "all
+  ten corrupt months at Coffee Guru" shipped inside Meat Flour Wine's report. The
+  defect class was the useful part; whose data it happened to was never
+  load-bearing.
+
+`scripts/layout-tests.ts` now asserts no organisation's prerendered HTML names
+another, and it is proven to catch both. It checks names, slugs and multi-word
+venue names; single-word venue names are **logged as not asserted**, because
+"Casey" is both a Coffee Guru venue and the first name of three Meat Flour Wine
+guests, and a test that cries wolf gets deleted.
+
+### The properties that matter
+
+- **It fails closed.** Missing, malformed or weak configuration denies every
+  request with a 503 naming the problem. A gate that waves traffic through when
+  its own config is unreadable is worse than no gate, because the deploy looks
+  healthy.
+- **Sessions are signed, not merely set.** A cookie reading `authed=true` is a
+  cookie anybody can type into devtools.
+- **Rotation actually rotates.** The signed session carries a fingerprint of the
+  whole grant — label, password and organisations — so changing a password *or
+  narrowing which orgs it opens* invalidates every session already issued.
+- **Comparisons are constant-time**, over equal-length digests, and iterate every
+  grant without an early exit so response time does not reveal which password
+  was close.
+- **No open redirect.** `?next=` is accepted only as an in-site path, and only
+  when the grant is entitled to it.
+- Two grants sharing a password is refused at boot rather than resolved by list
+  order.
+
+`npm run test:gate` — 53 assertions, refusals first. Three deliberate breaks were
+introduced to prove they fail: prefix-matching entitlement, a fingerprint that
+ignores `orgs`, and `grantAllows` returning true.
+
+### Configuration
+
+`SITE_ACCESS` (JSON grants) and `SESSION_SECRET`. See `.env.example`. JSON rather
+than a delimited string because a password is arbitrary text and
+`coffee-guru:p@ss,word` has no unambiguous parse — a format that can be mis-split
+is a format that eventually grants the wrong organisation.
 
 ---
 

@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { Page, PageHeader } from "@/components/shell/PageHeader";
 import { Tile } from "@/components/ui/Primitives";
-import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
+import { getPeriods, getGuests, getSnapshot } from "@/lib/data";
 import { count, coverageState, money, pct, tileCount, windowShort } from "@/lib/metrics";
 import { GuestGrid, GROUPS, type GroupKey } from "./GuestGrid";
 import { GridControls } from "./GridControls";
@@ -30,8 +30,8 @@ export default async function GuestsPage({
   const { org: slug, period } = await params;
   const sp = await searchParams;
 
-  const [snap, guests, orgs] = await Promise.all([
-    getSnapshot(slug, period), getGuests(slug, period), getAllOrgs(),
+  const [snap, guests] = await Promise.all([
+    getSnapshot(slug, period), getGuests(slug, period),
   ]);
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
@@ -53,7 +53,6 @@ export default async function GuestsPage({
     <>
       <PageHeader
         org={org}
-        orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))}
         periods={periods}
         period={current}
         title="Guests"

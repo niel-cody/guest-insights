@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { CoverageChip } from "@/components/ui/CoverageChip";
 import { ChecksDrawer } from "@/components/ui/ChecksDrawer";
+import { SessionChip } from "@/components/shell/SessionChip";
 import { FilterBar } from "@/components/shell/FilterBar";
 import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
@@ -21,10 +22,9 @@ import type { Org } from "@/lib/types";
  * open on click rather than on hover (§8 rule 7 — hover does not exist on touch).
  */
 export function PageHeader({
-  org, orgs, title, coverage, filters, actions, periods, period, checks, coverageScope = "card",
+  org, title, coverage, filters, actions, periods, period, checks, coverageScope = "card",
 }: {
   org: Org;
-  orgs: { slug: string; name: string }[];
   title: string;
   coverage?: CoverageState;
   /** Report-specific controls, rendered inside the shared bar. */
@@ -59,6 +59,9 @@ export function PageHeader({
             it says so, and the wall inside the page carries the member-tier
             figure where the member-tier content starts. */}
         <div className="flex items-center gap-2">
+          {/* Which of the three audiences this session belongs to. Three
+              audiences read pages that differ only in their figures. */}
+          <SessionChip />
           {actions}
           {/* C-4. This was `<CheckBadge href="#checks" />` and `#checks` did not
               exist on any page — the anchor's host section was removed from
@@ -69,7 +72,7 @@ export function PageHeader({
         </div>
       </div>
 
-      <FilterBar org={org} orgs={orgs} periods={periods} period={period} extra={filters} />
+      <FilterBar org={org} periods={periods} period={period} extra={filters} />
     </header>
   );
 }

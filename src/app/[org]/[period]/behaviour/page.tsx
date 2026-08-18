@@ -8,7 +8,7 @@ import { TIER_LABEL } from "@/lib/lexicon";
 import { IconArrow } from "@/components/shell/Icons";
 import { CohortLens } from "@/components/charts/CohortLens";
 import { SegmentBasket, SegmentTiming } from "@/components/charts/SegmentBehaviour";
-import { getPeriods, getAllOrgs, getSnapshot } from "@/lib/data";
+import { getPeriods, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import {
   cohortWindow, count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
@@ -38,7 +38,6 @@ export default async function BehaviourPage({
   void (await searchParams);
 
   const snap = await getSnapshot(slug, period);
-  const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
   const { org, dayparts, venueCross, network, cohorts, segments, segmentBehaviour } = snap;
@@ -118,7 +117,6 @@ export default async function BehaviourPage({
     <>
       <PageHeader
         org={org}
-        orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))}
         periods={periods}
         period={current}
         title="Behaviour"

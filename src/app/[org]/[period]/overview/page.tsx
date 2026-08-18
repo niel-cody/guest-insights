@@ -11,7 +11,7 @@ import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
 import { GrowthView } from "@/components/charts/GrowthView";
 import { BasketMix } from "@/components/ui/BasketMix";
 import { IDENTITY_LABEL, TIER_LABEL } from "@/lib/lexicon";
-import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
+import { getPeriods, getGuestRows, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
 import {
@@ -81,7 +81,6 @@ export default async function OverviewPage({
 
   const snap = await getSnapshot(slug, period);
   const guests = await getGuestRows(slug, period);
-  const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
 
@@ -134,7 +133,6 @@ export default async function OverviewPage({
     <>
       <PageHeader
         org={org}
-        orgs={orgs.map((o) => ({ slug: o.slug, name: o.name }))}
         periods={periods}
         period={current}
         title="Overview"
