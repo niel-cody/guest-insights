@@ -43,7 +43,7 @@ async function load(slug: string, period: string): Promise<Fixture> {
 
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, segmentBehaviour, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, segmentBehaviour, team, cohorts,
   ] = await Promise.all([
     read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
     read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
@@ -57,13 +57,14 @@ async function load(slug: string, period: string): Promise<Fixture> {
     read<Guests>("guests"),
     read<Snapshot["items"]>("items"),
     read<Snapshot["segmentBehaviour"]>("segmentBehaviour").catch(() => null),
+    read<Snapshot["team"]>("team").catch(() => null),
     // Org grain, not period grain — the member tier is not a card period. §4.3.
     orgRead<Snapshot["cohorts"]>("cohorts").catch(() => null),
   ]);
   return {
     snap: {
       org, coverage, lifecycle, decomposition, segments, members, dayparts,
-      dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
+      dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
     },
     guests: { sampled: guests.sampled, population: guests.population, rows: unpackGuests(guests) },
   };
@@ -210,6 +211,56 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
     const q = f.snap.org.cardTier.quality.find((x) => x.month === m)!;
     q.coverage = 0.04;
     q.withPar = Math.round(q.txns * 0.04);
+  },
+
+  // ── the team half ─────────────────────────────────────────────────────────
+
+  // A shift crossing midnight dropped from one grain. This is the realistic
+  // apportionment bug: the table still renders, every row is plausible, and one
+  // grain quietly holds less money than the others.
+  "team.grainsReconcile": (f) => {
+    const day = f.snap.team?.margin.day.filter((c) => c.storeId === "all");
+    if (day?.length) { day[0].net = 0; day[0].labour = 0; }
+  },
+  // The wage percentage rolled up by averaging the per-shift column rather than
+  // dividing the sums — which on this window returns a flattering number,
+  // because a dead Monday lunch is weighted the same as a full Saturday dinner.
+  "team.wagePctNotAveraged": (f) => {
+    const cells = f.snap.team?.margin.serviceDow.filter((c) => c.storeId === "all" && c.wagePct != null);
+    if (f.snap.team && cells?.length) {
+      f.snap.team.totals.wagePct =
+        cells.reduce((a, c) => a + (c.wagePct ?? 0), 0) / cells.length;
+    }
+  },
+  // Somebody helpfully filling in the empty column: a clock hour handed the
+  // ratio it cannot support.
+  "team.clockRatiosAbsent": (f) => {
+    const dp = f.snap.team?.margin.daypart.find((c) => c.storeId === "all" && c.hours > 0);
+    if (dp) {
+      dp.wagePct = dp.net > 0 ? dp.labour / dp.net : 0;
+      dp.margin = dp.net - dp.labour;
+      dp.refusal = null;
+    }
+  },
+  // A conflicted link costed anyway — one person's wage divided into another
+  // person's sales, which is exactly what the four conflicts at this
+  // organisation would produce if the guard were relaxed.
+  "team.costedOnlyOnEvidence": (f) => {
+    const bad = f.snap.team?.people.find((p) => p.verdict === "conflict" || p.verdict === "collision");
+    if (bad) { bad.netPerHour = 250; bad.wagePct = 0.2; }
+  },
+  // A status filter added to one half of the build and not the other, so the
+  // product carries two order counts and no way to tell which is the business's.
+  "team.ordersReconcileToCustomerReport": (f) => {
+    const day = f.snap.team?.margin.day.filter((c) => c.storeId === "all");
+    if (day?.length) day[0].orders += 37;
+  },
+  // The classifier failing to recognise a shared login: the training till keeps
+  // its name and acquires an ordinary verdict, which is what lets it walk into
+  // the league table.
+  "team.sharedLoginsNotRated": (f) => {
+    const ghost = f.snap.team?.links.find((l) => l.verdict === "not-a-person" && l.orders >= 50);
+    if (ghost) ghost.verdict = "proposed";
   },
 };
 

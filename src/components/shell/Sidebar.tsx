@@ -59,6 +59,44 @@ const CUSTOMERS = [
   { label: "Loyalty Redemption", href: "loyalty-redemption", placeholder: true },
 ] as const;
 
+/**
+ * The Team section. Three built reports, then the two that already ship.
+ *
+ * ── The group is called Team, and it used to be called Staff ───────────────
+ *
+ * "Staff" names a cost line. **"Team" names the people the cost line is made
+ * of**, and the difference is the whole argument of this section: the lever is
+ * raising what a committed hour returns, not cutting the hour. A manager who
+ * opens a section called Staff is already looking for somebody to send home.
+ * The production information architecture is being renamed to match, and this is
+ * where that lands first.
+ *
+ * The order runs the same way Customers does — group level down to the
+ * individual — but it starts one step earlier, because none of it works until
+ * the two systems agree who a person is:
+ *
+ *   **People** is the identity spine. It is first because Performance and Margin
+ *   both read through it, and a reviewer who meets the league table before they
+ *   meet the 24 unproven matches underneath it will believe the league table.
+ *
+ *   **Performance** is who is doing well and *why* — the decomposition, not the
+ *   ranking.
+ *
+ *   **Margin** is the money: what each service, day, week and month returns
+ *   against what it costs.
+ *
+ * Staff Scorecard and Attendance ship in production and are **not built,
+ * changed or fixed here**. They are present so the section reads whole and so
+ * nobody proposes building the thing that already exists.
+ */
+const TEAM = [
+  { label: "People", href: "team/people", placeholder: false },
+  { label: "Performance", href: "team/performance", placeholder: false },
+  { label: "Margin", href: "team/margin", placeholder: false },
+  { label: "Staff Scorecard", href: "team/staff-scorecard", placeholder: true },
+  { label: "Attendance", href: "team/attendance", placeholder: true },
+] as const;
+
 const GROUPS: {
   label: string;
   open?: boolean;
@@ -67,14 +105,14 @@ const GROUPS: {
   { label: "Sales", items: [] },
   { label: "Payments", items: [] },
   { label: "Operations", items: [] },
-  { label: "Staff", items: [] },
+  { label: "Team", open: true, items: TEAM },
   { label: "Customers", open: true, items: CUSTOMERS },
   { label: "Admin", items: [] },
 ];
 
 export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }) {
   const pathname = usePathname();
-  const [open, setOpen] = useState<Record<string, boolean>>({ Customers: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ Team: true, Customers: true });
 
   return (
     <div className="flex h-full">

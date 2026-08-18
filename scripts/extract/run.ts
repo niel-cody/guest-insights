@@ -25,6 +25,10 @@ import {
 } from "./sql";
 import * as Q from "./queries";
 import * as C from "./cohort";
+import * as T from "./team";
+import type {
+  Team, TeamLink, TeamMargin, TeamMarginCell, TeamPerson, TeamVerdict,
+} from "../../src/lib/types";
 import { allRuns, claimLevel, gradeMonth, longestRun, monthsBetween } from "../grade";
 import { packGuests } from "../../src/lib/guest-columns";
 /** One segment vocabulary, shared by the URL contract, the surfaces and the extract. */
@@ -1339,6 +1343,8 @@ async function extractPeriod(
     ...packGuests(guestsWithItems as unknown as Record<string, unknown>[]),
   });
 
+  await extractTeam(org, w, period, venueList, windowDays);
+
   console.log(
     `  ✓ ${totals.orders.toLocaleString()} orders · ` +
       `${member.people.toLocaleString()} members vs ${nonMember.people.toLocaleString()} card-known · ` +
@@ -1346,11 +1352,612 @@ async function extractPeriod(
   );
 }
 
+/**
+ * The team half of one period's snapshot.
+ *
+ * ── Why this is a separate pass and not folded into the one above ──────────
+ *
+ * It reads a different half of the warehouse, joined on a key that does not
+ * exist. Everything above resolves a *guest* through their payment card;
+ * everything here resolves an *employee* across two systems that have never been
+ * introduced. Folding them together would make one failure look like the other,
+ * and the whole value of this section is being precise about which of the two
+ * broke.
+ *
+ * It also has to be able to produce nothing. Coffee Guru is nineteen venues on
+ * no rostering vendor at all, so the honest output for that organisation is a
+ * refusal carrying the reason — not a section of zeroes that reads as a business
+ * with no wage bill.
+ */
+
+/**
+ * A `TIMESTAMP_NTZ` as the venue's wall clock.
+ *
+ * The driver hands these back as a `Date` built by reading the naive timestamp
+ * as though it were UTC, so `getUTCHours()` returns the hour the venue actually
+ * saw and `getHours()` returns that hour shifted into whatever zone the extract
+ * happens to be running in. **Every reader here must use the UTC accessors**,
+ * and the conversion is done once, here, rather than at each of the four call
+ * sites that would otherwise each get it right or wrong on their own.
+ *
+ * A string is accepted too, because the driver's return type depends on how it
+ * inferred the column and a helper that only handles today's inference is a
+ * silent zero the first time that changes.
+ */
+function tsLocal(v: unknown): Date | null {
+  if (v == null) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  const d = new Date(`${String(v).replace(" ", "T").slice(0, 23)}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+async function extractTeam(
+  org: OrgConfig,
+  w: { start: string; end: string; months: number },
+  period: string,
+  venueList: { id: string; name: string }[],
+  windowDays: number,
+) {
+  console.log("  team: identity, labour, margin…");
+  const storeIds = venueList.map((v) => v.id);
+  const storeName = new Map(venueList.map((v) => [v.id, v.name]));
+  const win = { ...w, days: windowDays };
+
+  const empty: Team = {
+    window: win,
+    available: false,
+    refusal: "",
+    integrity: {
+      vendor: null, posIdentities: 0, employees: 0, idMatches: 0, exactNameMatches: 0,
+      counts: { confirmed: 0, proposed: 0, conflict: 0, collision: 0, unmatched: 0, "not-a-person": 0 },
+      costedOrders: 0, costedNet: 0, orphanEmployees: 0, orphanCost: 0,
+      nullStartSegments: 0, nullStartCost: 0, costCoverage: 0,
+      departments: 0, sections: 0, wagedWithoutContractedHours: 0, waged: 0, salaried: 0,
+      elapsedAgrees: true, segments: 0,
+    },
+    links: [], people: [],
+    margin: { daypart: [], service: [], serviceDow: [], dow: [], dowDaypart: [], week: [], month: [], day: [] },
+    sections: [],
+    totals: { net: 0, labour: 0, leave: 0, plannedLabour: 0, hours: 0, penaltyHours: 0, penaltyCost: 0, wagePct: 0, margin: 0, netPerHour: 0 },
+  };
+
+  if (!storeIds.length) {
+    write(org.slug, period, "team", { ...empty, refusal: "No venue resolved for this organisation." });
+    return;
+  }
+
+  const [posRows, grainRows, salesRows, empRows, deptRows, labourRows, plannedRows, nullStart] =
+    await Promise.all([
+      query<Row>(T.posStaffQuery(org.id, w)),
+      query<Row>(T.posStaffGrainQuery(org.id, w)),
+      query<Row>(T.salesGrainQuery(org.id, w)),
+      query<Row>(T.employeeQuery(storeIds)),
+      query<Row>(T.departmentQuery(storeIds)),
+      query<Row>(T.labourQuery(storeIds, w)),
+      query<Row>(T.plannedQuery(storeIds, w)),
+      query<Row>(T.labourNullStartQuery(storeIds)),
+    ]);
+
+  // The gate. No employee roll and no costed segment means no workforce system,
+  // and every ratio below would be a division by an absence.
+  if (!empRows.length && !labourRows.length) {
+    write(org.slug, period, "team", {
+      ...empty,
+      integrity: { ...empty.integrity, posIdentities: posRows.length },
+      refusal:
+        `${org.name} has no workforce management integration. There is no roster, no timesheet and ` +
+        `no employee roll in the warehouse for its ${storeIds.length} venue${storeIds.length === 1 ? "" : "s"}, ` +
+        `so wage cost, labour margin and sales per labour hour cannot be computed — not approximated, ` +
+        `not estimated. The POS side alone would answer who sells most, and this build does not publish ` +
+        `that on its own: a raw sales total ranks people by the hours they were rostered, which is a ` +
+        `roster report wearing a performance label.`,
+    });
+    console.log(`      team.json  refused — no workforce integration`);
+    return;
+  }
+
+  // ── the identity spine ────────────────────────────────────────────────────
+  const posInputs: T.MatchInput[] = posRows.map((r) => ({
+    id: String(r.POS_ID), name: String(r.POS_NAME ?? ""), storeId: String(r.STORE_ID),
+  }));
+  const empInputs: T.MatchInput[] = empRows.map((r) => ({
+    id: String(r.ID), name: String(r.NAME ?? ""), storeId: String(r.STORE_ID),
+  }));
+
+  const matches = T.matchIdentities(posInputs, empInputs);
+  const matchByPos = new Map(matches.map((m) => [m.posId, m]));
+
+  const posIdSet = new Set(posInputs.map((p) => p.id));
+  const idMatches = empInputs.filter((e) => posIdSet.has(e.id)).length;
+  const exactNameMatches = posInputs.filter((p) =>
+    T.normaliseName(p.name) && empInputs.some((e) => T.normaliseName(e.name) === T.normaliseName(p.name)),
+  ).length;
+
+  // One alias per human. A matched pair shares it, so the two sides of the
+  // mapping screen read as one person seen through two systems — which is what
+  // the operator is being asked to confirm.
+  const empById = new Map(empInputs.map((e) => [e.id, e]));
+  const groupKey = (posId: string) => matchByPos.get(posId)?.empId ?? `pos:${posId}`;
+  const aliasCache = new Map<string, T.Alias>();
+  const aliasOf = (key: string): T.Alias => {
+    let a = aliasCache.get(key);
+    if (!a) { a = T.aliasFor(pseudonymise(key)); aliasCache.set(key, a); }
+    return a;
+  };
+
+  /** The longest real surname either system holds for this person, for shape. */
+  const realSurname = (posName: string, empName: string | null): string | null => {
+    const cand = [posName, empName ?? ""]
+      .flatMap((n) => T.normaliseName(n).split(" ").slice(1))
+      .filter((t) => t.length > 1 && !T.ROLE_TOKENS.has(t));
+    return cand.sort((a, b) => b.length - a.length)[0] ?? null;
+  };
+
+  const posByIdRow = new Map(posRows.map((r) => [String(r.POS_ID), r]));
+
+  const links: TeamLink[] = matches.map((m) => {
+    const r = posByIdRow.get(m.posId)!;
+    const e = m.empId ? empById.get(m.empId) ?? null : null;
+    const posName = String(r.POS_NAME ?? "");
+    const sur = realSurname(posName, e?.name ?? null);
+    const alias = aliasOf(groupKey(m.posId));
+    return {
+      posId: pseudonymise(m.posId),
+      posLabel: T.pseudonymise(posName, alias, sur),
+      empId: m.empId ? pseudonymise(m.empId) : null,
+      empLabel: e ? T.pseudonymise(e.name, alias, sur) : null,
+      verdict: m.verdict,
+      evidence: m.evidence,
+      storeId: String(r.STORE_ID),
+      storeName: storeName.get(String(r.STORE_ID)) ?? String(r.STORE_ID),
+      orders: num(r.ORDERS),
+      net: r2(num(r.NET)),
+      days: num(r.DAYS),
+      rivals: m.rivals.map((id) => {
+        const rival = posByIdRow.get(id);
+        if (rival) return T.pseudonymise(String(rival.POS_NAME ?? ""), aliasOf(groupKey(id)), null);
+        const emp = empById.get(id);
+        return emp ? T.pseudonymise(emp.name, aliasOf(id), null) : "";
+      }).filter(Boolean),
+    };
+  }).sort((a, b) => b.orders - a.orders);
+
+  // ── labour, apportioned ───────────────────────────────────────────────────
+  const deptName = new Map(deptRows.map((d) => [String(d.ID), String(d.NAME ?? "")]));
+
+  /**
+   * Cost kinds are not interchangeable and are not summed blind.
+   *
+   * `award` carries the worked hours and the bulk of the cost. `allowance` is
+   * real cost — laundry, split shift — but its hours mirror the shift it hangs
+   * off, so counting them inflates the denominator of every per-hour figure:
+   * 729 allowance hours against $3,141 would read as $4.31 an hour of labour
+   * that nobody worked. `leave` is paid and not worked, so it is excluded from
+   * both and reported on its own, which is the same decision the production
+   * labour dashboard takes and the same one for the same reason.
+   */
+  type Bucket = {
+    net: number; labour: number; leave: number; hours: number;
+    penaltyHours: number; penaltyCost: number; orders: number; covers: number;
+    planned: number; hasPlanned: boolean; days: Set<string>;
+  };
+  const zero = (): Bucket => ({
+    net: 0, labour: 0, leave: 0, hours: 0, penaltyHours: 0, penaltyCost: 0,
+    orders: 0, covers: 0, planned: 0, hasPlanned: false, days: new Set(),
+  });
+
+  /** One fact table at the finest grain both sides share: store × date × daypart. */
+  const cells = new Map<string, Bucket & { storeId: string; date: string; daypart: string; service: string }>();
+  const cell = (storeId: string, date: string, daypart: string, service: string) => {
+    const k = `${storeId}|${date}|${daypart}|${service}`;
+    let c = cells.get(k);
+    if (!c) { c = { ...zero(), storeId, date, daypart, service }; cells.set(k, c); }
+    return c;
+  };
+
+  for (const r of salesRows) {
+    const c = cell(String(r.STORE_ID), day(r.D)!, String(r.DAYPART), String(r.SERVICE));
+    c.net += num(r.NET); c.orders += num(r.ORDERS); c.covers += num(r.COVERS);
+    c.days.add(day(r.D)!);
+  }
+
+  const perEmployee = new Map<string, { hours: number; cost: number; penaltyHours: number; shifts: number; depts: Map<string, number> }>();
+  let elapsedAgrees = true;
+  let segments = 0;
+
+  for (const r of labourRows) {
+    const kind = String(r.COST_KIND ?? "");
+    const start = tsLocal(r.START_TIME_TZ);
+    // A segment with no start time is dropped here and counted in `integrity`.
+    // It is the one row a time-bounded query loses silently, so it is the one
+    // row this build refuses to lose silently.
+    if (!start) continue;
+    const finish = tsLocal(r.FINISH_TIME_TZ);
+    const hours = num(r.HOURS);
+    const cost = num(r.COST);
+    const ordinary = r.ORDINARY_HOURS === true;
+    const storeId = String(r.STORE_ID);
+    // The service the venue itself assigned this shift to, falling back to when
+    // the shift actually started. Decided once per segment, so every minute of
+    // it lands in the same block — a shift is not split across two services
+    // just because it crosses four o'clock.
+    const service = T.serviceOfShift(deptName.get(String(r.DEPARTMENT_ID ?? "")) ?? null, start.getUTCHours());
+    segments++;
+
+    // The assumption pro-rata apportionment rests on, asserted on the real rows.
+    if (kind === "award" && finish && hours > 0) {
+      const elapsed = (finish.getTime() - start.getTime()) / 3_600_000;
+      if (elapsed > hours + 0.5) elapsedAgrees = false;
+    }
+
+    // Hours only from award. Cost from award and allowance. Leave from neither.
+    const costHere = kind === "leave" ? 0 : cost;
+    const hoursHere = kind === "award" ? hours : 0;
+
+    for (const s of T.apportion(start, finish, hoursHere, costHere)) {
+      const c = cell(storeId, s.date, s.daypart, service);
+      if (kind === "leave") continue;
+      c.labour += s.cost;
+      c.hours += s.hours;
+      c.days.add(s.date);
+      if (kind === "award" && !ordinary) { c.penaltyHours += s.hours; c.penaltyCost += s.cost; }
+    }
+    if (kind === "leave") {
+      const c = cell(storeId, start.toISOString().slice(0, 10), T.daypartOfHour(start.getUTCHours()), service);
+      c.leave += cost;
+    }
+
+    const eid = String(r.EMPLOYEE_ID ?? "");
+    if (eid) {
+      let p = perEmployee.get(eid);
+      if (!p) { p = { hours: 0, cost: 0, penaltyHours: 0, shifts: 0, depts: new Map() }; perEmployee.set(eid, p); }
+      p.hours += hoursHere; p.cost += costHere;
+      if (kind === "award" && !ordinary) p.penaltyHours += hours;
+      if (kind === "award") {
+        p.shifts++;
+        const dn = deptName.get(String(r.DEPARTMENT_ID ?? "")) ?? "";
+        if (dn) p.depts.set(dn, (p.depts.get(dn) ?? 0) + hours);
+      }
+    }
+  }
+
+  /** The published plan, per store per date. `ROSTER` names no daypart, so this
+   *  attaches to grains derived from the date and to no others. */
+  const plannedByDate = new Map<string, { cost: number; hours: number }>();
+  for (const r of plannedRows) {
+    const d = day(r.D)!;
+    // The plan is per date, not per daypart, so it attaches to the date's cells
+    // in aggregate rather than being spread across windows it does not name.
+    const k = `${String(r.STORE_ID)}|${d}`;
+    plannedByDate.set(k, { cost: num(r.COST), hours: num(r.HOURS) });
+  }
+
+  const orphanIds = new Set(
+    labourRows.map((r) => String(r.EMPLOYEE_ID ?? "")).filter((id) => id && !empById.has(id)),
+  );
+  const orphanCost = labourRows
+    .filter((r) => orphanIds.has(String(r.EMPLOYEE_ID ?? "")) && String(r.COST_KIND) !== "leave")
+    .reduce((a, r) => a + num(r.COST), 0);
+
+  // ── the grains ────────────────────────────────────────────────────────────
+  const all = [...cells.values()];
+  const roll = (
+    keyOf: (c: (typeof all)[number]) => string | null,
+    labelOf: (key: string) => string,
+    byStore: boolean,
+    /** How a plain date maps to this grain's key, where the plan can reach it. */
+    plannedKeyOf?: (date: string) => string,
+    /** Set where this grain cannot carry a ratio. Nulls all three, not the caption. */
+    refusal?: string,
+  ): TeamMarginCell[] => {
+    const acc = new Map<string, Bucket & { key: string; storeId: string }>();
+    for (const c of all) {
+      const k = keyOf(c);
+      if (k == null) continue;
+      for (const store of byStore ? [c.storeId, "all"] : ["all"]) {
+        const id = `${store}|${k}`;
+        let b = acc.get(id);
+        if (!b) { b = { ...zero(), key: k, storeId: store }; acc.set(id, b); }
+        b.net += c.net; b.labour += c.labour; b.leave += c.leave; b.hours += c.hours;
+        b.penaltyHours += c.penaltyHours; b.penaltyCost += c.penaltyCost;
+        b.orders += c.orders; b.covers += c.covers;
+        for (const d of c.days) b.days.add(d);
+      }
+    }
+    if (plannedKeyOf) {
+      for (const [k, v] of plannedByDate) {
+        const [store, date] = k.split("|");
+        const cellKey = plannedKeyOf(date);
+        for (const s of byStore ? [store, "all"] : ["all"]) {
+          const b = acc.get(`${s}|${cellKey}`);
+          if (b) { b.planned += v.cost; b.hasPlanned = true; }
+        }
+      }
+    }
+    return [...acc.values()].map((b) => ({
+      key: b.key,
+      label: labelOf(b.key),
+      storeId: b.storeId,
+      net: r2(b.net),
+      labour: r2(b.labour),
+      leave: r2(b.leave),
+      plannedLabour: b.hasPlanned ? r2(b.planned) : null,
+      hours: r2(b.hours),
+      penaltyHours: r2(b.penaltyHours),
+      penaltyCost: r2(b.penaltyCost),
+      orders: b.orders,
+      covers: b.covers,
+      tradingDays: b.days.size,
+      wagePct: refusal ? null : b.net > 0 ? r4(b.labour / b.net) : null,
+      margin: refusal ? null : r2(b.net - b.labour),
+      netPerHour: refusal ? null : b.hours > 0 ? r2(b.net / b.hours) : null,
+      refusal: refusal ?? null,
+    }));
+  };
+
+  const DP_LABEL = new Map<string, string>(DAYPARTS.map((d) => [d.key as string, d.label as string]));
+  const DOW_LABEL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const dowOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
+
+  const SV_LABEL = new Map<string, string>(T.SERVICE_BLOCKS.map((b) => [b.key as string, b.label as string]));
+  const CLOCK_REFUSAL =
+    "Labour is committed before and after the trade it serves — a kitchen preps at ten for a lunch " +
+    "that sells at twelve, a floor team clears at eleven for a dinner that sold at seven. Wage " +
+    "percentage and margin per clock hour divide the two anyway and report Late Evening at 348%. " +
+    "The same trade and the same labour are measured at service-block grain, where the boundary " +
+    "falls where the venue puts it.";
+
+  const margin: TeamMargin = {
+    daypart: roll((c) => c.daypart, (k) => DP_LABEL.get(k) ?? k, true, undefined, CLOCK_REFUSAL)
+      .sort((a, b) => DAYPARTS.findIndex((d) => d.key === a.key) - DAYPARTS.findIndex((d) => d.key === b.key)),
+    service: roll((c) => c.service, (k) => SV_LABEL.get(k) ?? k, true)
+      .sort((a, b) => T.SERVICE_BLOCKS.findIndex((x) => x.key === a.key) - T.SERVICE_BLOCKS.findIndex((x) => x.key === b.key)),
+    serviceDow: roll((c) => `${dowOf(c.date)}|${c.service}`, (k) => {
+      const [d, v] = k.split("|");
+      return `${DOW_LABEL[Number(d)]} ${(SV_LABEL.get(v) ?? v).toLowerCase()}`;
+    }, true).map((c) => ({ ...c, dow: Number(c.key.split("|")[0]), service: c.key.split("|")[1] })),
+    dow: roll((c) => String(dowOf(c.date)), (k) => DOW_LABEL[Number(k)], true, (d) => String(dowOf(d))),
+    dowDaypart: roll((c) => `${dowOf(c.date)}|${c.daypart}`, (k) => {
+      const [d, p] = k.split("|");
+      return `${DOW_LABEL[Number(d)]} ${DP_LABEL.get(p) ?? p}`;
+    }, true, undefined, CLOCK_REFUSAL).map((c) => ({ ...c, dow: Number(c.key.split("|")[0]), daypart: c.key.split("|")[1] })),
+    week: roll((c) => T.weekStart(c.date), (k) => k, true, (d) => T.weekStart(d)).sort((a, b) => a.key.localeCompare(b.key)),
+    month: roll((c) => c.date.slice(0, 7), (k) => k, true, (d) => d.slice(0, 7)).sort((a, b) => a.key.localeCompare(b.key)),
+    day: roll((c) => c.date, (k) => k, true, (d) => d).sort((a, b) => a.key.localeCompare(b.key)),
+  };
+
+  // ── people ────────────────────────────────────────────────────────────────
+  const grainByPos = new Map<string, [number, string, number, number, number, number][]>();
+  for (const g of grainRows) {
+    const id = String(g.POS_ID);
+    const arr = grainByPos.get(id) ?? [];
+    arr.push([num(g.DOW), String(g.DAYPART), num(g.ORDERS), r2(num(g.NET)), r2(num(g.ITEMS)), num(g.COVERS)]);
+    grainByPos.set(id, arr);
+  }
+
+  const empMeta = new Map(empRows.map((r) => [String(r.ID), r]));
+  const div = (a: number, b: number): number | null => (b > 0 ? Number((a / b).toFixed(2)) : null);
+
+  const people: TeamPerson[] = matches.map((m) => {
+    const r = posByIdRow.get(m.posId)!;
+    const e = m.empId ? empMeta.get(m.empId) : null;
+    const lab = m.empId ? perEmployee.get(m.empId) : null;
+    const posName = String(r.POS_NAME ?? "");
+    const alias = aliasOf(groupKey(m.posId));
+    const sur = realSurname(posName, e ? String(e.NAME ?? "") : null);
+
+    const orders = num(r.ORDERS);
+    const net = num(r.NET);
+    const items = num(r.ITEMS);
+    const covers = num(r.COVERS);
+
+    /**
+     * Only a link the evidence supports may divide one system by the other.
+     *
+     * A conflict or a collision is exactly the case where attaching this
+     * person's wage cost to that person's sales produces a confident, wrong
+     * number — so those rows keep both sides and publish no ratio. A proposal
+     * does carry the ratio, because a unique first name at a venue with nothing
+     * contradicting it is the evidence an operator would accept, and the row
+     * says on its face that it is a proposal.
+     */
+    const costed = m.verdict === "confirmed" || m.verdict === "proposed";
+    const topDept = lab ? [...lab.depts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null : null;
+
+    return {
+      id: pseudonymise(m.posId),
+      label: T.pseudonymise(posName, alias, sur),
+      storeId: String(r.STORE_ID),
+      storeName: storeName.get(String(r.STORE_ID)) ?? String(r.STORE_ID),
+      verdict: m.verdict,
+      costed: costed && !!lab,
+      employmentType: e ? ((String(e.TYPE) === "Salaried" ? "Salaried" : "Waged") as "Salaried" | "Waged") : null,
+      department: topDept,
+      // No costed hours means no rostering department, and "Unmapped" would read
+      // as a mapping failure rather than as an absent link. It is not a section.
+      section: lab ? T.sectionOf(topDept) : "—",
+      orders, net: r2(net), items: r2(items), covers,
+      ordersWithCovers: num(r.ORDERS_WITH_COVERS),
+      days: num(r.DAYS),
+      discount: r2(num(r.DISCOUNT)),
+      itemsPerCover: div(items, covers),
+      avgItemValue: div(net, items),
+      netPerCover: div(net, covers),
+      netPerOrder: div(net, orders),
+      coversPerOrder: div(covers, num(r.ORDERS_WITH_COVERS)),
+      hours: lab ? r2(lab.hours) : null,
+      cost: lab ? r2(lab.cost) : null,
+      penaltyHours: lab ? r2(lab.penaltyHours) : null,
+      shifts: lab ? lab.shifts : null,
+      netPerHour: costed && lab && lab.hours > 0 ? div(net, lab.hours) : null,
+      coversPerHour: costed && lab && lab.hours > 0 ? div(covers, lab.hours) : null,
+      costPerHour: lab && lab.hours > 0 ? div(lab.cost, lab.hours) : null,
+      wagePct: costed && lab && net > 0 ? r4(lab.cost / net) : null,
+      grain: grainByPos.get(m.posId) ?? [],
+    };
+  }).sort((a, b) => b.net - a.net);
+
+  // Employees who worked and never rang an order. A kitchen is not a failure of
+  // attribution — it is a section whose output is not a sale, and leaving it out
+  // of the roll would understate the wage bill the sales side is measured against.
+  for (const [eid, lab] of perEmployee) {
+    if (links.some((l) => l.empId === pseudonymise(eid))) continue;
+    const e = empMeta.get(eid);
+    const topDept = [...lab.depts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const alias = aliasOf(eid);
+    people.push({
+      id: pseudonymise(eid),
+      label: e ? T.pseudonymise(String(e.NAME ?? ""), alias, realSurname("", String(e.NAME ?? ""))) : "Former employee",
+      storeId: e ? String(e.STORE_ID) : "",
+      storeName: e ? storeName.get(String(e.STORE_ID)) ?? "" : "",
+      verdict: e ? "unmatched" : "unmatched",
+      costed: false,
+      employmentType: e ? ((String(e.TYPE) === "Salaried" ? "Salaried" : "Waged") as "Salaried" | "Waged") : null,
+      department: topDept,
+      section: T.sectionOf(topDept),
+      orders: 0, net: 0, items: 0, covers: 0, ordersWithCovers: 0, days: 0, discount: 0,
+      itemsPerCover: null, avgItemValue: null, netPerCover: null, netPerOrder: null, coversPerOrder: null,
+      hours: r2(lab.hours), cost: r2(lab.cost), penaltyHours: r2(lab.penaltyHours), shifts: lab.shifts,
+      netPerHour: null, coversPerHour: null, costPerHour: lab.hours > 0 ? div(lab.cost, lab.hours) : null,
+      wagePct: null,
+      grain: [],
+    });
+  }
+
+  // ── sections ──────────────────────────────────────────────────────────────
+  const sectionAcc = new Map<string, { departments: Set<string>; storeIds: Set<string>; hours: number; cost: number; penaltyCost: number; people: Set<string> }>();
+  for (const p of people) {
+    if (p.hours == null) continue;
+    let s = sectionAcc.get(p.section);
+    if (!s) { s = { departments: new Set(), storeIds: new Set(), hours: 0, cost: 0, penaltyCost: 0, people: new Set() }; sectionAcc.set(p.section, s); }
+    if (p.department) s.departments.add(p.department);
+    if (p.storeId) s.storeIds.add(p.storeId);
+    s.hours += p.hours; s.cost += p.cost ?? 0; s.people.add(p.id);
+  }
+
+  const totalNet = all.reduce((a, c) => a + c.net, 0);
+  const totalLabour = all.reduce((a, c) => a + c.labour, 0);
+  const totalHours = all.reduce((a, c) => a + c.hours, 0);
+  const costedNet = links.filter((l) => l.verdict === "confirmed" || l.verdict === "proposed").reduce((a, l) => a + l.net, 0);
+  const costedOrders = links.filter((l) => l.verdict === "confirmed" || l.verdict === "proposed").reduce((a, l) => a + l.orders, 0);
+  const counts = matches.reduce(
+    (acc, m) => ({ ...acc, [m.verdict]: (acc[m.verdict] ?? 0) + 1 }),
+    { confirmed: 0, proposed: 0, conflict: 0, collision: 0, unmatched: 0, "not-a-person": 0 } as Record<TeamVerdict, number>,
+  );
+
+  const waged = empRows.filter((r) => String(r.TYPE) !== "Salaried");
+  const team: Team = {
+    window: win,
+    available: true,
+    refusal: null,
+    integrity: {
+      vendor: empRows.length ? String(empRows[0].SOURCE ?? "") || null : null,
+      posIdentities: posRows.length,
+      employees: empRows.length,
+      idMatches,
+      exactNameMatches,
+      counts,
+      costedOrders,
+      costedNet: r2(costedNet),
+      orphanEmployees: orphanIds.size,
+      orphanCost: r2(orphanCost),
+      nullStartSegments: num(nullStart[0]?.N),
+      nullStartCost: r2(num(nullStart[0]?.COST)),
+      costCoverage: r4(
+        posRows.reduce((a, r) => a + num(r.ORDERS_WITH_COST), 0) /
+          Math.max(1, posRows.reduce((a, r) => a + num(r.ORDERS), 0)),
+      ),
+      departments: new Set(deptRows.map((d) => String(d.NAME))).size,
+      sections: sectionAcc.size,
+      wagedWithoutContractedHours: waged.filter((r) => !num(r.CONTRACTED_WEEKLY_HOURS)).length,
+      waged: waged.length,
+      salaried: empRows.length - waged.length,
+      elapsedAgrees,
+      segments,
+    },
+    links,
+    people,
+    margin,
+    sections: [...sectionAcc.entries()]
+      .map(([section, s]) => ({
+        section,
+        departments: [...s.departments].sort(),
+        storeIds: [...s.storeIds],
+        hours: r2(s.hours),
+        cost: r2(s.cost),
+        penaltyCost: r2(s.penaltyCost),
+        people: s.people.size,
+      }))
+      .sort((a, b) => b.cost - a.cost),
+    totals: {
+      net: r2(totalNet),
+      labour: r2(totalLabour),
+      leave: r2(all.reduce((a, c) => a + c.leave, 0)),
+      plannedLabour: r2([...plannedByDate.values()].reduce((a, v) => a + v.cost, 0)),
+      hours: r2(totalHours),
+      penaltyHours: r2(all.reduce((a, c) => a + c.penaltyHours, 0)),
+      penaltyCost: r2(all.reduce((a, c) => a + c.penaltyCost, 0)),
+      wagePct: totalNet > 0 ? r4(totalLabour / totalNet) : 0,
+      margin: r2(totalNet - totalLabour),
+      netPerHour: totalHours > 0 ? r2(totalNet / totalHours) : 0,
+    },
+  };
+
+  write(org.slug, period, "team", team);
+  console.log(
+    `      ${counts.confirmed} confirmed · ${counts.proposed} proposed · ${counts.conflict} conflict · ` +
+      `${counts.collision} collision · ${counts.unmatched} unmatched · ${counts["not-a-person"]} not a person · ` +
+      `wage ${(team.totals.wagePct * 100).toFixed(1)}%`,
+  );
+}
+
+/**
+ * Re-extract only the team half, over the periods already on disk.
+ *
+ *   npm run extract -- --team
+ *
+ * ── Why this mode exists ───────────────────────────────────────────────────
+ *
+ * A full extract derives its own window from today's date and re-grades every
+ * month, so running one to add a new file would move every published figure in
+ * the build — and the README, the changelog and the decision record all quote
+ * those figures against a stated extraction date. Adding a section is not a
+ * reason to invalidate the numbers a reader has already checked.
+ *
+ * So this reads the periods and venues that are already on disk and writes
+ * `team.json` beside them, against exactly the window the rest of the snapshot
+ * was taken over. The team figures and the customer figures therefore cover the
+ * same days, which is the only way a wage percentage and a revenue total on two
+ * different screens can be reconciled by the operator reading both.
+ */
+async function extractTeamOnly(org: OrgConfig) {
+  console.log(`\n${org.name}  (team only)`);
+  const index = JSON.parse(
+    readFileSync(join(DATA, org.slug, "periods.json"), "utf8"),
+  ) as { periods: { id: string }[] };
+
+  for (const p of index.periods) {
+    const snap = JSON.parse(
+      readFileSync(join(DATA, org.slug, p.id, "org.json"), "utf8"),
+    ) as { window: { start: string; end: string; months: number; days: number }; venues: { id: string; name: string }[] };
+    console.log(`\n  period ${p.id}  (${snap.window.start} → ${snap.window.end})`);
+    await extractTeam(
+      org,
+      { start: snap.window.start, end: snap.window.end, months: snap.window.months },
+      p.id,
+      snap.venues,
+      snap.window.days,
+    );
+  }
+}
+
 async function main() {
-  const only = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+  const argv = process.argv.slice(2);
+  const teamOnly = argv.includes("--team");
+  const only = argv.filter((a) => !a.startsWith("-"));
   const orgs = only.length ? ORGS.filter((o) => only.includes(o.slug)) : ORGS;
   if (!orgs.length) throw new Error(`No matching org. Known: ${ORGS.map((o) => o.slug).join(", ")}`);
-  for (const org of orgs) await extractOrg(org);
+  for (const org of orgs) await (teamOnly ? extractTeamOnly(org) : extractOrg(org));
   await disconnect();
   console.log("\nDone.");
 }

@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { cache } from "react";
 import type {
   Cohorts, Coverage, DayGrid, Dayparts, GuestRows, Guests, Items, Members, Network, Org,
-  Scatter, SegmentBehaviourRow, Snapshot, VenueCrossRow,
+  Scatter, SegmentBehaviourRow, Snapshot, Team, VenueCrossRow,
 } from "./types";
 import { unpackGuests } from "./guest-columns";
 import type { Periods } from "./periods";
@@ -62,7 +62,7 @@ export const getOrg = cache(
 export const getSnapshot = cache(async (slug: string, period: string): Promise<Snapshot> => {
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
   ] = await Promise.all([
     read<Snapshot["org"]>(slug, period, "org"),
     read<Snapshot["coverage"]>(slug, period, "coverage"),
@@ -79,10 +79,11 @@ export const getSnapshot = cache(async (slug: string, period: string): Promise<S
     read<Items>(slug, period, "items").catch(() => null),
     read<SegmentBehaviourRow[]>(slug, period, "segmentBehaviour").catch(() => null),
     getCohorts(slug),
+    getTeam(slug, period),
   ]);
   return {
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
   };
 });
 
@@ -128,3 +129,24 @@ export const getCoverage = cache(async (slug: string, period: string): Promise<C
 export async function getAllOrgs(): Promise<Org[]> {
   return Promise.all(ORG_SLUGS.map(async (s) => getOrg(s, await defaultPeriod(s))));
 }
+
+/**
+ * The team half. Present for every organisation and period, and **not always
+ * available** — an organisation with no workforce integration carries a snapshot
+ * whose `available` is false and whose `refusal` says why.
+ *
+ * That distinction is the reason this returns the file rather than null on a
+ * missing integration: a null would let a surface render an empty state that
+ * reads as "no data yet", and the actual statement is "this organisation has no
+ * rostering vendor connected, and here is precisely what that costs them".
+ *
+ * Null is reserved for a snapshot extracted before the team pass existed, which
+ * every consumer guards for the same reason the cohort lens is guarded.
+ */
+export const getTeam = cache(async (slug: string, period: string): Promise<Team | null> => {
+  try {
+    return await read<Team>(slug, period, "team");
+  } catch {
+    return null;
+  }
+});

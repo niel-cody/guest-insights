@@ -11,9 +11,10 @@
  * `npm run verify`. A check with no failing fixture does not count toward the
  * badge — see `scripts/verify.ts`.
  */
-import type { GuestRows, Snapshot } from "./types";
+import type { GuestRows, Snapshot, TeamMarginCell } from "./types";
 import { count, money, pairArithmetic, pct, recency, tileCount } from "./metrics";
 import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
+import { looksShared, ratedPeople } from "./team";
 
 export type Severity = "blocking" | "warning";
 
@@ -524,7 +525,144 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
     "warning",
   ));
 
+  checks.push(...teamChecks(snap));
+
   return checks;
+}
+
+
+/**
+ * The team half's invariants.
+ *
+ * ── Why these six and not a reconciliation total ───────────────────────────
+ *
+ * Build v1's lesson applies here exactly: an identity like *labour equals
+ * labour* is decoration. Each of these asserts a property that a plausible,
+ * well-meaning change would break, and each names the specific way it would
+ * break it.
+ *
+ * Three of them guard a **refusal** rather than a figure, which is unusual and
+ * deliberate. This section declines to publish per-clock-hour wage percentages,
+ * declines to cost an identity the evidence does not support, and declines to
+ * rate a shared login. Every one of those refusals is one helpful commit away
+ * from being undone by somebody filling in what looks like a gap — so the
+ * refusals are asserted, not merely documented.
+ */
+export function teamChecks(snap: Snapshot): Check[] {
+  const team = snap.team;
+  if (!team || !team.available) return [];
+  const out: Check[] = [];
+  const t = team.totals;
+  const all = <C extends TeamMarginCell>(cells: C[]): C[] => cells.filter((c) => c.storeId === "all");
+
+  // 1. Apportioning a shift across the windows it spans must neither lose a
+  //    minute nor count one twice. Every grain re-cuts the same money, so every
+  //    grain must sum to the same money — and a grain that silently drops the
+  //    segments crossing midnight would still look entirely reasonable on screen.
+  const grains: [string, TeamMarginCell[]][] = [
+    ["daypart", all(team.margin.daypart)],
+    ["service", all(team.margin.service)],
+    ["serviceDow", all(team.margin.serviceDow)],
+    ["dow", all(team.margin.dow)],
+    ["dowDaypart", all(team.margin.dowDaypart)],
+    ["week", all(team.margin.week)],
+    ["month", all(team.margin.month)],
+    ["day", all(team.margin.day)],
+  ];
+  const off = grains
+    .map(([name, cells]) => ({
+      name,
+      net: Math.abs(cells.reduce((a, c) => a + c.net, 0) - t.net),
+      labour: Math.abs(cells.reduce((a, c) => a + c.labour, 0) - t.labour),
+    }))
+    .filter((g) => g.net > 1 || g.labour > 1);
+  out.push(ok(
+    "team.grainsReconcile",
+    "Every margin grain sums to the same net sales and the same labour cost as the window total.",
+    "A shift apportioned across a daypart boundary being counted twice, or a segment crossing midnight being dropped — both of which render as a perfectly plausible table.",
+    off.length === 0,
+    off.length
+      ? `${off.map((g) => `${g.name} off by $${Math.max(g.net, g.labour).toFixed(0)}`).join(", ")}`
+      : `${grains.length} grains agree to the dollar on ${money(t.net)} and ${money(t.labour)}`,
+  ));
+
+  // 2. A wage percentage is a ratio of sums, never a mean of ratios. The two
+  //    differ whenever the denominators differ, which on this data is always.
+  const recomputed = t.net > 0 ? t.labour / t.net : 0;
+  out.push(ok(
+    "team.wagePctNotAveraged",
+    "The published wage percentage equals total labour over total net sales, not the average of the per-cell percentages.",
+    "Rolling a column of percentages up by averaging it — which on this window returns a different, flattering number because the light shifts carry as much weight as the heavy ones.",
+    Math.abs(t.wagePct - recomputed) < 0.0005,
+    `published ${pct(t.wagePct)} · recomputed ${pct(recomputed)}`,
+  ));
+
+  // 3. The clock grain carries no ratio, in the data and not merely in a caption.
+  const leaked = [...team.margin.daypart, ...team.margin.dowDaypart].filter(
+    (c) => c.wagePct != null || c.margin != null || c.netPerHour != null,
+  );
+  out.push(ok(
+    "team.clockRatiosAbsent",
+    "No clock-hour cell carries a wage percentage, a margin or a sales-per-hour figure.",
+    "Filling in what looks like a missing column. Labour is committed before and after the trade it serves, so dividing by the revenue banked in the same hour reports the pack-down shift at several hundred percent — an operator who acts on it cuts the clean-down.",
+    leaked.length === 0,
+    leaked.length
+      ? `${leaked.length} clock cells carry a ratio they cannot support`
+      : `${team.margin.daypart.length + team.margin.dowDaypart.length} clock cells, no ratios`,
+  ));
+
+  // 4. Wage cost may only be divided into sales where the identity link is one
+  //    the People page stands behind.
+  const miscosted = team.people.filter(
+    (p) => (p.netPerHour != null || p.wagePct != null) && p.verdict !== "confirmed" && p.verdict !== "proposed",
+  );
+  out.push(ok(
+    "team.costedOnlyOnEvidence",
+    "Only a confirmed or proposed identity link carries a per-person cost or sales-per-labour-hour figure.",
+    "Attaching one person's wage to another person's sales. Four links at this organisation have a first name that agrees and surname evidence that does not, and two have a single employee behind two logins.",
+    miscosted.length === 0,
+    miscosted.length
+      ? `${miscosted.length} people costed on evidence that does not support it`
+      : `${team.people.filter((p) => p.netPerHour != null).length} costed, all on a confirmed or proposed link`,
+  ));
+
+  // 5. The two halves of the build must count the same trade. They compute net
+  //    sales differently on purpose — the team half works ex-tax — so the
+  //    reconciliation is on the order count, which has no such excuse.
+  const teamOrders = all(team.margin.day).reduce((a, c) => a + c.orders, 0);
+  const reportOrders = snap.coverage.totals.orders;
+  out.push(ok(
+    "team.ordersReconcileToCustomerReport",
+    "The team half counts exactly the same orders as the customer half.",
+    "The two halves drifting apart on what an order is — a status filter added to one and not the other — which leaves an operator with two order counts in one product and no way to tell which is theirs.",
+    teamOrders === reportOrders,
+    `${count(teamOrders)} against ${count(reportOrders)} on the customer half`,
+  ));
+
+  // 6. A shared login is trade, not a person, and must never reach a ranking.
+  //
+  //    The assertion is on the **label**, not on the verdict. Asking whether any
+  //    row marked not-a-person is rated would be an identity — the rating filter
+  //    excludes them by construction, so the answer is always no and the check
+  //    would be decoration. The real failure is a shared login the classifier
+  //    did not recognise, which arrives wearing a name and a verdict that both
+  //    look ordinary. So this asks the other question: does anything that reads
+  //    like a till, a trainee or a device carry a verdict that would let it be
+  //    ranked?
+  const misread = team.links.filter((l) => looksShared(l.posLabel) && l.verdict !== "not-a-person");
+  const rated = ratedPeople(team);
+  const ghosts = rated.filter((p) => looksShared(p.label) || p.verdict === "not-a-person");
+  out.push(ok(
+    "team.sharedLoginsNotRated",
+    "Every login whose name identifies a till, a shared account or a training session is classified as not a person, and none of them reaches the rated team.",
+    "A training login that rang 227 orders across 49 days entering the league table as a person. It clears every volume threshold a rating floor can impose, and it is nobody — so a manager coaches an average of whoever was training that quarter.",
+    misread.length === 0 && ghosts.length === 0,
+    misread.length || ghosts.length
+      ? `${misread.length} shared logins classified as people · ${ghosts.length} in the rated set`
+      : `${count(team.integrity.counts["not-a-person"])} held out of ${count(rated.length)} rated`,
+  ));
+
+  return out;
 }
 
 export const blocking = (checks: Check[]) => checks.filter((c) => c.severity === "blocking");

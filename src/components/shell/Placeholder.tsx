@@ -22,9 +22,11 @@ import type { ReactNode } from "react";
  * an engineer later treats a mock as a contract.
  */
 export function Placeholder({
-  title, standfirst, children, note,
+  title, section = "Customers", standfirst, children, note,
 }: {
   title: string;
+  /** The section this stand-in sits in. Not always Customers any more. */
+  section?: string;
   standfirst: string;
   children: ReactNode;
   note?: ReactNode;
@@ -34,7 +36,7 @@ export function Placeholder({
       <header className="shrink-0 border-b border-line bg-surface px-6 pt-4 pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
-          <span className="text-[13px] text-ink-muted">Customers</span>
+          <span className="text-[13px] text-ink-muted">{section}</span>
         </div>
       </header>
 

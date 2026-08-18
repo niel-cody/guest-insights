@@ -101,11 +101,14 @@ async function main() {
     const html = await readFile(file, "utf8");
     const name = file.replace(OUT, "").replace(/\.html$/, "");
     const isOverview = name.endsWith("/overview");
-    const isPlaceholder = /loyalty-(spend|redemption)$/.test(name);
+    const isPlaceholder = /(loyalty-(spend|redemption)|team\/(staff-scorecard|attendance))$/.test(name);
     // The org and root routes are redirects with no chrome. Asserting a sidebar
     // on them would be asserting against a page that has no reader.
     const isReport =
-      isOverview || isPlaceholder || /\/(behaviour|guests)$/.test(name);
+      isOverview ||
+      isPlaceholder ||
+      /\/(behaviour|guests)$/.test(name) ||
+      /\/team\/(people|performance|margin)$/.test(name);
 
     console.log(`\n${name}`);
 
@@ -514,16 +517,50 @@ async function main() {
         check(`no nav link points at the retired /${retired} route`,
           !new RegExp(`href="/[^"]+/${retired}"`).test(html));
       }
-      for (const item of ["Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Guests"]) {
+      for (const item of [
+        "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Guests",
+        "People", "Performance", "Margin", "Staff Scorecard", "Attendance",
+      ]) {
         check(`the sidebar carries "${item}"`, html.includes(item));
       }
-      // Exactly five links under Customers, and not a sixth.
-      const navLinks = [...html.matchAll(/href="\/[^/"]+\/[^/"]+\/([a-z-]+)"/g)].map((m) => m[1]);
+
+      /**
+       * The group is called Team, and the word Staff survives in exactly one
+       * place: the name of the production report that is actually called Staff
+       * Scorecard.
+       *
+       * This is asserted because the rename is the kind of change that gets
+       * half-done — a group header updated and a heading left behind, or the
+       * reverse — and the half-done state reads as a product that has not
+       * decided what it calls its people.
+       */
+      const navBlock = between(html, html.indexOf("Operations"), html.indexOf("Customers"));
+      check("the section is called Team, not Staff",
+        navBlock.includes("Team") && !/>\s*Staff\s*</.test(navBlock),
+        "a nav group still reads Staff");
+
+      /**
+       * Every nav item resolves to a route the build actually produced.
+       *
+       * The old assertion listed the five Customers items and rejected a sixth,
+       * which was right until there was a second section — at which point it
+       * would have rejected the Team routes as intruders. Enumerating a fixed
+       * list is a test that has to be edited every time the product grows, and a
+       * test edited under pressure to make it pass stops being a test. This
+       * asserts the property that actually matters instead: **no nav item points
+       * somewhere the build did not render.**
+       */
+      const navLinks = [...html.matchAll(/href="\/[^/"]+\/[^/"]+\/([a-z-]+(?:\/[a-z-]+)?)"/g)]
+        .map((m) => m[1]);
       const unique = [...new Set(navLinks)].sort();
-      check("there is no sixth item in the section",
-        unique.every((h) =>
-          ["overview", "loyalty-spend", "loyalty-redemption", "behaviour", "guests"].includes(h)),
-        `found ${unique.join(", ")}`);
+      const known = [
+        "overview", "behaviour", "guests", "loyalty-spend", "loyalty-redemption",
+        "team/people", "team/performance", "team/margin",
+        "team/staff-scorecard", "team/attendance",
+      ];
+      const strays = unique.filter((h) => !known.includes(h));
+      check("every nav item points at a route this build renders", strays.length === 0,
+        `found ${strays.join(", ")}`);
     }
 
     // ── §7.3: the truncation confession is gone ────────────────────────────

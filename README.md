@@ -1,6 +1,6 @@
 # Guests — POC
 
-**`v0.5.0`** · the customer side of the sales report, built on real Oolio Pay
+**`v0.8.0`** · the customer side of the sales report, and now the team side, built on real Oolio Pay
 trade. Snapshots re-extracted 18 August 2026.
 
 Rebuilt around one question: **are your members worth anything, and where is the
@@ -87,6 +87,53 @@ opportunity on the gap instead would multiply it roughly twentyfold, and every
 dollar would be selection. A check fails the build if that ever happens.
 
 ---
+
+## The team side: what a shift returns against what it costs
+
+Added in `v0.8.0`, and built on the same rule — publish what the data supports,
+refuse the rest, and say which is which.
+
+**The join does not exist.** `ORDERS` is keyed on the POS user id and
+`ROSTER_COSTS` on the workforce vendor's employee id. At Meat Flour Wine there
+are 53 POS identities and 83 Tanda employees and **not one id appears in both**.
+Five names match exactly. So the section opens on the identity queue rather than
+a league table: 12 confirmed, 24 proposed, 3 conflicts, 2 collisions, 9
+unmatched, 3 that are not people at all. Conflicts and collisions are **not
+costed**, and proposals are costed and marked everywhere they appear.
+
+**Wage percentage is not one number.**
+
+| | Lunch service | Dinner service |
+|---|---:|---:|
+| Net sales | $629,377 | $2,023,106 |
+| Labour | $344,724 | $409,353 |
+| Wage % | **54.8%** | **20.2%** |
+| Sales per labour hour | $60 | $160 |
+
+At shift grain, **Monday lunch runs at 95.6%** against **Sunday dinner at
+16.9%**. A flat daily or weekly target flags the whole business amber and tells a
+manager nothing they can act on.
+
+**The clock daypart is refused.** Labour is committed before and after the trade
+it serves, so apportioning wage cost across the clock and dividing by the revenue
+banked in the same hour reports Late Evening at 348% and Breakfast at 6,207%.
+Those cells ship with `wagePct`, `margin` and `netPerHour` **null in the data** —
+not hidden behind a caption — and the clock grain publishes only the shape that
+proves the point: Dinner is 74.1% of trade on 43.6% of hours.
+
+**The difference between sellers is attachment, not trading up.** Across the 30
+rated people, items per cover spans **1.86×** top to bottom while average item
+value spans **1.38×**. Everybody sells much the same things at much the same
+price; the spread is in how much of it reaches the table.
+
+**Coffee Guru gets none of it**, and says so. Nineteen venues on no rostering
+vendor means no denominator, so the section renders the refusal and the list of
+questions connecting one would answer — and explicitly declines to publish the
+sales side alone, because a raw sales total ranks people by the hours they were
+given.
+
+**Gross margin per person is refused**: cost of goods is recorded on 3.1% of
+orders. Margin here means *margin after labour* and is named that everywhere.
 
 ## The change that made this publishable: the card is the spine
 
@@ -253,9 +300,19 @@ it, most of which happened where nothing was measured.
 
 ## The screens
 
-Five items under **Customers**, and three of them are this build. The other two
-are the existing Loyalty reports, rendered as labelled placeholders and
-deliberately untouched.
+Two sections. **Customers** carries five items, three of them this build.
+**Team** carries five, three of them this build. In each, the remainder are
+existing production reports rendered as labelled placeholders and deliberately
+untouched.
+
+| Screen | Answers |
+|---|---|
+| **People** | Whether the till and the rostering system agree who a person is. A review queue, worst evidence first, and the list of what the rest of the section is allowed to divide by |
+| **Performance** | Who is doing well and **why** — the decomposition into attachment against trading up, on rates rather than totals, with everyone below the evidence floor shown unrated |
+| **Margin** | What each service, day, week and month returns against what it costs to staff. Six grains, and one refused |
+| **Staff Scorecard** | *Existing report. Not part of this POC.* |
+| **Attendance** | *Existing report. Not part of this POC.* |
+
 
 | Screen | Answers |
 |---|---|
@@ -340,6 +397,15 @@ npm run extract
 
 Reads `~/.snowflake/connections.toml` and uses the same SSO credentials an analyst
 uses interactively. About four minutes for both organisations.
+
+```bash
+npm run extract -- --team
+```
+
+Re-extracts **only** the team half, over the periods already on disk. A full
+extract derives its own window from today's date and re-grades every month, so
+running one to add a file would move every figure the README and changelog quote
+against a stated extraction date.
 
 **This is why the app ships snapshots rather than querying live:** the connection
 uses `authenticator = "externalbrowser"`, which cannot run in a serverless

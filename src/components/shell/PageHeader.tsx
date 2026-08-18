@@ -22,10 +22,19 @@ import type { Org } from "@/lib/types";
  * open on click rather than on hover (§8 rule 7 — hover does not exist on touch).
  */
 export function PageHeader({
-  org, title, coverage, filters, actions, periods, period, checks, coverageScope = "card",
+  org, title, section = "Customers", coverage, filters, actions, periods, period, checks,
+  coverageScope = "card",
 }: {
   org: Org;
   title: string;
+  /**
+   * The section this report belongs to, beside the title.
+   *
+   * It was the literal string "Customers" until there was a second section, at
+   * which point every Team page quietly claimed to be a customer report. A label
+   * that is right by coincidence stops being right the moment the product grows.
+   */
+  section?: string;
   coverage?: CoverageState;
   /** Report-specific controls, rendered inside the shared bar. */
   filters?: ReactNode;
@@ -45,7 +54,7 @@ export function PageHeader({
       <div className="flex items-center justify-between gap-4 px-6 pt-4 pb-3">
         <div className="flex items-baseline gap-3">
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
-          <span className="text-[13px] text-ink-muted">Customers</span>
+          <span className="text-[13px] text-ink-muted">{section}</span>
           <BuildStamp />
         </div>
         {/* ── The recognition chip is scoped to what it describes ─────────────

@@ -696,4 +696,219 @@ export type Snapshot = {
   segmentBehaviour: SegmentBehaviourRow[] | null;
   /** Member tier, 21 months. Loaded per org, not per card period — see §4.3. */
   cohorts: Cohorts | null;
+  /**
+   * The team half. Null on a snapshot extracted before it existed; present but
+   * `available: false` for an organisation with no workforce integration.
+   */
+  team: Team | null;
+};
+
+// ── the team half ───────────────────────────────────────────────────────────
+
+/**
+ * How confident the identity spine is about one POS login.
+ *
+ * There are five states and not two, because the difference between them is the
+ * product. `confirmed` has corroborating evidence beyond a first name.
+ * `proposed` is a good bet on a unique first name and is not proof. `conflict`
+ * has a first name that agrees and surname evidence that does not — the pair
+ * most likely to be two different people, and the first row a human should open.
+ * `collision` is two logins on one employee. `not-a-person` is a shared login,
+ * a device or a system account, which is a finding rather than a failure.
+ */
+export type TeamVerdict =
+  | "confirmed" | "proposed" | "conflict" | "collision" | "unmatched" | "not-a-person";
+
+/** One row of the mapping review queue. */
+export type TeamLink = {
+  posId: string;
+  posLabel: string;
+  empId: string | null;
+  empLabel: string | null;
+  verdict: TeamVerdict;
+  evidence: string;
+  storeId: string;
+  storeName: string;
+  orders: number;
+  net: number;
+  /** Days this login rang trade. A shared login shows up here as far too many. */
+  days: number;
+  /** Other POS labels the matcher put on the same employee. */
+  rivals: string[];
+};
+
+/**
+ * A person as the report can see them: the POS side, the workforce side, and
+ * the ratio that only exists when both are present.
+ *
+ * Every rate is null rather than zero where its denominator is missing. A chef
+ * has hours and no attributed sales, and a chef rendered at $0 per labour hour
+ * is a defamation of a chef.
+ */
+export type TeamPerson = {
+  id: string;
+  label: string;
+  storeId: string;
+  storeName: string;
+  verdict: TeamVerdict;
+  /** True only where the link is good enough to divide one side by the other. */
+  costed: boolean;
+  employmentType: "Salaried" | "Waged" | null;
+  department: string | null;
+  section: string;
+  // POS side. Null where this person never rang an order.
+  orders: number;
+  net: number;
+  items: number;
+  covers: number;
+  ordersWithCovers: number;
+  days: number;
+  discount: number;
+  // The decomposition. Revenue per cover = items per cover × average item value.
+  itemsPerCover: number | null;
+  avgItemValue: number | null;
+  netPerCover: number | null;
+  netPerOrder: number | null;
+  coversPerOrder: number | null;
+  // Workforce side. Null where this person is not linked to a costed employee.
+  hours: number | null;
+  cost: number | null;
+  penaltyHours: number | null;
+  shifts: number | null;
+  // The ratio. Null unless both sides are present.
+  netPerHour: number | null;
+  coversPerHour: number | null;
+  costPerHour: number | null;
+  wagePct: number | null;
+  /** Per weekday and per daypart, POS side only. `[dow, daypart, orders, net, items, covers]`. */
+  grain: [number, string, number, number, number, number][];
+};
+
+/**
+ * One cell of the margin grid, at whichever grain the collection names.
+ *
+ * `margin` is **net sales minus wage cost**, and it is not gross margin. Cost of
+ * goods is recorded on 3.1% of Meat Flour Wine orders, so gross profit is not
+ * computable and is refused rather than approximated — see `costCoverage`.
+ */
+export type TeamMarginCell = {
+  key: string;
+  label: string;
+  storeId: string;
+  net: number;
+  /** Award and allowance. Leave is excluded and carried separately. */
+  labour: number;
+  leave: number;
+  plannedLabour: number | null;
+  hours: number;
+  /** Award hours worked outside ordinary hours — the penalty exposure. */
+  penaltyHours: number;
+  penaltyCost: number;
+  orders: number;
+  covers: number;
+  tradingDays: number;
+  /**
+   * The three ratios, and every one of them is nullable on purpose.
+   *
+   * A clock daypart carries real labour and real sales and **no valid ratio
+   * between them**, because a kitchen preps at ten for a lunch that sells at
+   * twelve and a floor team clears at eleven for a dinner that sold at seven.
+   * Dividing the two produces Late Evening at 348% wage, which is arithmetic
+   * rather than measurement. Those cells therefore ship with all three ratios
+   * null and `refusal` set, so a surface cannot render one by reaching past a
+   * caption. The service-block grain carries the same trade and the same labour
+   * with the boundary drawn where the operator draws it, and does have them.
+   */
+  wagePct: number | null;
+  margin: number | null;
+  netPerHour: number | null;
+  /** Why the ratios are absent, where they are. Null when they are present. */
+  refusal: string | null;
+};
+
+export type TeamMargin = {
+  /** The clock. Trade shape and labour shape; ratios refused. */
+  daypart: TeamMarginCell[];
+  /** Lunch and dinner service. The finest grain a wage percentage survives. */
+  service: TeamMarginCell[];
+  /** Service × day of week — which shift on which day, the rostering question. */
+  serviceDow: (TeamMarginCell & { dow: number; service: string })[];
+  dow: TeamMarginCell[];
+  /** Day of week × daypart. `dow` is the warehouse's Sunday-zero index. */
+  dowDaypart: (TeamMarginCell & { dow: number; daypart: string })[];
+  week: TeamMarginCell[];
+  month: TeamMarginCell[];
+  day: TeamMarginCell[];
+};
+
+/** What the workforce feed is, and what it is missing. Named so it can be fixed. */
+export type TeamIntegrity = {
+  vendor: string | null;
+  posIdentities: number;
+  employees: number;
+  /** Employee ids matching a POS user id. Zero everywhere, and that is the point. */
+  idMatches: number;
+  exactNameMatches: number;
+  counts: Record<TeamVerdict, number>;
+  /** Share of trade rung by a login the spine can cost. */
+  costedOrders: number;
+  costedNet: number;
+  /** Cost segments whose employee has no row on the current roll. Leavers. */
+  orphanEmployees: number;
+  orphanCost: number;
+  /** Segments with no start time. They vanish from every time-bounded query. */
+  nullStartSegments: number;
+  nullStartCost: number;
+  /** Orders carrying a cost of goods. The gate on gross margin. */
+  costCoverage: number;
+  /** Raw vendor departments, and what they collapse to. The multi-site problem. */
+  departments: number;
+  sections: number;
+  /** Waged employees with no contracted weekly hours recorded. */
+  wagedWithoutContractedHours: number;
+  waged: number;
+  salaried: number;
+  /** Elapsed time against recorded hours, asserted rather than assumed. */
+  elapsedAgrees: boolean;
+  segments: number;
+};
+
+export type Team = {
+  window: AnalysisWindow;
+  /**
+   * False where the organisation has no workforce integration at all.
+   *
+   * Coffee Guru is nineteen venues on no rostering vendor. There is no labour
+   * cost, no roster and no employee roll, so every figure in this section is
+   * refused for that organisation rather than rendered as zero — and the refusal
+   * is the honest statement of what integrating would buy them.
+   */
+  available: boolean;
+  refusal: string | null;
+  integrity: TeamIntegrity;
+  links: TeamLink[];
+  people: TeamPerson[];
+  margin: TeamMargin;
+  /** Section totals, for the multi-site roll-up the raw names prevent. */
+  sections: {
+    section: string;
+    departments: string[];
+    storeIds: string[];
+    hours: number;
+    cost: number;
+    penaltyCost: number;
+    people: number;
+  }[];
+  totals: {
+    net: number;
+    labour: number;
+    leave: number;
+    plannedLabour: number;
+    hours: number;
+    penaltyHours: number;
+    penaltyCost: number;
+    wagePct: number;
+    margin: number;
+    netPerHour: number;
+  };
 };

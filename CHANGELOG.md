@@ -2,12 +2,181 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.7.0`** — the version and commit render in the app header on every
+**Current: `v0.8.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.8.0 — Staff becomes Team, and the two systems are introduced
+
+The sidebar group called **Staff** is now called **Team**, and it has three
+reports under it. The rename is not cosmetic: *staff* names a cost line, *team*
+names the people the cost line is made of, and the whole argument of the section
+is that the lever is raising what a committed hour returns rather than cutting
+the hour.
+
+### The problem the section exists to solve
+
+`ORDERS` is keyed on the POS user id. `ROSTER_COSTS` is keyed on the workforce
+vendor's employee id. **Nothing joins them.** At Meat Flour Wine there are 53
+POS identities and 83 Tanda employees and the intersection on id is *empty* —
+not sparse, empty. Five names match exactly. Everything worth asking — what does
+this person cost against what they produce, who should work Friday dinner —
+sits behind that one join.
+
+**People** (`/team/people`) is therefore the first screen, and it is a review
+queue rather than a result. The matcher blocks on first name within a venue,
+then looks for corroborating surname evidence, and reports one of six verdicts:
+
+| Verdict | MFW | What it means |
+|---|---:|---|
+| Confirmed | 12 | Surname evidence agrees, or the whole string does. Costed. |
+| Proposed | 24 | Unique first name at the venue, nothing contradicting. Costed, and marked. |
+| Conflict | 3 | First name agrees, surname evidence disagrees. **Not costed.** |
+| Collision | 2 | Two logins, one employee. **Not costed.** |
+| Unmatched | 9 | No fit on the current roll — the vendor sync keeps no leavers. |
+| Not a person | 3 | Shared, training or system login. Trade counted, performance nobody's. |
+
+The temptation was to collapse the first two and report a 70% match rate. That
+number would be a claim the evidence does not support for two thirds of the rows
+underneath it, so the queue is sorted **worst evidence first** and the section
+divides by nothing it cannot stand behind.
+
+### Margin, and the grain that is refused
+
+**Margin** (`/team/margin`) answers at five grains — service, service by day,
+day of week, week, month, day. It does **not** answer per clock daypart, and
+that refusal is the most considered thing in the release.
+
+Labour is not consumed in the hour it is paid in. A kitchen preps at ten for a
+lunch that sells at twelve; a floor team clears at eleven for a dinner that sold
+at seven. Apportion wage cost across the clock and divide by the revenue banked
+in the same hour and the arithmetic reports **Late Evening at 348% and Breakfast
+at 6,207%**. Both are correct and both are nonsense, and an operator who acts on
+them cuts the pack-down shift.
+
+So the ratios are **absent from those cells in the data**, not hidden behind a
+caption — `wagePct`, `margin` and `netPerHour` are null and a `refusal` string
+says why. No chart, export or later change can reach past a warning and render
+one. The clock grain still publishes the *shape*: Dinner is 74.1% of trade on
+43.6% of hours, Afternoon is 3.7% of trade on 16.5%, and that gap is the
+argument made visible.
+
+What replaces it is the **service block**, defensible on two grounds. The venue
+already declares it — its rostering departments are named `CHEF Lunch` and
+`CHEF Dinner`, `Bar Lunch` and `Bar Dinner`. And the trade agrees: orders per
+hour run 595 at one o'clock, fall to 73 at three and 94 at four, then rise to
+1,392 at five. The boundary is an empirical trough, not a round number.
+
+### What that grain shows
+
+Meat Flour Wine runs at **28.4%** wage across the window. Underneath it:
+
+| | Lunch service | Dinner service |
+|---|---:|---:|
+| Net sales | $629,377 | $2,023,106 |
+| Labour | $344,724 | $409,353 |
+| Wage % | **54.8%** | **20.2%** |
+| Sales per labour hour | $60 | $160 |
+
+And at shift grain, **Monday lunch runs at 95.6%** — $41,964 of labour against
+$43,875 of trade — against **Sunday dinner at 16.9%**. A single daily or weekly
+target flags the whole business amber and tells a manager nothing they can act
+on. Lunch is the problem, and Saturday lunch at 66% beside Saturday dinner at
+18% is the sharpest instance of it.
+
+### Performance, and why the league table is not a total
+
+**Performance** (`/team/performance`) publishes rates, never totals. The shipped
+Staff Scorecard ranks on net sales, and that figure measures the *roster* — the
+person at the top worked the most Saturday dinners.
+
+The decomposition is the part nobody else builds. Revenue per cover is items per
+cover × average item value, and those are two different jobs: attachment, and
+trading up. Across the 30 rated people at Meat Flour Wine, **items per cover
+spans 1.86× top to bottom while average item value spans 1.38×**. The team is
+not separated by *what* they sell. It is separated by how much of it reaches the
+table — which is a sentence a manager can coach.
+
+Anyone below **50 orders across 5 days** is listed as unrated, never ranked
+last. Both thresholds, because either alone is gamed by the shape of a roster.
+
+### Three things this build refuses to compute
+
+- **Gross profit per person.** `TOTAL_COST_PRICE` is above zero on 296 of 9,410
+  orders — 3.1%. Margin here means *margin after labour* and is named that
+  everywhere. A per-head margin struck against a 96.9%-empty field would be
+  confident and wrong.
+- **Wage percentage per clock hour.** Above.
+- **Anything at all for Coffee Guru.** Nineteen venues, no rostering vendor. The
+  section renders the refusal, the list of questions connecting one would
+  answer, and an explicit statement that the sales side is *not* published on
+  its own — because a raw sales total ranks people by the hours they were given.
+
+### Six new checks, all proven capable of failing
+
+Three of them guard a refusal rather than a figure, which is unusual and
+deliberate — each refusal is one helpful commit away from being undone by
+somebody filling in what looks like a gap.
+
+- `team.grainsReconcile` — all eight grains sum to the same net and labour.
+  Catches a shift crossing midnight being dropped, or a daypart boundary
+  double-counting one.
+- `team.wagePctNotAveraged` — the published ratio is sums divided once, never
+  the mean of the per-cell percentages.
+- `team.clockRatiosAbsent` — no clock cell carries a ratio it cannot support.
+- `team.costedOnlyOnEvidence` — only a confirmed or proposed link is costed.
+- `team.ordersReconcileToCustomerReport` — the team half counts exactly the
+  orders the customer half counts. The two compute net sales differently on
+  purpose (the team half is ex-tax), so the reconciliation is on the count.
+- `team.sharedLoginsNotRated` — asserted on the **label**, not the verdict. The
+  first attempt asked whether any row marked not-a-person was rated, which the
+  rating filter excludes by construction: it could not fail, and `npm run
+  verify` caught it. It now asks whether anything reading like a till or a
+  trainee carries a verdict that would let it be ranked.
+
+### Data hygiene the section surfaces rather than absorbs
+
+- **31 employee ids** appear in timesheets with no entry on the roll, carrying
+  $35,854 of wage cost. The vendor sync retains only active employees, so anyone
+  who left mid-window is unmatchable by construction.
+- **103 cost segments have no start time.** They carry $0 and they drop out of
+  every time-bounded query silently, which is why they are counted before they
+  are dropped.
+- **46 of 56 waged employees** have no contracted weekly hours recorded.
+- **16 rostering department names** across two venues, colliding on purpose
+  (`CHEF Lunch` / `CHEF LUNCH - BERW`). They roll up to 8 sections, without
+  which nothing compares Berwick's kitchen to Braeside's.
+
+### Names
+
+Employees are people and this snapshot lives in a repository, so the guest
+extract's rule applies here too: **no real name leaves the warehouse.** The
+matcher runs on the real strings and the verdicts are computed against them;
+what ships is a synthetic pair that *preserves the evidence*. Where a real
+surname initial agreed, the synthetic one agrees. Section codes pass through
+untouched, because they are half of why the join is hard.
+
+### Also
+
+- `PageHeader` and `Placeholder` take a `section` prop. Both hard-coded the
+  string "Customers", which was right by coincidence until there was a second
+  section.
+- `npm run extract -- --team` re-extracts only the team half over the periods
+  already on disk. A full extract derives its own window from today's date, so
+  running one to add a file would move every published figure in the build.
+- The layout test that enumerated five nav items and rejected a sixth now
+  asserts the property that matters — no nav item points somewhere the build did
+  not render — because a fixed list is a test that must be edited every time the
+  product grows.
+- Staff Scorecard and Attendance appear as marked production placeholders, so
+  the section reads whole. The Attendance stand-in states the finding it
+  embodies: it reads the till's clock, staff clock in on the rostering system,
+  and the product has taken no decision about which is authoritative.
 
 ---
 
