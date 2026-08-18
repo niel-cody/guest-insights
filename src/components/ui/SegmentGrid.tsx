@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { IconArrow, IconChevron } from "@/components/shell/Icons";
 import { InfoButton } from "@/components/ui/InfoButton";
-import { SEGMENT_COLOUR, count, delta, money, pct, segmentLadder, SEGMENT_LABEL } from "@/lib/metrics";
+import {
+  SEGMENT_COLOUR, count, delta, money, pct, segmentLadder, SEGMENT_LABEL, type VisitBandRow,
+} from "@/lib/metrics";
 
 /**
  * §5.4. Where your members stand — as a grid rather than a table.
@@ -32,6 +34,24 @@ import { SEGMENT_COLOUR, count, delta, money, pct, segmentLadder, SEGMENT_LABEL 
  * somebody produce a screenshot in which Lapsed does not exist, and the shares
  * in the remaining rows would silently re-base against a smaller denominator.
  * Columns are a view. Rows are the population.
+ *
+ * ── The tier control, and why it changes the rows ──────────────────────────
+ *
+ * Cards are the bigger half of this business — 19,940 people and $1.3m against
+ * 4,966 and $795k — and until now the grid could not show them at all. It still
+ * cannot show them **by lifecycle**: `segment` is null at source for anyone not
+ * enrolled, because a reissued card is indistinguishable from a customer who
+ * stopped coming. That rule is not worked around here.
+ *
+ * So switching to Cards or All switches the rows to **visit bands**, which both
+ * tiers genuinely carry and which is most of what the lifecycle was measuring
+ * anyway. Lifecycle stays selectable on Members, and is disabled with its reason
+ * elsewhere — the same pattern the filter bar already uses when tier is set to
+ * card. The default is unchanged: Members, by lifecycle.
+ *
+ * What this exposes is worth the control on its own. At Meat Flour Wine the
+ * card tier out-earns members 2.2x per head, the exact inverse of Coffee Guru,
+ * and a members-only grid could not show it.
  */
 
 type Row = {
@@ -58,28 +78,42 @@ export type PreviousPeriod = {
   rows: Row[];
 };
 
+export type Tier = "member" | "card" | "all";
+type Group = "lifecycle" | "visits";
+
+const TIERS: { key: Tier; label: string }[] = [
+  { key: "member", label: "Members" },
+  { key: "card", label: "Cards" },
+  { key: "all", label: "All" },
+];
+
 type ColumnKey =
   | "people" | "peopleShare" | "visits" | "visitShare"
   | "spend" | "spendShare" | "perHead" | "peopleChange" | "perHeadChange";
 
 const COLUMNS: { key: ColumnKey; label: string; needsPrevious?: boolean; note: string }[] = [
-  { key: "people", label: "People", note: "Enrolled people in this segment. The denominator of every per-head figure on the row." },
-  { key: "peopleShare", label: "Share of people", note: "This segment as a share of all enrolled people." },
-  { key: "visits", label: "Visits", note: "Visits by this segment. A visit is a day at a venue, not a transaction." },
-  { key: "visitShare", label: "Share of visits", note: "This segment as a share of all enrolled visits." },
-  { key: "spend", label: "Spend", note: "Total trade from this segment inside the window." },
-  { key: "spendShare", label: "Share of spend", note: "This segment as a share of all enrolled spend. Read against share of people — the gap is the finding." },
+  { key: "people", label: "People", note: "People in this row. The denominator of every per-head figure beside it." },
+  { key: "peopleShare", label: "Share of people", note: "This row as a share of the people in the selected tier." },
+  { key: "visits", label: "Visits", note: "Visits by this row. A visit is a day at a venue, not a transaction." },
+  { key: "visitShare", label: "Share of visits", note: "This row as a share of visits in the selected tier." },
+  { key: "spend", label: "Spend", note: "Total trade from this row inside the window." },
+  { key: "spendShare", label: "Share of spend", note: "This row as a share of spend in the selected tier. Read against share of people — the gap is the finding." },
   { key: "perHead", label: "Per head", note: "Spend divided by the people count on the same row, over the window. Not annualised." },
-  { key: "peopleChange", label: "People vs previous", needsPrevious: true, note: "Change in the number of people in this segment against the previous comparable period." },
-  { key: "perHeadChange", label: "Per head vs previous", needsPrevious: true, note: "Change in spend per head against the previous comparable period. Both periods are the same length, so this is not a rate artefact." },
+  { key: "peopleChange", label: "People vs previous", needsPrevious: true, note: "Change in the number of people against the previous comparable period. Lifecycle rows only — the previous period is held per segment, not per visit band." },
+  { key: "perHeadChange", label: "Per head vs previous", needsPrevious: true, note: "Change in spend per head against the previous comparable period. Both periods are the same length, so this is not a rate artefact. Lifecycle rows only." },
 ];
 
 const DEFAULT_ON: ColumnKey[] = ["people", "peopleShare", "spend", "spendShare", "perHead"];
 
 export function SegmentGrid({
-  rows, orgSlug, period, lapsedDays, lapsedGuests, previous,
+  rows, visitRows, excludedCards, orgSlug, period, lapsedDays, lapsedGuests, previous,
 }: {
+  /** Lifecycle rows. Members only, by construction. */
   rows: Row[];
+  /** Visit-band rows per tier — the axis both tiers can be compared on. */
+  visitRows: Record<Tier, VisitBandRow[]>;
+  /** One-visit cards, excluded from the card tier and therefore stated. */
+  excludedCards: { people: number; spend: number };
   orgSlug: string;
   period: string;
   lapsedDays: number;
@@ -88,14 +122,26 @@ export function SegmentGrid({
 }) {
   const [on, setOn] = useState<Set<ColumnKey>>(new Set(DEFAULT_ON));
   const [picking, setPicking] = useState(false);
+  const [tier, setTier] = useState<Tier>("member");
+  const [group, setGroup] = useState<Group>("lifecycle");
 
-  const available = COLUMNS.filter((c) => !c.needsPrevious || previous);
+  // Lifecycle is only expressible on the member tier, so it is not merely
+  // disabled there — the effective grouping falls back, and the control shows
+  // the reason rather than silently rendering an empty table.
+  const effectiveGroup: Group = tier === "member" ? group : "visits";
+  const body: (Row | VisitBandRow)[] = effectiveGroup === "lifecycle" ? rows : visitRows[tier];
+
+  // The previous period is held per lifecycle segment, so those two columns are
+  // unavailable on a visit-band view rather than silently reading "—".
+  const available = COLUMNS.filter(
+    (c) => !c.needsPrevious || (previous !== null && effectiveGroup === "lifecycle"),
+  );
   const shown = available.filter((c) => on.has(c.key));
 
   const totals = {
-    guests: rows.reduce((a, r) => a + r.guests, 0) || 1,
-    visits: rows.reduce((a, r) => a + r.visits, 0) || 1,
-    spend: rows.reduce((a, r) => a + r.spend, 0) || 1,
+    guests: body.reduce((a, r) => a + r.guests, 0) || 1,
+    visits: body.reduce((a, r) => a + r.visits, 0) || 1,
+    spend: body.reduce((a, r) => a + r.spend, 0) || 1,
   };
 
   const prevOf = (segment: string) => previous?.rows.find((r) => r.segment === segment) ?? null;
@@ -106,7 +152,7 @@ export function SegmentGrid({
     return now / before - 1;
   }
 
-  function cell(r: Row, key: ColumnKey) {
+  function cell(r: Row | VisitBandRow, key: ColumnKey) {
     const prev = prevOf(r.segment);
     switch (key) {
       case "people":
@@ -142,13 +188,65 @@ export function SegmentGrid({
 
   const ladder = segmentLadder(lapsedDays);
 
+  /** Where a row sends the reader, on whichever axis is showing. */
+  function drillTo(r: Row | VisitBandRow): string {
+    const q = new URLSearchParams();
+    if (effectiveGroup === "lifecycle") {
+      q.set("tier", "member");
+      q.set("segment", r.segment);
+    } else {
+      // "All" is the absence of a tier filter, not a third value the grid
+      // understands — the guest grid has no such option and inventing one in a
+      // link would produce a URL that silently drops it.
+      if (tier !== "all") q.set("tier", tier);
+      q.set("minVisits", String((r as VisitBandRow).band));
+    }
+    return `/${orgSlug}/${period}/guests?${q.toString()}`;
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {/* ── tier, and what the rows can be ─────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Segmented
+          legend="Tier"
+          value={tier}
+          options={TIERS}
+          onChange={(t) => setTier(t)}
+        />
+        <Segmented
+          legend="Rows"
+          value={effectiveGroup}
+          options={[
+            { key: "lifecycle" as Group, label: "Lifecycle", disabled: tier !== "member" },
+            { key: "visits" as Group, label: "Visits" },
+          ]}
+          onChange={(g) => setGroup(g)}
+        />
+        {tier !== "member" && (
+          <span className="text-[12px] text-ink-muted">
+            Lifecycle is enrolled people only — a reissued card cannot be told from a customer who stopped
+            coming, so the verdict is empty at source.
+          </span>
+        )}
+      </div>
+
+      <p className="text-[13px] text-ink-secondary">
+        <strong className="tnum text-ink">{count(totals.guests)}</strong>{" "}
+        {tier === "member" ? "enrolled people" : tier === "card" ? "card-recognised people" : "people"}
+        {effectiveGroup === "lifecycle"
+          ? ", classified against their own visit cadence."
+          : ", grouped by how many times they came."}{" "}
+        <span className="text-ink-muted">
+          {money(totals.spend)} between them · every row opens the people behind it.
+        </span>
+      </p>
+
       {/* ── the column picker ──────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[12px] text-ink-muted">
           {shown.length} of {available.length} columns shown
-          {previous && (
+          {previous && effectiveGroup === "lifecycle" && (
             <>
               {" "}· previous period is <strong className="text-ink-secondary">{previous.label}</strong>
             </>
@@ -199,7 +297,9 @@ export function SegmentGrid({
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
-              <th className="py-2 pr-3 text-left font-medium">Segment</th>
+              <th className="py-2 pr-3 text-left font-medium">
+                {effectiveGroup === "lifecycle" ? "Segment" : "Visits"}
+              </th>
               {shown.map((c) => (
                 <th key={c.key} className="px-2 py-2 text-right font-medium whitespace-nowrap">
                   {c.label}
@@ -209,15 +309,24 @@ export function SegmentGrid({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {body.map((r) => (
               <tr key={r.segment} className="border-b border-line last:border-b-0 hover:bg-surface-hover">
                 <th scope="row" className="py-2 pr-3 text-left font-medium text-ink">
                   <span className="flex items-center gap-2 whitespace-nowrap">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
-                      style={{ background: SEGMENT_COLOUR[r.segment] }}
-                    />
-                    {SEGMENT_LABEL[r.segment]}
+                    {effectiveGroup === "lifecycle" ? (
+                      <>
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+                          style={{ background: SEGMENT_COLOUR[r.segment] }}
+                        />
+                        {SEGMENT_LABEL[r.segment]}
+                      </>
+                    ) : (
+                      /* No swatch. The segment colours mean lifecycle, and
+                         reusing them on a visit band would say Regulars about a
+                         row that is a visit count. */
+                      (r as VisitBandRow).label
+                    )}
                   </span>
                 </th>
                 {shown.map((c) => {
@@ -238,7 +347,7 @@ export function SegmentGrid({
                 })}
                 <td className="py-2 pl-2 text-right">
                   <Link
-                    href={`/${orgSlug}/${period}/guests?tier=member&segment=${r.segment}`}
+                    href={drillTo(r)}
                     className="inline-flex items-center gap-1 text-[12px] font-medium whitespace-nowrap text-accent hover:underline"
                   >
                     Open <IconArrow className="h-3 w-3" />
@@ -250,7 +359,7 @@ export function SegmentGrid({
         </table>
       </div>
 
-      {previous && (
+      {previous && effectiveGroup === "lifecycle" && (
         <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
           <strong className="text-ink-secondary">
             The previous period is not last quarter, and the comparison says so.
@@ -263,13 +372,33 @@ export function SegmentGrid({
         </p>
       )}
 
+      {/* ── What a card view leaves out, stated rather than dropped ─────────
+          The card tier is non-members with two or more visits, so a whole
+          population sits outside it — and it is not small. Dropping it silently
+          would make the tier totals unreconcilable against the coverage figures
+          on the same page, which is the defect this build exists to not ship. */}
+      {tier !== "member" && excludedCards.people > 0 && (
+        <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
+          <strong className="text-ink-secondary">
+            {count(excludedCards.people)} cards seen exactly once are not in this view
+          </strong>{" "}
+          — {money(excludedCards.spend)} between them. A card is only counted as a person on its second
+          visit: one sighting is a transaction you can see, not a customer you can count, and there is no
+          cadence to place it against. Members are counted from the moment they enrol, which is why the
+          one-visit row is present on the member tier and absent here.
+        </p>
+      )}
+
       {/* ── §4.5 the boundary rules, behind a button ────────────────────────
           These used to sit open beneath the table as a numbered list plus a
           paragraph — roughly 150 words of definition under a six-row table,
           every time anybody loaded the page. It is reference material: read
           once, argued with once, and then never needed again by the same
           person. What it is *not* is a caveat, so it is allowed to fold. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-sunken px-4 py-2.5">
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-sunken px-4 py-2.5"
+        hidden={effectiveGroup !== "lifecycle"}
+      >
         <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
           Where the boundaries fall
         </span>
@@ -309,6 +438,49 @@ export function SegmentGrid({
           six segments, first match wins — {SEGMENT_LABEL.regular} is ten or more visits and still inside
           their own usual gap
         </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A small segmented control.
+ *
+ * A disabled option keeps its slot rather than disappearing, for the same reason
+ * a refused figure does: its absence would change how the remaining options
+ * read. Somebody who never sees "Lifecycle" offered on the card tier concludes
+ * the grid cannot do it at all, rather than that this tier cannot.
+ */
+function Segmented<T extends string>({
+  legend, value, options, onChange,
+}: {
+  legend: string;
+  value: T;
+  options: { key: T; label: string; disabled?: boolean }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[12px] font-medium tracking-wide text-ink-muted uppercase">{legend}</span>
+      <div role="group" aria-label={legend} className="flex rounded-lg border border-line p-0.5">
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            disabled={o.disabled}
+            aria-pressed={value === o.key}
+            onClick={() => onChange(o.key)}
+            className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+              value === o.key
+                ? "bg-accent-soft text-accent"
+                : o.disabled
+                  ? "cursor-not-allowed text-ink-muted opacity-50"
+                  : "text-ink-secondary hover:bg-surface-hover"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
       </div>
     </div>
   );

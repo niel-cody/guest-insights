@@ -13,8 +13,8 @@ import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
 import {
   attributionPct, basketMix, basketStory, causalReading, count, coverageState,
-  decompose, delta, money, monthLabel, opportunityPerVenueWeek, pct, ratio, rollUpSegments,
-  tileCount, valueClaims, windowShort,
+  decompose, delta, excludedSingleVisitCards, money, monthLabel, opportunityPerVenueWeek, pct, ratio,
+  rollUpSegments, tileCount, valueClaims, visitBands, windowShort,
 } from "@/lib/metrics";
 
 export const dynamic = "force-static";
@@ -84,7 +84,6 @@ export default async function OverviewPage({
   // Members only — a lifecycle verdict on a card is a claim we cannot support,
   // so the table is enrolled people and says so rather than quietly excluding.
   const stands = rollUpSegments(segments, "member");
-  const standsTotal = stands.reduce((a, s) => a + s.guests, 0);
 
   /**
    * The previous comparable period, where one exists.
@@ -380,10 +379,14 @@ export default async function OverviewPage({
               importance change as you move from people, to behaviour, to
               money?* Neither duplicates the other, which is the test a second
               visual on the same data has to pass. */}
-          <Card
-            title="Where your members stand"
-            subtitle={`${count(standsTotal)} enrolled people, classified against their own visit cadence. Every row opens the people behind it.`}
-          >
+          {/* The heading and the population sentence moved apart, and had to.
+              The heading is tier-neutral because the tier is now a control; the
+              sentence beneath it is rendered by the grid, where it can change
+              with the tier. Left as it was, a static "4,966 enrolled people" sat
+              directly above a grid showing 19,940 cards — the caption
+              contradicting the table it captions, which is the class of defect
+              this build was rebuilt to remove. */}
+          <Card title="Where your guests stand">
             <div className="flex flex-col gap-7">
               <SegmentGrid
                 rows={stands.map((s) => ({
@@ -398,6 +401,12 @@ export default async function OverviewPage({
                 lapsedDays={org.calibration.lapsedDays}
                 lapsedGuests={stands.find((s) => s.segment === "lapsed")?.guests ?? 0}
                 previous={previous}
+                visitRows={{
+                  member: visitBands(members, "member"),
+                  card: visitBands(members, "card"),
+                  all: visitBands(members, "all"),
+                }}
+                excludedCards={excludedSingleVisitCards(members)}
               />
 
               <SegmentComposition

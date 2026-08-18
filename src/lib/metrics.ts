@@ -870,6 +870,81 @@ export function rollUpSegments(segments: Segments, tier?: "member" | "card") {
   })).filter((s) => s.guests > 0);
 }
 
+/**
+ * Visit bands, for either tier — the axis a members-against-cards comparison can
+ * actually be made on.
+ *
+ * ── Why not the lifecycle segments ────────────────────────────────────────
+ *
+ * Because cards do not have one. `segment` is null at source for anyone not
+ * enrolled, and deliberately: a reissued card is indistinguishable from a
+ * customer who stopped coming, so "Lapsed" on a card is a guess. That rule is
+ * not being worked around here. Visit count is the thing both tiers genuinely
+ * carry, and frequency is most of what the lifecycle was measuring anyway.
+ *
+ * ── The band-1 asymmetry is the point, not an oversight ───────────────────
+ *
+ * A member is a person from the moment they enrol, so their single-visit band
+ * counts. **A card is not a person until its second visit** — one sighting is a
+ * transaction we can see, not a customer we can count, which is
+ * `CARD_PERSON_FILTER` in the extract and the reason the card tier is 19,940
+ * rather than 64,563.
+ *
+ * So band 1 is included for members and excluded for cards, and the two
+ * totals then reconcile exactly with every other population figure in the
+ * product: 4,966 members, 19,940 cards, 24,906 classifiable between them. The
+ * 44,623 one-visit cards are **stated on the surface** rather than dropped
+ * quietly — see the note the grid renders under a card or combined view.
+ */
+export type VisitBandRow = {
+  segment: string;
+  label: string;
+  band: number;
+  guests: number;
+  visits: number;
+  spend: number;
+  orders: number;
+};
+
+/** A card is only a person on its second visit. A member is one from enrolment. */
+export const CARD_MIN_VISITS = 2;
+
+export function visitBands(members: Members, tier: "member" | "card" | "all"): VisitBandRow[] {
+  const src = members.opportunity.candidates.byBand;
+  const wanted = (r: { isMember: boolean; visitBand: number }) => {
+    if (r.isMember) return tier === "member" || tier === "all";
+    if (tier === "member") return false;
+    return r.visitBand >= CARD_MIN_VISITS;
+  };
+
+  const by = new Map<number, VisitBandRow>();
+  for (const r of src) {
+    if (!wanted(r)) continue;
+    const cur = by.get(r.visitBand) ?? {
+      segment: `visits-${r.visitBand}`,
+      label: r.visitBand >= 10 ? "10 or more" : plural(r.visitBand, "visit"),
+      band: r.visitBand,
+      guests: 0, visits: 0, spend: 0, orders: 0,
+    };
+    by.set(r.visitBand, {
+      ...cur,
+      guests: cur.guests + r.people,
+      visits: cur.visits + r.visits,
+      spend: cur.spend + r.spend,
+      orders: cur.orders + r.orders,
+    });
+  }
+  return [...by.values()].sort((a, b) => a.band - b.band);
+}
+
+/** The one-visit cards a card view excludes, so the exclusion can be stated. */
+export function excludedSingleVisitCards(members: Members) {
+  const r = members.opportunity.candidates.byBand.find(
+    (x) => !x.isMember && x.visitBand === 1,
+  );
+  return { people: r?.people ?? 0, spend: r?.spend ?? 0 };
+}
+
 export function valueBands(segments: Segments, tier?: "member" | "card") {
   const rows = tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows;
   const by = new Map<number, SegmentRow[]>();
