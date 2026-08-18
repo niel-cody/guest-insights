@@ -208,14 +208,27 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
 
   // ── governance ────────────────────────────────────────────────────────────
 
-  const cardWithSegment = segments.rows.filter((r) => r.tier !== "member" && r.segment !== null);
-  const guestCardWithSegment = guests?.rows.filter((g) => g.tier !== "member" && g.segment !== null) ?? [];
+  // ── The card tier carries a verdict now, and this is what bounds it ───────
+  //
+  // `segment.tierPermission` used to assert that no non-member carried a
+  // lifecycle verdict at all. That was too blunt: every input the classifier
+  // needs is computed for cards too, and nulling the output hid the larger half
+  // of the base — 51.3% of everyone with ten or more visits is an anonymous
+  // card. The rule that survives is the one the data actually supports.
+  //
+  // **A card cannot be Seen once.** `CARD_PERSON_FILTER` makes a card a person
+  // only on its second visit — one sighting is a transaction we can see, not a
+  // customer we can count. So the one verdict a card may never carry is the one
+  // that asserts a single visit, and a card row holding it means the eligibility
+  // filter and the classifier have come apart.
+  const onceCards = segments.rows.filter((r) => r.tier !== "member" && r.segment === "one-visit");
+  const onceGuestCards = guests?.rows.filter((g) => g.tier !== "member" && g.segment === "one-visit") ?? [];
   checks.push(ok(
-    "segment.tierPermission",
-    "No non-member carries a lifecycle verdict, in any file.",
-    "`/coming-back` stating the prohibition while `/guests` and `/brief` rendered Regulars, Slipping and Lapsed on card rows.",
-    cardWithSegment.length === 0 && guestCardWithSegment.length === 0,
-    `${cardWithSegment.length} segment rows and ${guestCardWithSegment.length} guest rows in breach`,
+    "segment.cardNeverSeenOnce",
+    "No card carries a Seen once verdict. A card is only a person on its second visit.",
+    "The eligibility filter and the classifier disagreeing about what makes a card a person, so a single sighting is published as a customer who came once.",
+    onceCards.length === 0 && onceGuestCards.length === 0,
+    `${onceCards.length} segment rows and ${onceGuestCards.length} guest rows in breach`,
   ));
 
   // An *inferred* verdict rests on an estimate of the guest's own cadence, and

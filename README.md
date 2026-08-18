@@ -273,9 +273,20 @@ Daypart Specialist — far more concentrated than the Premium Dining archetype's
   unavailable the function returns null and the surface declines to draw.
 - Revenue grain is the primary coverage measure; transaction grain names its
   denominator; **guest-grain coverage is never computed**.
-- A lifecycle verdict is **null at source** for anyone not enrolled — card reissue
-  is unmeasured and looks identical to churn. A rule stated in prose and
-  unenforced in the data is not a control.
+- A lifecycle verdict is computed for **both tiers**, and the claim it supports is
+  scoped instead of the row being deleted. Every input the classifier needs —
+  visits, days since, own cadence — is measured for a card as well as a member,
+  and nulling the output hid the larger half of the base: **51.3% of everyone
+  with ten or more visits at Coffee Guru is an anonymous card**, and 78% of
+  everyone with three or more. The reissue objection is real but directional. A
+  member keeps one identity across a reissued card and an anonymous card does
+  not, so a reissue splits one person in two — which can only ever *understate*
+  Regulars and Established, and does inflate Lapsed and Slipping. So those two
+  are labelled for what they observe: on a card, Lapsed means **the card stopped
+  appearing**. The inference to "this customer churned" is what a reissue breaks,
+  and the surface says so. `segment.cardNeverSeenOnce` holds the one hard
+  boundary left — a card is not a person until its second visit, so it can never
+  be Seen once.
 - An **inferred** verdict (Slipping, Regulars, Established) needs three visits,
   because two visits is one gap and one gap is not an estimate. An **observed**
   state (Seen once, New, Lapsed) rests on the calendar and needs no minimum.

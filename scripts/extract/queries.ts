@@ -60,6 +60,36 @@ function segmentCase(lapseDays: number) {
  * Sharing the text means they cannot drift. The scatter is not "computed the
  * same way" as the table; it is computed by the same characters.
  */
+/**
+ * ── The tier gate is gone, and why it should never have been absolute ──────
+ *
+ * This used to read `IFF(TIER = 'member', <case>, NULL)`. Every input the
+ * classifier needs — VISITS, DAYS_SINCE, CADENCE_DAYS — is computed in `p` for
+ * **every** person regardless of tier, and always was. The gate was a policy
+ * applied after the arithmetic, not a limit of the data, and it hid the larger
+ * half of the base: 51.3% of everyone with ten or more visits at Coffee Guru is
+ * an anonymous card, and 78% of everyone with three or more.
+ *
+ * The objection it encoded is real but **directional**, and blanket-nulling
+ * threw away the half of it that is sound. A card person is not stitched across
+ * a reissue the way a member is by MEMBER_ID, so a reissue splits one person in
+ * two. That error does not point the same way for every verdict:
+ *
+ * - **Regulars and Established are conservative.** Splitting a twelve-visit
+ *   person into a seven and a five can only ever *understate* them. There is no
+ *   way to manufacture a regular by reissuing a card — ten observed visits
+ *   inside a cadence are ten visits that happened.
+ * - **Lapsed and Slipping are inflated.** A card going quiet is precisely what a
+ *   reissue looks like, so these carry genuine false positives.
+ * - **Seen once cannot occur on a card at all.** `CARD_PERSON_FILTER` makes a
+ *   card a person only on its second visit, which `segment.cardNeverSeenOnce`
+ *   now asserts rather than assumes.
+ *
+ * So the verdict is computed for everyone and the *claim* is scoped instead: on
+ * a card, "Lapsed" means this card stopped appearing, which is observably true.
+ * It is the inference to "this customer churned" that a reissue breaks, and the
+ * surface says so rather than the extract deleting the row.
+ */
 function classified(lapseDays: number) {
   return `p AS (
   SELECT person.*, DATEDIFF(day, LAST_SEEN, '@@END@@') AS DAYS_SINCE,
@@ -68,7 +98,7 @@ function classified(lapseDays: number) {
   FROM person JOIN eligible e ON e.PERSON_ID = person.PERSON_ID
 ),
 c AS (
-  SELECT *, IFF(TIER = 'member', ${segmentCase(lapseDays)}, NULL) AS SEGMENT FROM p
+  SELECT *, ${segmentCase(lapseDays)} AS SEGMENT FROM p
 )`;
 }
 
@@ -519,6 +549,10 @@ ${PEOPLE},
 ${classifiedFor(lapseDays, w.end)}
 SELECT
   c.SEGMENT,
+  -- The tier travels with the row now that both carry a verdict. Without it
+  -- this table would silently pool enrolled people and anonymous cards into one
+  -- "Regulars" bucket, and the surface could not take them apart again.
+  c.TIER,
   DAYOFWEEK(v.D) AS DOW,
   v.DAYPART,
   COUNT(*) AS VISITS,
@@ -529,7 +563,7 @@ SELECT
 FROM visits v
 JOIN c ON c.PERSON_ID = v.PERSON_ID
 WHERE c.SEGMENT IS NOT NULL
-GROUP BY 1, 2, 3
+GROUP BY 1, 2, 3, 4
 ORDER BY 1, 2, 3`;
 }
 

@@ -106,10 +106,16 @@ const COLUMNS: { key: ColumnKey; label: string; needsPrevious?: boolean; note: s
 const DEFAULT_ON: ColumnKey[] = ["people", "peopleShare", "spend", "spendShare", "perHead"];
 
 export function SegmentGrid({
-  rows, visitRows, excludedCards, orgSlug, period, lapsedDays, lapsedGuests, previous,
+  lifecycleRows, visitRows, excludedCards, orgSlug, period, lapsedDays, lapsedGuests, previous,
 }: {
-  /** Lifecycle rows. Members only, by construction. */
-  rows: Row[];
+  /**
+   * Lifecycle rows per tier.
+   *
+   * Empty for a tier the snapshot cannot classify. Card verdicts arrived with a
+   * change to the extract, so a snapshot taken before it carries none and the
+   * control says so rather than offering an option that renders nothing.
+   */
+  lifecycleRows: Record<Tier, Row[]>;
   /** Visit-band rows per tier — the axis both tiers can be compared on. */
   visitRows: Record<Tier, VisitBandRow[]>;
   /** One-visit cards, excluded from the card tier and therefore stated. */
@@ -125,10 +131,13 @@ export function SegmentGrid({
   const [tier, setTier] = useState<Tier>("member");
   const [group, setGroup] = useState<Group>("lifecycle");
 
-  // Lifecycle is only expressible on the member tier, so it is not merely
-  // disabled there — the effective grouping falls back, and the control shows
-  // the reason rather than silently rendering an empty table.
-  const effectiveGroup: Group = tier === "member" ? group : "visits";
+  // Lifecycle is offered where the snapshot can actually express it. It is not
+  // a tier rule any more — the classifier runs on cards too — but an older
+  // snapshot carries no card verdicts, so the control falls back and states why
+  // rather than offering an option that renders an empty table.
+  const rows = lifecycleRows[tier];
+  const canLifecycle = rows.length > 0;
+  const effectiveGroup: Group = canLifecycle ? group : "visits";
   const body: (Row | VisitBandRow)[] = effectiveGroup === "lifecycle" ? rows : visitRows[tier];
 
   // The previous period is held per lifecycle segment, so those two columns are
@@ -192,7 +201,12 @@ export function SegmentGrid({
   function drillTo(r: Row | VisitBandRow): string {
     const q = new URLSearchParams();
     if (effectiveGroup === "lifecycle") {
-      q.set("tier", "member");
+      // The tier was hardcoded to member here, from when lifecycle was the
+      // member tier by definition. It is not any more, and a Cards row linking
+      // to `tier=member&segment=regular` sends the reader to a different
+      // population than the one they clicked — the exact drill-through lie this
+      // grid exists to avoid.
+      if (tier !== "all") q.set("tier", tier);
       q.set("segment", r.segment);
     } else {
       // "All" is the absence of a tier filter, not a third value the grid
@@ -218,15 +232,15 @@ export function SegmentGrid({
           legend="Rows"
           value={effectiveGroup}
           options={[
-            { key: "lifecycle" as Group, label: "Lifecycle", disabled: tier !== "member" },
+            { key: "lifecycle" as Group, label: "Lifecycle", disabled: !canLifecycle },
             { key: "visits" as Group, label: "Visits" },
           ]}
           onChange={(g) => setGroup(g)}
         />
-        {tier !== "member" && (
+        {!canLifecycle && (
           <span className="text-[12px] text-ink-muted">
-            Lifecycle is enrolled people only — a reissued card cannot be told from a customer who stopped
-            coming, so the verdict is empty at source.
+            This snapshot carries no lifecycle verdict for {tier === "card" ? "cards" : "this tier"} — the
+            classifier now runs on both tiers, and the figures arrive on the next extract.
           </span>
         )}
       </div>
@@ -369,6 +383,27 @@ export function SegmentGrid({
           not absent from the chart; they are absent from the snapshot, because card capture failed in them
           and a figure drawn across that gap would be measuring the outage. A segment somebody moved into
           during those months arrives here looking like a change that happened over one period.
+        </p>
+      )}
+
+      {/* ── The one thing a card verdict may not be read as ─────────────────
+          The classifier is sound on cards for the verdicts that rest on counting
+          — a reissue splits a person, so it can only ever understate Regulars
+          and Established. It is not sound for the two that rest on absence: a
+          card going quiet is exactly what a reissue looks like. That is not a
+          reason to withhold the row, and it is every reason to name what the row
+          means, which is a fact about the card rather than a conclusion about
+          the person. */}
+      {tier !== "member" && effectiveGroup === "lifecycle" && (
+        <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
+          <strong className="text-ink-secondary">
+            On a card, Lapsed and Slipping mean the card stopped appearing.
+          </strong>{" "}
+          A member keeps one identity across a reissued card because the membership carries it; an anonymous
+          card does not, so a reissue looks identical to somebody who stopped coming and these two rows carry
+          real false positives. <strong className="text-ink-secondary">Regulars and Established do not</strong>{" "}
+          — a reissue splits one person into two smaller ones, so it can only understate them, and those rows
+          are a floor rather than an estimate. Ten visits inside a cadence are ten visits that happened.
         </p>
       )}
 

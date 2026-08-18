@@ -38,6 +38,19 @@ export const metadata = { title: "Overview" };
 const TAKE_UP_ILLUSTRATION = [0.1, 0.2] as const;
 
 /**
+ * The grid's row shape, from a roll-up.
+ *
+ * Written once rather than three times: the same mapping now runs for members,
+ * for cards and for both together, and three copies of it is how the tiers come
+ * to disagree about what a row is.
+ */
+function toRows(rows: { segment: string; label: string; guests: number; visits: number; spend: number }[]) {
+  return rows.map((s) => ({
+    segment: s.segment, label: s.label, guests: s.guests, visits: s.visits, spend: s.spend,
+  }));
+}
+
+/**
  * Overview. §5.
  *
  * The order of the blocks is the argument, and it is deliberate top to bottom:
@@ -389,13 +402,11 @@ export default async function OverviewPage({
           <Card title="Where your guests stand">
             <div className="flex flex-col gap-7">
               <SegmentGrid
-                rows={stands.map((s) => ({
-                  segment: s.segment,
-                  label: s.label,
-                  guests: s.guests,
-                  visits: s.visits,
-                  spend: s.spend,
-                }))}
+                lifecycleRows={{
+                  member: toRows(stands),
+                  card: toRows(rollUpSegments(segments, "card")),
+                  all: toRows(rollUpSegments(segments)),
+                }}
                 orgSlug={org.slug}
                 period={period}
                 lapsedDays={org.calibration.lapsedDays}

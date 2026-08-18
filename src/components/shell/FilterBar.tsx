@@ -133,13 +133,12 @@ export function FilterBar({
           label="Customers"
           value={view.tier ?? "all"}
           onChange={(v) =>
-            set({
-              tier: v === "all" ? null : (v as View["tier"]),
-              // A card cannot carry a lifecycle verdict, so a segment filter
-              // held alongside a card-tier filter would select nobody and read
-              // as an empty population rather than as a contradiction.
-              segment: v === "card" ? null : view.segment,
-            })
+            // The segment used to be cleared here whenever the tier became
+            // card, because a card could not carry a verdict. It can now — the
+            // classifier runs on both tiers — and clearing it silently widened
+            // the population the moment somebody drilled through from the
+            // Cards view of the segment grid.
+            set({ tier: v === "all" ? null : (v as View["tier"]) })
           }
           options={[
             { value: "all", label: "All customers" },
@@ -151,8 +150,11 @@ export function FilterBar({
         <Select
           label="Segment"
           value={view.segment ?? "all"}
-          disabled={view.tier === "card"}
-          note={view.tier === "card" ? "Only enrolled people carry a lifecycle verdict" : undefined}
+          note={
+            view.tier === "card"
+              ? "On a card, Lapsed and Slipping mean the card stopped appearing — a reissue looks the same"
+              : undefined
+          }
           onChange={(v) => set({ segment: v === "all" ? null : (v as View["segment"]) })}
           options={[
             { value: "all", label: "All segments" },

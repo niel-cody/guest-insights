@@ -122,12 +122,14 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
     const g = f.guests.rows.find((x) => x.tier !== "member");
     if (g) g.name = "Casey Lindqvist D696";
   },
-  // The governance breach: a lifecycle verdict on a card row.
-  "segment.tierPermission": (f) => {
+  // The breach that survives now that cards carry a verdict: a card published
+  // as having come exactly once, when a card is not a person until its second
+  // visit. Corrupts both files the check reads.
+  "segment.cardNeverSeenOnce": (f) => {
     const g = f.guests.rows.find((x) => x.tier !== "member");
-    if (g) g.segment = "slipping";
+    if (g) g.segment = "one-visit";
     const s = f.snap.segments.rows.find((x) => x.tier !== "member");
-    if (s) s.segment = "lapsed";
+    if (s) s.segment = "one-visit";
   },
   // A habit-broken verdict issued on a single observed interval.
   "segment.minimumObservations": (f) => {
