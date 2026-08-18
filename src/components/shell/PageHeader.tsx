@@ -46,6 +46,7 @@ export function PageHeader({
         <div className="flex items-baseline gap-3">
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
           <span className="text-[13px] text-ink-muted">Customers</span>
+          <BuildStamp />
         </div>
         {/* ── The recognition chip is scoped to what it describes ─────────────
             It asserted "Recognising 82.4% of revenue" persistently, on every
@@ -71,4 +72,36 @@ export function PageHeader({
 
 export function Page({ children }: { children: ReactNode }) {
   return <div className="flex-1 overflow-y-auto p-6">{children}</div>;
+}
+
+/**
+ * The build, on every screen.
+ *
+ * This artefact is screenshotted constantly and the screenshots outlive the
+ * build that produced them. "The grid showed 4,966 there" is unanswerable when
+ * nobody can say which build *there* was — and the meaning of that number has
+ * genuinely changed more than once in this repo, most recently when the card
+ * tier started carrying a lifecycle verdict.
+ *
+ * Version first because it says which phase of the plan you are looking at,
+ * then the commit, because that is the part you can check out and re-run.
+ * `title` carries the build date so it is one hover away without spending
+ * header width on it.
+ *
+ * Deliberately quiet: this is provenance, not a figure, and it sits at the same
+ * weight as the section label rather than competing with the page title.
+ */
+function BuildStamp() {
+  const version = process.env.NEXT_PUBLIC_VERSION;
+  const commit = process.env.NEXT_PUBLIC_COMMIT;
+  if (!version) return null;
+  return (
+    <span
+      className="tnum rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-muted"
+      title={`Built ${process.env.NEXT_PUBLIC_BUILD_DATE} from commit ${commit}`}
+    >
+      v{version}
+      {commit && <span className="ml-1 opacity-70">{commit}</span>}
+    </span>
+  );
 }

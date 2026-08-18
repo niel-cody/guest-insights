@@ -1,12 +1,18 @@
-# Guests — POC, build v2
+# Guests — POC
 
-The customer side of the sales report, built on real Oolio Pay trade.
+**`v0.5.0`** · the customer side of the sales report, built on real Oolio Pay
+trade. Snapshots re-extracted 18 August 2026.
 
-Build v1 was shown to the Product Council and to UAT. This is what came back from
-that, rebuilt around one question: **are your members worth anything, and where is
-the room to grow?** The full decision record — written to be read without repo
-access — is `Guest Reporting & Insights — Build v2 Decisions` in the project
-folder.
+Rebuilt around one question: **are your members worth anything, and where is the
+room to grow?** This file is the standing description of what the build is and
+what it stands on. **[`CHANGELOG.md`](CHANGELOG.md) is how it got here** — read
+that for what moved and why, including the numbers that changed meaning.
+
+The version and commit render in the app header on every screen, so a screenshot
+can always be traced back to the tree that produced it.
+
+The full decision record — written to be read without repo access — is
+`Guest Reporting & Insights — Build v2 Decisions` in the project folder.
 
 Two organisations, switchable from the scope bar on any screen:
 
@@ -35,12 +41,12 @@ at person grain, with both columns identified by their payment card.
 
 | | Non-member | Member | |
 |---|---|---|---|
-| People | 64,211 | 4,966 | |
-| Visits per person / 92 days | 2.09 | **11.07** | +430% |
+| People | 64,563 | 4,966 | |
+| Visits per person / 92 days | 2.09 | **11.09** | +431% |
 | Repeat rate (detection-corrected) | 30.8% | **68.2%** | 2.2× |
-| Spend per visit | $15.48 | $14.42 | **−7%** |
+| Spend per visit | $15.48 | $14.44 | **−7%** |
 | Items per visit | 1.97 | 2.04 | +4% |
-| **Spend per person** | **$32.35** | **$159.60** | **4.9×** |
+| **Spend per person** | **$32.41** | **$160.14** | **4.9×** |
 
 Members buy slightly *less* per visit and are worth nearly five times as much.
 The whole difference is return rate. A report that publishes only average order
@@ -69,8 +75,8 @@ against themselves.
 
 | | Coffee Guru | Meat Flour Wine |
 |---|---|---|
-| Switchers | **451** | 17 |
-| Spend-rate lift after enrolling | **+12.7%** (95% CI +4.5 – +21.0) | — |
+| Switchers | **455** | 17 |
+| Spend-rate lift after enrolling | **+11.1%** (95% CI +3.0 – +19.3) | — |
 | Verdict | published | **refused at n=17** |
 
 Against the 4.9× cross-sectional gap, roughly **97% of the observed difference is
@@ -99,10 +105,10 @@ member on every other order it appears on.
 Three consequences, all load-bearing:
 
 - A member who forgets to scan stays the same person, so **their unscanned spend
-  counts toward their value** — 14,239 orders and $179,166 at Coffee Guru, which
+  counts toward their value** — 14,413 orders and $181,809 at Coffee Guru, which
   is 27% of known members' trade.
 - Member and non-member become the same grain, so the comparison is expressible.
-- **Scan rate becomes measurable** — 82% of visits at Coffee Guru, 76% at Meat
+- **Scan rate becomes measurable** — 81% of visits at Coffee Guru, 76% at Meat
   Flour Wine — and with it the size of the recognition gap.
 
 Cost, published rather than hidden: a card shared between two members is
@@ -115,7 +121,7 @@ Membership is only visible when somebody scans, so a member who came ten times h
 ten chances to be detected and one who came once has one. Members look more loyal
 than they are, **by construction**. With a per-visit scan probability *p*, a member
 with *v* visits is seen with probability 1−(1−p)^v; dividing through recovers the
-population. Repeat rate falls from 72.4% to 68.2% at Coffee Guru and from 27.9% to
+population. Repeat rate falls from 72.5% to 68.3% at Coffee Guru and from 27.9% to
 23.4% at Meat Flour Wine. The claim survives; publishing both is the point.
 
 ---
@@ -173,7 +179,7 @@ v1 shipped five reconciliation invariants that compared numbers to themselves �
 `41,410 of 41,410`, three times. They were green on the day 403,600 transactions
 carried one token.
 
-There are now **24 checks, and the contract is stricter than "they pass"**: each
+There are now **28 checks, and the contract is stricter than "they pass"**: each
 is demonstrated failing against a fixture corrupted in the specific way it claims
 to catch.
 
@@ -184,7 +190,7 @@ npm run verify
 fails the build unless every blocking check passes on the real snapshot *and*
 every check fails on its corrupted fixture. A check with no failing fixture is
 excluded from the badge — adding one is not free. Current state on both
-organisations: **17/17 blocking pass, 19/19 proven capable of failing.** One
+organisations: **26/26 blocking pass, 28/28 proven capable of failing.** One
 warning fires by design, and its firing is what withholds the per-cover comparison
 above.
 
@@ -197,6 +203,7 @@ The five that matter most, each written against a defect that actually happened:
 | `source.orderCountParity` | The parity dispute above, with its exclusions named |
 | `rounding.derivedConsistency` | `110 gained · 100 lost · Net +1` |
 | `cohort.spendScope` | The sixfold seen-once spend overstatement |
+| `segment.cardNeverSeenOnce` | A card published as a customer who came once, when a card is not a person until its second visit |
 
 **Threshold calibration, not guesswork.** The 1% cap proposed for the largest
 single card token is right at estate volume and wrong for a two-venue merchant,
@@ -246,21 +253,30 @@ it, most of which happened where nothing was measured.
 
 ## The screens
 
-Seven surfaces became five.
+Five items under **Customers**, and three of them are this build. The other two
+are the existing Loyalty reports, rendered as labelled placeholders and
+deliberately untouched.
 
 | Screen | Answers |
 |---|---|
-| **Overview** | Where you sit. Attribution, the member headline, the segment grid, how members become visits and spend, growth |
-| **Members** | The value case: six ways, association against effect, the opportunities, the refusals |
-| **Guest list** | Grid and drawer. Masked by default, paginated, value band and daypart |
-| **Trade density** | Eight dayparts, trading identity, member penetration, daypart standardisation |
-| **Coverage** | The checks, card capture month by month, what to fix and what it unlocks |
+| **Overview** | Where you sit. Attribution, the member headline, the segment grid, how the base turns into visits and spend, the opportunity, what the report is standing on |
+| **Behaviour** | When and where they trade. Dayparts by density, where members are not, cross-venue, what each segment buys and when they come, and the member retention burn-down behind its wall |
+| **Guests** | The grid and the drawer. Masked by default, value band and daypart, and a per-guest weekday-by-daypart heatmap |
+| **Loyalty Spend** | *Existing report. Not part of this POC.* |
+| **Loyalty Redemption** | *Existing report. Not part of this POC.* |
 
-`/coming-back` and `/growth` are absorbed into Overview. `/value` becomes
-Members. **The pre-shift Brief moves to Loyalty** — Insights reports what
-happened and publishes the definitions; Loyalty acts on them and owns the channel.
+`/coming-back`, `/growth` and `/value` are absorbed into Overview. Trade density
+became Behaviour. **Coverage became a panel rather than a report** — a
+diagnostics page operators had to be told to open is what it was before. The
+venue network graph, the map and the distance-decay model were cut. **The
+pre-shift Brief moves to Loyalty** — Insights reports what happened and publishes
+the definitions; Loyalty acts on them and owns the channel.
 
-Trade density validates against the Trade Density Framework on first contact: the
+Every page carries the **build stamp** in its header — `v0.5.0 ba31b0f`, with
+the build date on hover. A screenshot of this product outlives the build that
+made it, and the meaning of a figure here has changed more than once.
+
+Behaviour validates against the Trade Density Framework on first contact: the
 framework's illustrative Coffee Shop row predicts 38 / 26 / 18 / 10 across
 Breakfast, Mid-Morning, Lunch and Afternoon, and Coffee Guru measures **43.0 /
 29.8 / 18.6 / 8.3**. Meat Flour Wine measures 72.9% Dinner and classifies as
@@ -370,19 +386,25 @@ has to: masked by default, reveal gated, exports controlled.
 ## Layout
 
 ```
+CHANGELOG.md           where this build is and how it got here
 data/<org>/            extracted snapshots — the only thing the app reads
+next.config.ts         legacy redirects, and the build stamp the header renders
 scripts/
   snowflake.ts         connection (SSO now, key-pair when one exists)
   verify.ts            proves every check can fail
+  layout-tests.ts      display rules asserted on the built HTML, not reviewed
   extract/
     orgs.ts            organisations, windows, the eight dayparts
     sql.ts             the warehouse models: orders, bridge, the card spine
-    queries.ts         one query per output file
+    queries.ts         one query per output file — including the shared
+                       `classified()` CTE both tiers are now labelled by
     run.ts             orchestration, card-quality gate, pseudonymisation
 src/lib/
   stats.ts             Kaplan-Meier, paired intervals, standardisation, detection
   metrics.ts           every derived figure, so two screens cannot disagree
-  checks.ts            the 24 checks
+  checks.ts            the 28 checks
+  weekdays.ts          Monday-first rotation — plain data, so a client component
+                       and a server component can both hold the real array
   data.ts              snapshot access — the seam a live warehouse would replace
 ```
 
@@ -393,19 +415,19 @@ src/lib/
 Out of scope per PRD §7.4: audiences, holdouts, incrementality, prediction, the
 sensitivity dial, pooling views, cross-venue overlap, postcode.
 
-Held for want of data, not appetite: cohort retention curves and any lifetime
-value figure — three months cannot carry either. Expected-next-visit with
-confidence bands is the next thing worth building, and the Kaplan-Meier fit the
-thresholds now come from is most of the work.
+**Still genuinely blocked on data, not appetite:**
 
-**Two panels are drawn but not yet populated.** Average transaction value and
-items per visit by segment, and the segment-by-daypart timing grid, need columns
-that are in the extract now and not in the shipped snapshots. They light up on
-the next `npm run extract`. Both are deliberately *not* derived from the guest
-working set the grid already ships to the browser: that set is the top of the
-value distribution in full plus a hash sample of the tail, its coverage runs
-from 97% of Regulars to 53% of Lapsed, and it overstates spend per visit by up
-to fourteen points on exactly the low-frequency segments. The finding those
-panels carry is that the most frequent guests have the *smallest* baskets, and
-the bias inflates the other end of that comparison — the same test that
-withholds the per-cover figure.
+- **Any lifetime value figure.** Three months cannot carry one.
+- **Whether cohort quality is falling.** Six-month survival does drop across the
+  run, and scan coverage rose over the same period, so later cohorts include
+  marginal members the early ones never captured. The two effects are not
+  separated in this data and the trend is refused rather than drawn.
+- **Spend per head at the table for Meat Flour Wine.** Party size is recorded on
+  51% of member orders against 97% of everyone else's, and the missingness runs
+  in the direction of the answer.
+- **Revenue centres within a venue.** Oolio has Venues *and* Locations; this data
+  set only uses one level. Bar-inside against bar-outside is not expressible yet,
+  and Behaviour says so rather than letting the omission scale up quietly.
+
+**Next thing worth building:** expected-next-visit with confidence bands. The
+Kaplan-Meier fit the lapse thresholds already come from is most of the work.
