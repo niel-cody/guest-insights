@@ -6,8 +6,11 @@ import { SegmentComposition } from "@/components/charts/SegmentCharts";
 import { SegmentGrid, type PreviousPeriod } from "@/components/ui/SegmentGrid";
 import { SelectionCorrection, ValuePanels } from "@/components/charts/ValuePanels";
 import { Disclosure } from "@/components/ui/Disclosure";
-import { GrowthWaterfall, RealVsPriceBar } from "@/components/charts/GrowthWaterfall";
+import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
+import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
+import { GrowthView } from "@/components/charts/GrowthView";
 import { BasketMix } from "@/components/ui/BasketMix";
+import { IDENTITY_LABEL, TIER_LABEL } from "@/lib/lexicon";
 import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
@@ -156,21 +159,28 @@ export default async function OverviewPage({
               carries them cannot put them behind a click. */}
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
-              label="People you can name"
+              label="Guests you can recognise"
               value={count(tileCount(identifiedPeople))}
               accent="var(--tier-card)"
               detail={
                 <>
-                  {count(tileCount(cs.member.people))} enrolled · {count(tileCount(cs.nonMember.people))} card only
+                  {count(tileCount(cs.member.people))} enrolled ·{" "}
+                  {count(tileCount(cs.nonMember.people))} never enrolled
                 </>
               }
-              meta={<>Card tier · {win}</>}
+              meta={<>Person grain · {win}</>}
               info={
                 <>
                   <p>
-                    Everybody identified by their <strong className="text-ink">payment card</strong>, whether
-                    or not they ever scanned. A card seen on a scanned order belongs to that member on every
-                    other order it appears on, so a member who forgets to scan is still the same person.
+                    Everybody identified by their <strong className="text-ink">payment card</strong> — the
+                    one they paid with, not a loyalty card — whether or not they ever scanned. A card seen
+                    on a scanned order belongs to that member on every other order it appears on, so a
+                    member who forgets to scan is still the same person.
+                  </p>
+                  <p className="mt-1.5">
+                    <strong className="text-ink">{IDENTITY_LABEL.card}</strong> is the method here.{" "}
+                    <strong className="text-ink">{TIER_LABEL.card}</strong> is the population it finds and
+                    the loyalty programme never did.
                   </p>
                   <p className="mt-1.5">
                     That inversion is why this figure is {count(tileCount(identifiedPeople))} rather than the{" "}
@@ -194,7 +204,7 @@ export default async function OverviewPage({
                   {attributionPct(cov.identifiedRevenueShare - cov.scannedRevenueShare)} added by the card
                 </>
               }
-              meta={<>Revenue grain · {win} · of {money(coverage.totals.revenue)} trade</>}
+              meta={<>Revenue grain · {win} · of {money(coverage.totals.revenue)}</>}
               info={
                 <>
                   <p>
@@ -235,7 +245,7 @@ export default async function OverviewPage({
                     {money(cs.member.spendPerPerson)} against {money(cs.nonMember.spendPerPerson)}
                   </>
                 }
-                meta={<>Person grain · {win} · enrolled against card only</>}
+                meta={<>Person grain · {win}</>}
                 info={
                   <>
                     <p>
@@ -248,15 +258,29 @@ export default async function OverviewPage({
                       &quot;is worth&quot; on purpose. A screenshot of a KPI card travels without its caption,
                       and this one ends up in a board deck.
                     </p>
+                    {/* OV-1's compromise, and the half of it that moves. The
+                        *size* of the selection share is method — it is the
+                        output of the within-person design two blocks down. The
+                        *fact* that this is association rather than effect is
+                        not, and stays on the face below. */}
+                    <p className="mt-1.5">
+                      <strong className="text-ink">{pct(causal.selectionShare ?? 0, 0)} of this gap was
+                      already there before anybody enrolled.</strong> The people who enrol were coming back
+                      anyway; the within-person estimate below separates the two and is the only figure that
+                      may be used to justify the programme.
+                    </p>
                   </>
                 }
                 /* The caveat stays on the face. It is not method, and it is the
                    one sentence that stops this figure being misused. */
+                /* Shortened to the sentence that does the work, so the four
+                   tiles read as one row rather than one tile explaining itself
+                   beside three that do not. What could not go is the claim
+                   itself: it changes how 4.9× must be read, it took two council
+                   sittings to get here, and a tile that loses it starts
+                   asserting causation the moment somebody screenshots it. */
                 footnote={
-                  <span className="text-ink-muted">
-                    Association, not effect. {pct(causal.selectionShare ?? 0, 0)} of this gap was already
-                    there before anybody enrolled — see below.
-                  </span>
+                  <span className="text-ink-muted">Association, not effect — see below.</span>
                 }
               />
             ) : (
@@ -305,8 +329,8 @@ export default async function OverviewPage({
               }
               meta={
                 <>
-                  Of {count(opp.unscanned.orders + members.linkage.scannedOrders)} member orders the card
-                  bridge resolved
+                  Order grain · of {count(opp.unscanned.orders + members.linkage.scannedOrders)} bridged
+                  member orders
                 </>
               }
               info={
@@ -332,21 +356,119 @@ export default async function OverviewPage({
             />
           </div>
 
-          {/* ── §5.3 one sentence, and how the four counts nest ──────────────
+          {/* ── §5.3 the sentence stays, the nesting moves (OV-2) ────────────
+              Note A's arrow landed between two things and the answer differs
+              for each, so neither was guessed at. **Both stay, and the method
+              half moves into the drawer** — which is the Task 0 rule applied
+              rather than a compromise between two cuts.
+
               The sentence is the only place on the page carrying the order
               count, which is the denominator of the recognition tile and the
               base of the whole Behaviour page, and the only place making the
-              CRM comparison. It stays.
+              loyalty-CRM comparison — the sentence a prospect repeats back to
+              you. The council refused to cut it on 17 August and the reason has
+              not changed.
 
-              The nesting note is new. Four population figures appear on this
-              screen — 69,530, 24,906, 4,966 and 19,940 — and nothing told the
-              reader how they sit inside each other. It reads as four unrelated
-              counts, and a reader who cannot nest them cannot check any of
-              them. It also quotes the same rounded figure the tile does: the
-              sentence used to carry the exact 69,529 directly beneath a tile
-              reading 69,530, which is the rounding contract producing a
-              discrepancy in the reader's eye. */}
-          <Card>
+              The nesting block is the opposite: four counts and how they sit
+              inside each other is *how the figures are built*, read once and
+              never again by the same person. It is the clearest case on the
+              page of something that fails the stay-or-move rule in the
+              move direction. */}
+          <Card
+            explain={
+              <ExplainDrawer
+                label="How the counts on this page fit together"
+                title="How the counts fit together"
+                showing={
+                  <>
+                    <p>
+                      One sentence, and it is the whole report in miniature: what you took, how much of it
+                      this build can put against a person, and what a loyalty CRM would have been able to
+                      tell you instead.
+                    </p>
+                    <p>
+                      The gap between those last two figures —{" "}
+                      <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> against{" "}
+                      <strong>{attributionPct(cov.scannedRevenueShare)}</strong> — is the argument for
+                      building on the payment card rather than on the scan.
+                    </p>
+                  </>
+                }
+                made={
+                  <>
+                    <p>
+                      <strong>How the four people-counts nest.</strong> Four population figures appear on
+                      this screen and nothing on the face says how they sit inside each other. Read as four
+                      unrelated counts none of them can be checked.
+                    </p>
+                    <ul className="flex flex-col gap-1.5">
+                      <li>
+                        <strong className="tnum">{count(tileCount(identifiedPeople))}</strong> people
+                        identified at all — everyone seen on a payment card, however briefly.
+                      </li>
+                      <li className="pl-4">
+                        ↳ <strong className="tnum">{count(segments.population)}</strong> of them are
+                        classifiable: enrolled, or seen on a card more than once. A card seen once is a
+                        transaction, not yet a customer.
+                      </li>
+                      <li className="pl-8">
+                        ↳ <strong className="tnum">{count(cs.member.people)}</strong> of those have
+                        enrolled, and are the only people who carry a lifecycle verdict from a scan.
+                      </li>
+                      <li className="pl-8">
+                        ↳ <strong className="tnum">{count(opp.candidates.people)}</strong> of those have
+                        not, and are the enrolment opportunity below.
+                      </li>
+                    </ul>
+                    <p>
+                      Tiles round to the nearest ten; tables and the grid never round. The exact identified
+                      population is {count(identifiedPeople)}.
+                    </p>
+
+                    {/* ── C-1, the three member-order figures ──────────────────
+                        Three quantities that all sound like "member orders"
+                        appear across Overview and Behaviour: 52,844, 62,107 and
+                        55,070. They are 17% apart, none of them is wrong, and
+                        nothing on either page reconciled them — so a reader who
+                        noticed had no way to resolve it except to conclude one
+                        of the numbers was broken.
+
+                        The one that looks most like an error is the smallest
+                        sitting under a tile: a *subset* of orders, next to a
+                        visit count larger than it. Orders cannot be fewer than
+                        visits — unless the orders are a subset, which these are,
+                        and nothing said so. */}
+                    <p>
+                      <strong>Three member-order figures, and why they differ.</strong> They measure
+                      different things and are 17% apart, so they are nested here the same way the people
+                      counts are.
+                    </p>
+                    <ul className="flex flex-col gap-1.5">
+                      <li>
+                        <strong className="tnum">{count(coverage.totals.memberOrders)}</strong> member
+                        orders in the window — every order placed by an enrolled person, however they were
+                        identified. This is the figure the Behaviour daypart table adds up to.
+                      </li>
+                      <li className="pl-4">
+                        ↳ <strong className="tnum">
+                          {count(opp.unscanned.orders + members.linkage.scannedOrders)}
+                        </strong>{" "}
+                        of those the card bridge resolved, and the denominator of the recognition tile
+                        above. The rest are member orders identified by the scan alone, where no payment
+                        card could be linked.
+                      </li>
+                      <li>
+                        <strong className="tnum">{count(cs.member.visits)}</strong> member{" "}
+                        <em>visits</em>, which is a different unit entirely — a visit is a person-day at a
+                        venue and can carry more than one order. It is smaller than total orders and larger
+                        than the bridged subset, and neither comparison means anything.
+                      </li>
+                    </ul>
+                  </>
+                }
+              />
+            }
+          >
             <p className="max-w-[100ch] text-[15px] leading-relaxed text-ink">
               Over {win} you served {money(coverage.totals.revenue)} across {count(coverage.totals.orders)}{" "}
               orders, and can put <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> of that
@@ -354,34 +476,6 @@ export default async function OverviewPage({
               a loyalty CRM, which only sees a scan, would show{" "}
               <strong>{attributionPct(cov.scannedRevenueShare)}</strong>.
             </p>
-            <div className="mt-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
-              <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-                How these four counts nest
-              </p>
-              <ul className="mt-2 flex flex-col gap-1 text-[13px] leading-relaxed text-ink-secondary">
-                <li>
-                  <strong className="tnum text-ink">{count(tileCount(identifiedPeople))}</strong> people
-                  identified at all — everyone seen on a card, however briefly.
-                </li>
-                <li className="pl-4">
-                  ↳ <strong className="tnum text-ink">{count(segments.population)}</strong> of them are
-                  classifiable: enrolled, or seen on a card more than once. A card seen once is a
-                  transaction, not yet a customer.
-                </li>
-                <li className="pl-8">
-                  ↳ <strong className="tnum text-ink">{count(cs.member.people)}</strong> of those have
-                  enrolled, and are the only people who carry a lifecycle verdict.
-                </li>
-                <li className="pl-8">
-                  ↳ <strong className="tnum text-ink">{count(opp.candidates.people)}</strong> of those have
-                  not, and are the enrolment opportunity below.
-                </li>
-              </ul>
-              <p className="mt-2 text-[12px] text-ink-muted">
-                Tiles round to the nearest ten; tables and the grid never round. The exact identified
-                population is {count(identifiedPeople)}.
-              </p>
-            </div>
           </Card>
 
           {/* ── §5.4 where your members stand ────────────────────────────────
@@ -399,7 +493,21 @@ export default async function OverviewPage({
               directly above a grid showing 19,940 cards — the caption
               contradicting the table it captions, which is the class of defect
               this build was rebuilt to remove. */}
-          <Card title="Where your guests stand">
+          {/* OV-4. "Explain segments" is the first instance of the Task 0
+              pattern, on the panel that needed it most — the boundary rules
+              used to sit at the foot of the table, below the thing they define.
+              The word stays "segments" and not "cohorts": a cohort on Behaviour
+              is an intake month nobody ever leaves, and these six buckets are
+              the opposite by design. See `SegmentsExplainer`. */}
+          <Card
+            title="Where your guests stand"
+            explain={
+              <SegmentsExplainer
+                lapsedDays={org.calibration.lapsedDays}
+                lapsedGuests={stands.find((s) => s.segment === "lapsed")?.guests ?? 0}
+              />
+            }
+          >
             <div className="flex flex-col gap-7">
               <SegmentGrid
                 lifecycleRows={{
@@ -409,8 +517,6 @@ export default async function OverviewPage({
                 }}
                 orgSlug={org.slug}
                 period={period}
-                lapsedDays={org.calibration.lapsedDays}
-                lapsedGuests={stands.find((s) => s.segment === "lapsed")?.guests ?? 0}
                 previous={previous}
                 visitRows={{
                   member: visitBands(members, "member"),
@@ -420,14 +526,14 @@ export default async function OverviewPage({
                 excludedCards={excludedSingleVisitCards(members)}
               />
 
+              {/* Same three roll-ups the grid gets, so both objects in this
+                  card answer to the one control in the filter bar. */}
               <SegmentComposition
-                rows={stands.map((s) => ({
-                  segment: s.segment,
-                  label: s.label,
-                  guests: s.guests,
-                  visits: s.visits,
-                  spend: s.spend,
-                }))}
+                rowsByTier={{
+                  member: toRows(stands),
+                  card: toRows(rollUpSegments(segments, "card")),
+                  all: toRows(rollUpSegments(segments)),
+                }}
                 windowLabel={win}
               />
             </div>
@@ -440,6 +546,42 @@ export default async function OverviewPage({
             title="Are your members worth more?"
             subtitle="The same question, six ways — and they disagree. The disagreement is the finding."
           >
+            {/* ── OV-5: the verdict the six panels support ──────────────────
+                The review rates this the strongest artefact in the build and
+                calls the UI wrong, and the specific wrong is that six panels of
+                unequal importance are given equal weight — so a reader scanning
+                them takes away whichever number is largest.
+
+                The fix is not to re-rank the panels. They are deliberately
+                equal, because "these six answers disagree" is the finding and
+                demoting the two that disagree would be answering the question
+                the block exists to refuse to answer. What was missing is the
+                **conclusion** the six support, stated once, above them.
+
+                The other half of OV-5 — value labels on the two panels the log
+                scale flattens — is already in `ValuePanels`, added when the
+                scale was found to be erasing 0.93× and 1.04× against the
+                reference line. Both are needed: the labels stop a near-null
+                reading as nothing, and this line stops six equal panels reading
+                as no answer at all. */}
+            <div className="mb-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
+              <p className="max-w-[95ch] text-[14px] leading-relaxed text-ink">
+                <strong>
+                  Yes per person, and no per visit — and the six panels below are how you tell.
+                </strong>{" "}
+                An enrolled person is worth {ratio(memberLift)} a non-enrolled one over {win}, and{" "}
+                <strong>almost none of that is a bigger basket</strong>: they return{" "}
+                {cs.member.avgVisits.toFixed(1)} times against {cs.nonMember.avgVisits.toFixed(1)}, while
+                spending {delta(cs.lifts.spendPerVisit)} per visit. Frequency is the whole of the gap.
+              </p>
+              <p className="mt-1.5 max-w-[95ch] text-[12px] leading-relaxed text-ink-secondary">
+                Two of the six panels say members are no better, and they are correct on their own
+                denominators. That is why all six are shown at equal weight rather than the flattering one
+                being promoted — and why the correction beneath them, not the {ratio(memberLift)}, is the
+                figure that may be used to justify the programme.
+              </p>
+            </div>
+
             <ValuePanels claims={claims} />
 
             <div className="mt-5">
@@ -468,136 +610,177 @@ export default async function OverviewPage({
             </div>
           </Card>
 
-          {/* ── §5.6 the opportunity ─────────────────────────────────────── */}
+          {/* ── §5.6 the opportunity, reduced (OV-6) ─────────────────────────
+              Kept, and cut to about a third. It was the most caveat-heavy block
+              on the page and it is the only one that turns the whole thesis
+              into a number a merchant would act on — the CRO and the CFO both
+              named it as the reason the analysis is worth funding. Cutting it
+              leaves a report that explains itself beautifully and asks for
+              nothing.
+
+              **What stays on the face:** the population, the trade at stake,
+              "this is trade at stake, not uplift", the per venue per week line,
+              and the link to the actual people.
+
+              **What moves into the drawer: the entire uplift band, with its
+              confidence interval and its take-up working attached.** That is
+              deliberate and it is the only shape that satisfies both the review
+              and the stay-or-move rule. A confidence interval may never be
+              filed away while its point estimate stays on the face — so the
+              estimate goes in with it, rather than being stranded out here
+              looking more certain than it is. The face loses a seven-figure
+              number and keeps every number a merchant can act on. */}
           <Card
             title="The opportunity"
-            subtitle={`Card-recognised repeat guests who have never enrolled, ${win}.`}
-          >
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Tile
-                  label="People"
-                  value={count(tileCount(opp.candidates.people))}
-                  accent="var(--tier-card)"
-                  footnote={
+            subtitle={`Guests recognised by payment card, seen more than once, never enrolled. ${win}.`}
+            explain={
+              <ExplainDrawer
+                label="What enrolling these guests would be worth"
+                title="What enrolling them would be worth"
+                triggerLabel="What it could be worth"
+                showing={
+                  opp.uplift ? (
                     <>
-                      two or more visits, never enrolled
-                      <span className="mt-1 block text-ink-muted">Card tier · {win}</span>
+                      <p>
+                        <strong className="tnum text-[17px]">
+                          {money(opp.uplift.valueLo)} – {money(opp.uplift.valueHi)}
+                        </strong>{" "}
+                        a quarter, <strong>if every one of them enrolled</strong>.
+                      </p>
+                      <p>
+                        A range and never a point estimate: the interval on the underlying lift runs{" "}
+                        {delta(opp.uplift.lo, 1)} to {delta(opp.uplift.hi, 1)} around{" "}
+                        {delta(opp.uplift.lift, 1)}, and a single number off that spread is false precision
+                        dressed as a forecast.
+                      </p>
+                      <p>
+                        <strong>
+                          That figure assumes every one of the {count(opp.candidates.people)} enrols.
+                        </strong>{" "}
+                        At a take-up of{" "}
+                        {TAKE_UP_ILLUSTRATION.map((t) => `${Math.round(t * 100)}%`).join(" and ")} it is{" "}
+                        {TAKE_UP_ILLUSTRATION.map(
+                          (t) => `${money(opp.uplift!.valueLo * t)}–${money(opp.uplift!.valueHi * t)}`,
+                        ).join(" and ")}{" "}
+                        respectively. No take-up rate is assumed, because none has been measured at this
+                        merchant — the figure above is the ceiling, not the forecast.
+                      </p>
                     </>
-                  }
-                />
-                {/* "62% of non-member spend" was true only against *attributed*
-                    non-member spend. Against every non-member dollar the
-                    business took, including the trade no card could be resolved
-                    for, it is 48%. Both denominators are named, because a share
-                    without its denominator is the thing this build exists not
-                    to publish. */}
-                <Tile
-                  label="Their trade in the window"
-                  value={money(opp.candidates.spend)}
-                  accent="var(--accent)"
-                  footnote={
-                    <>
-                      {pct(opp.candidates.spend / Math.max(cs.nonMember.spend, 1), 0)} of{" "}
-                      <em>attributed</em> non-member spend · {pct(opp.candidates.spend / Math.max(coverage.totals.revenue - coverage.totals.memberRevenue, 1), 0)}{" "}
-                      of all non-member trade
-                      <span className="mt-1 block text-ink-muted">
-                        This is trade at stake, not uplift
-                      </span>
-                    </>
-                  }
-                />
-              </div>
-
-              <div>
-                {opp.uplift ? (
+                  ) : (
+                    <p>
+                      <strong>Sized, but not valued.</strong> The population is real and countable. What
+                      enrolling them would be worth is not, because the within-person estimate could not be
+                      made in this window. The list is still the right list to work; the number attached to
+                      it would be invented.
+                    </p>
+                  )
+                }
+                made={
                   <>
-                    <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3.5">
-                      <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-                        What enrolling them would be worth
-                      </p>
-                      {/* A range, never a point estimate. The interval runs
-                          +3.0% to +19.3% and a single number off that spread is
-                          false precision dressed as a forecast. */}
-                      <p className="tnum mt-1 text-[26px] leading-none font-semibold text-ink">
-                        {money(opp.uplift.valueLo)} – {money(opp.uplift.valueHi)}
-                      </p>
-                      <p className="mt-1.5 text-[12px] text-ink-muted">
-                        a quarter, <strong className="text-ink-secondary">if every one of them enrolled</strong>{" "}
-                        · 95% CI on a within-person lift of {delta(opp.uplift.lift, 1)} (
-                        {delta(opp.uplift.lo, 1)} to {delta(opp.uplift.hi, 1)})
-                      </p>
-                      {/* The take-up assumption is on the face because it is the
-                          first thing a finance director will work out, and
-                          working it out for themselves in the meeting costs more
-                          credibility than stating it costs. The band is the full
-                          interval applied to the full trade of everybody in the
-                          population — arithmetically it assumes 100% take-up,
-                          which no enrolment campaign has ever achieved. */}
-                      <div className="mt-2 rounded-lg border border-line bg-surface-raised px-3 py-2">
-                        <p className="text-[12px] leading-relaxed text-ink-secondary">
-                          <strong className="text-ink">That figure assumes every one of the{" "}
-                          {count(opp.candidates.people)} enrols.</strong> At a take-up of{" "}
-                          {TAKE_UP_ILLUSTRATION.map((t) => `${Math.round(t * 100)}%`).join(", ")} it is{" "}
-                          {TAKE_UP_ILLUSTRATION.map(
-                            (t) => `${money(opp.uplift!.valueLo * t)}–${money(opp.uplift!.valueHi * t)}`,
-                          ).join(", ")}{" "}
-                          respectively. No take-up rate is assumed here because none has been measured at
-                          this merchant; the figure above is the ceiling, not the forecast.
-                        </p>
-                      </div>
-                      <p className="mt-2.5 max-w-[70ch] text-[12px] leading-relaxed text-ink-secondary">
-                        Sized on the within-person uplift, never on the observed gap. The observed gap would
-                        put this roughly twenty times higher and every dollar of it would be selection.
-                      </p>
-                    </div>
-
-                    {/* Nobody can act on a seven-figure lottery number. A venue
-                        manager can act on a weekly one for their own site. */}
-                    <div className="mt-4 rounded-lg border border-line px-4 py-3.5">
-                      <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-                        Per venue, per week
-                      </p>
-                      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-6 gap-y-2">
-                        <span>
-                          <span className="tnum text-[22px] font-semibold text-ink">
-                            {money(perVenueWeek.trade)}
-                          </span>
-                          <span className="ml-2 text-[12px] text-ink-secondary">
-                            of trade at stake
-                          </span>
-                        </span>
-                        <span>
-                          <span className="tnum text-[22px] font-semibold text-ink">
-                            {money(perVenueWeek.upliftLo)} – {money(perVenueWeek.upliftHi)}
-                          </span>
-                          <span className="ml-2 text-[12px] text-ink-secondary">of uplift</span>
-                        </span>
-                      </div>
-                      <p className="mt-2 max-w-[70ch] text-[12px] leading-relaxed text-ink-muted">
-                        Across {org.venues.length} venues and {perVenueWeek.weeks} weeks. The two are
-                        different quantities and are labelled as such: the first is the trade these guests
-                        already bring and which enrolling would put on a name, the second is the additional
-                        spend enrolling would cause.
-                      </p>
-                    </div>
+                    <p>
+                      The population is every guest recognised by payment card with{" "}
+                      <strong>two or more visits</strong> who has never scanned. One sighting is a
+                      transaction, not a customer, and there is no cadence to place it against.
+                    </p>
+                    <p>
+                      Any value is sized on the <strong>within-person</strong> uplift — the same guests
+                      compared against themselves before and after their first scan — and never on the
+                      observed gap. The observed gap would put this roughly twenty times higher and every
+                      dollar of it would be selection rather than effect.
+                    </p>
+                    <p>
+                      The two quantities on the face are different and are labelled as such:{" "}
+                      <strong>trade at stake</strong> is the money these guests already bring, which
+                      enrolling would put on a name; <strong>uplift</strong> is the additional spend
+                      enrolling would cause. Adding them together would double-count.
+                    </p>
                   </>
-                ) : (
-                  <EmptyState
-                    tone="warning"
-                    title="Sized, but not valued"
-                    body="The population is real and countable. What enrolling them would be worth is not, because the within-person estimate could not be made in this window. The list is still the right list to work; the number attached to it would be invented."
-                  />
-                )}
+                }
+              />
+            }
+          >
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)]">
+              <Tile
+                label="People"
+                value={count(tileCount(opp.candidates.people))}
+                accent="var(--tier-card)"
+                footnote={
+                  <>
+                    two or more visits, never enrolled
+                    <span className="mt-1 block text-ink-muted">{IDENTITY_LABEL.card} · {win}</span>
+                  </>
+                }
+              />
+              {/* "62% of non-member spend" was true only against *attributed*
+                  non-member spend. Against every non-member dollar the business
+                  took it is 48%. Both denominators are named, because a share
+                  without its denominator is the thing this build exists not to
+                  publish. */}
+              <Tile
+                label="Their trade in the window"
+                value={money(opp.candidates.spend)}
+                accent="var(--accent)"
+                footnote={
+                  <>
+                    {pct(opp.candidates.spend / Math.max(cs.nonMember.spend, 1), 0)} of{" "}
+                    <em>attributed</em> non-member spend ·{" "}
+                    {pct(opp.candidates.spend / Math.max(coverage.totals.revenue - coverage.totals.memberRevenue, 1), 0)}{" "}
+                    of all non-member trade
+                    <span className="mt-1 block text-ink-muted">
+                      This is trade at stake, not uplift
+                    </span>
+                  </>
+                }
+              />
 
-                <Link
-                  href={`/${org.slug}/${period}/guests?tier=card&minVisits=2`}
-                  className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
-                >
-                  Open these {count(opp.candidates.people)} guests <IconArrow className="h-3.5 w-3.5" />
-                </Link>
+              {/* Nobody can act on a seven-figure lottery number. A venue
+                  manager can act on a weekly one for their own site — which is
+                  why this line stays on the face while the estate-wide band
+                  moves into the drawer. */}
+              <div className="rounded-lg border border-line px-4 py-3.5">
+                <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
+                  Per venue, per week
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-baseline gap-x-6 gap-y-2">
+                  <span>
+                    <span className="tnum text-[22px] font-semibold text-ink">
+                      {money(perVenueWeek.trade)}
+                    </span>
+                    <span className="ml-2 text-[12px] text-ink-secondary">of trade at stake</span>
+                  </span>
+                  {opp.uplift && (
+                    <span>
+                      <span className="tnum text-[18px] font-semibold text-ink">
+                        {money(perVenueWeek.upliftLo)} – {money(perVenueWeek.upliftHi)}
+                      </span>
+                      <span className="ml-2 text-[12px] text-ink-secondary">of uplift</span>
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 max-w-[70ch] text-[12px] leading-relaxed text-ink-muted">
+                  Across {org.venues.length} venues and {perVenueWeek.weeks} weeks. Two different
+                  quantities: the first is trade these guests already bring, the second is spend enrolling
+                  would cause.
+                </p>
               </div>
             </div>
+
+            {!opp.uplift && (
+              <div className="mt-4">
+                <EmptyState
+                  tone="warning"
+                  title="Sized, but not valued"
+                  body="The population is real and countable. What enrolling them would be worth is not, because the within-person estimate could not be made in this window. The list is still the right list to work; the number attached to it would be invented."
+                />
+              </div>
+            )}
+
+            <Link
+              href={`/${org.slug}/${period}/guests?tier=card&minVisits=2`}
+              className="mt-4 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
+            >
+              Open these {count(opp.candidates.people)} guests <IconArrow className="h-3.5 w-3.5" />
+            </Link>
           </Card>
 
           {/* ── §5.7 the trust panel has gone from this page ──────────────────
@@ -628,6 +811,83 @@ export default async function OverviewPage({
               open, and there is no simple/advanced toggle anywhere. What folds
               here is the working: the decomposition table and the basket index,
               not the conclusions they support. */}
+          {/* ── OV-9: the basket block moved up ──────────────────────────────
+              It was last on the longest page in the build, collapsed, under a
+              decomposition table. It is arguably the most immediately
+              actionable thing on Overview — "members buy Breakfast Sweet at
+              1.37× the rate everybody else does" is a merchandising decision an
+              owner could take on Monday — so it now sits above the working it
+              used to sit below.
+
+              It is open by default, and was already: a finding behind a click
+              is a finding nobody reads. What has moved into the drawer is the
+              five-sentence method paragraph that used to sit above the table. */}
+          {mix && story && (
+            <Card
+              title="What members and everyone else actually buy"
+              explain={
+                <ExplainDrawer
+                  label="How the basket index is built"
+                  title="What members and everyone else actually buy"
+                  showing={
+                    <>
+                      <p>
+                        One row per reporting group, sorted by how differently the two sides buy it. The
+                        number on the right is an <strong>index</strong>: 1.37× means members buy that group
+                        at 1.37 times the rate everybody else does, as a share of each side&apos;s own
+                        basket.
+                      </p>
+                      <p>
+                        The two ends are the finding. The middle is the reassurance that most of the menu is
+                        bought in much the same proportion by both, which is the expected result.
+                      </p>
+                    </>
+                  }
+                  made={
+                    <>
+                      {cs.lifts.spendPerVisit < 0 && (
+                        <p>
+                          This is the missing half of the {delta(cs.lifts.spendPerVisit)} per-visit gap
+                          above. Standardising for daypart moved that gap by{" "}
+                          {delta(members.standardisedBasket.lift - members.standardisedBasket.crude.lift, 1)},
+                          so <em>when</em> members come is not the reason their basket is smaller.{" "}
+                          <strong>What they put in it is.</strong>
+                        </p>
+                      )}
+                      <p>
+                        Shares are of each side&apos;s <strong>own</strong> product lines, so a group does
+                        not index high merely because members buy more overall.
+                      </p>
+                      <p>
+                        A group carrying fewer than {count(snap.items!.totals.minLinesForIndex)} lines on
+                        one side keeps its counts and loses its index. A confident 1.2× computed on eleven
+                        lines against nine is the sort of figure that moves to 0.8× on a different
+                        fortnight, and this product does not publish those.
+                      </p>
+                    </>
+                  }
+                />
+              }
+            >
+              <p className="mb-4 max-w-[100ch] text-[15px] leading-relaxed text-ink">
+                Members buy <strong>{story.over.label}</strong> at{" "}
+                <strong>{story.over.index!.toFixed(2)}×</strong> the rate everybody else does, and{" "}
+                <strong>{story.under.label}</strong> at{" "}
+                <strong>{story.under.index!.toFixed(2)}×</strong>.
+              </p>
+              <BasketMix rows={mix} minLines={snap.items!.totals.minLinesForIndex} />
+            </Card>
+          )}
+
+          {/* ── §5.8 where the change came from ──────────────────────────────
+              **Caveats never collapse** — everything above this point stays
+              open, and there is no simple/advanced toggle anywhere. What folds
+              here is the working: the decomposition itself, not the conclusion
+              it supports.
+
+              Two views now (OV-8): what moved the quarter, and how the four
+              factors have moved over the months inside the window. See
+              `GrowthView` and `FactorTrend`. */}
           {growth && (
             <Disclosure
               defaultOpen
@@ -643,70 +903,39 @@ export default async function OverviewPage({
                 </>
               }
             >
-              <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-                <GrowthWaterfall d={growth} />
-                <div>
-                  <RealVsPriceBar d={growth} />
-                  <table className="mt-4 w-full text-[13px]">
-                    <tbody>
-                      {growth.terms.map((t) => (
-                        <tr key={t.key} className="border-b border-line last:border-b-0">
-                          <th scope="row" className="py-2 text-left font-medium text-ink">
-                            {t.label}
-                            <span className="tnum ml-2 block text-[12px] font-normal text-ink-muted">
-                              {t.operand}
-                            </span>
-                          </th>
-                          <td
-                            className="tnum py-2 text-right font-medium"
-                            style={{ color: t.value >= 0 ? "var(--good)" : "var(--loss)" }}
-                          >
-                            {t.value >= 0 ? "+" : "−"}{money(Math.abs(t.value))}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="mt-3 text-[12px] leading-relaxed text-ink-muted">
-                    Symmetric Shapley, so the parts sum to the whole exactly and no residual bar is needed.
-                    Each label states the direction the factor actually moved, not the direction its name
-                    implies.
-                  </p>
-                </div>
-              </div>
-            </Disclosure>
-          )}
+              {/* ── OV-7, the question note I asked and the answer ────────────
+                  "Are we saying a product is now sold for a higher price than
+                  it was before?" The honest answer is **no, and the panel used
+                  to imply otherwise.** Revenue over items moves when a price
+                  goes up and moves identically when the mix shifts toward
+                  pricier items with no price change at all — a guest buying a
+                  large flat white instead of a small one registers here as a
+                  higher price.
 
-          {mix && story && (
-            <Disclosure
-              defaultOpen
-              summary="What members and everyone else actually buy"
-              result={
-                <>
-                  Members buy <strong>{story.over.label}</strong> at{" "}
-                  <strong>{story.over.index!.toFixed(2)}×</strong> the rate everybody else does, and{" "}
-                  <strong>{story.under.label}</strong> at <strong>{story.under.index!.toFixed(2)}×</strong>.
-                </>
-              }
-            >
-              <p className="mb-4 max-w-[95ch] text-[13px] leading-relaxed text-ink-secondary">
-                {cs.lifts.spendPerVisit < 0 ? (
-                  <>
-                    This is the missing half of the {delta(cs.lifts.spendPerVisit)} per-visit gap above.
-                    Standardising for daypart moved that gap by{" "}
-                    {delta(members.standardisedBasket.lift - members.standardisedBasket.crude.lift, 1)}, so{" "}
-                    <em>when</em> members come is not the reason their basket is smaller.{" "}
-                    <strong className="text-ink">What they put in it is.</strong> This is association, not
-                    effect: people who drink a coffee every morning are the people who enrol.
-                  </>
-                ) : (
-                  <>
-                    The two baskets differ by composition as well as by size, so a single per-visit average
-                    describes neither side well. This is association, not effect.
-                  </>
-                )}
-              </p>
-              <BasketMix rows={mix} minLines={snap.items!.totals.minLinesForIndex} />
+                  The factor is renamed to what it measures. Separating a true
+                  price effect from a mix effect needs item-level price history
+                  the extract does not carry, so it is named as the next step
+                  rather than implied to be already done. */}
+              <div className="mb-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
+                <p className="max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                  <strong className="text-ink">
+                    &quot;Average item price&quot; is not the same as a price rise.
+                  </strong>{" "}
+                  It is revenue divided by items, and it moves the same amount whether you put prices up or
+                  your guests shifted toward more expensive items. A large flat white instead of a small one
+                  registers here identically to a price increase.{" "}
+                  <strong className="text-ink">This build cannot yet separate the two</strong> — that needs
+                  item-level price history against item-level volumes, and the extract carries the volumes
+                  but not the prices.
+                </p>
+                <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                  The four factors are multiplicative and the decomposition shares the movement across all
+                  of them, so it is not that some are &quot;also&quot; driving the basket — each gets its
+                  share and the shares sum to the total.
+                </p>
+              </div>
+
+              <GrowthView d={growth} rows={decomposition} />
             </Disclosure>
           )}
         </div>

@@ -9,6 +9,7 @@
  * a number nobody can reproduce.
  */
 import type {
+  Cohorts,
   AnalysisWindow, Coverage, DaypartRow, Dayparts, DecompositionRow, Guest, LifecycleRow,
   Items, Members, Network, Org, SegmentRow, Segments,
 } from "./types";
@@ -321,12 +322,32 @@ export function valueClaims(m: Members, org: Org): ValueClaim[] {
       nonMember: nonMember.repeatRate,
       lift: lift(nonMember.repeatRate, m.detection.correctedRepeatRate),
       unit: "rate",
-      basis: `${windowShort(w)} · share of people with two or more visits · corrected for scan detection`,
+      /**
+       * ── C-3: the correction is on the face, not implied ─────────────────
+       *
+       * This panel publishes a **corrected** figure, and the correction moves
+       * it more than five points — from an observed 72% to 68%. The old basis
+       * line said only "corrected for scan detection", which names a procedure
+       * without saying which way it went or by how much, and the explanation
+       * lived in `note`, which this component did not render at all.
+       *
+       * That put a corrected rate on one screen against the *uncorrected* rate
+       * the segment table on the same page derives from its own row counts,
+       * five points apart, with nothing to reconcile them. Both figures are now
+       * on the face and the direction is named; the mechanism is behind the
+       * button, which is where a method belongs.
+       */
+      basis:
+        `${windowShort(w)} · share of people with two or more visits · ` +
+        `${pct(m.detection.observedRepeatRate)} observed, corrected down to ${pct(m.detection.correctedRepeatRate)}`,
       refusal: null,
       note:
         `Membership is only visible when somebody scans, and members scan on ${scanRatePct(m.detection.scanPerVisit)} of visits, ` +
-        `so members who came once are the ones most likely to be missed entirely. Uncorrected this reads ` +
-        `${pct(m.detection.observedRepeatRate)}; the figure shown is the corrected one.`,
+        `so a member who came once and did not scan is missed entirely — which inflates the observed repeat rate, ` +
+        `because the people most likely to be invisible are exactly the one-visit ones. The correction adds the members ` +
+        `the scan rate implies were missed and re-bases on the larger population. ` +
+        `The segment table elsewhere on this page counts rows rather than correcting them, so it carries the ` +
+        `uncorrected ${pct(m.detection.observedRepeatRate)}; neither is wrong and they answer different questions.`,
     },
     {
       key: "spendPerPerson",
@@ -669,18 +690,61 @@ export function shapley(from: number[], to: number[]): number[] {
 export type Decomposition = {
   from: DecompositionRow;
   to: DecompositionRow;
+  /** The modelled change — what the four factors explain, and what they sum to. */
   revenueChange: number;
+  /** The change in recorded revenue, which the stored factors do not reproduce exactly. */
+  recordedChange: number;
+  /** Recorded minus modelled. Rounding in the four stored factors. */
+  reconciliation: number;
   terms: { key: string; label: string; value: number; kind: "real" | "price"; operand: string }[];
   real: number;
   price: number;
 };
 
+/**
+ * ── "price per item" became "average item price" (OV-7) ────────────────────
+ *
+ * The old label asserted something the figure cannot support. Revenue divided
+ * by items **moves when you raise a price, and moves identically when the mix
+ * shifts toward more expensive items with no price change at all.** A guest
+ * buying a large flat white instead of a small one registers here as a higher
+ * "price per item", and the panel was naming that a price rise.
+ *
+ * The measure is unchanged and the name now describes it: the average price of
+ * an item sold, which is a price effect and a mix effect added together. **This
+ * build cannot separate the two** — that needs item-level price history against
+ * item-level volumes, and the extract carries item counts but not a price per
+ * SKU per month. Splitting it is the version worth having and it is named as
+ * the next step rather than implied to be already done.
+ */
 const TERMS = [
   { key: "guests", label: "guests", kind: "real" as const },
   { key: "visitsPerGuest", label: "visits per guest", kind: "real" as const },
   { key: "itemsPerVisit", label: "items per visit", kind: "real" as const },
-  { key: "pricePerItem", label: "price per item", kind: "price" as const },
+  { key: "pricePerItem", label: "average item price", kind: "price" as const },
 ];
+
+/**
+ * An operand pair printed at whatever precision makes the movement visible.
+ *
+ * Fixed two-decimal formatting rendered **"1.95 → 1.95"** under a label reading
+ * "More items per visit" — a panel stating a direction its own figures do not
+ * show, against this file's own rule that each label states the direction the
+ * factor actually moved. The underlying move is 1.9514 to 1.9523, which is real
+ * and worth $322 of the quarter, and the formatter was hiding it.
+ *
+ * So precision is chosen rather than fixed: start at two decimals and widen
+ * until the two sides differ, up to the four the extract actually stores. A
+ * pair that is still identical at four decimals genuinely did not move, and
+ * prints as an equals sign instead of an arrow.
+ */
+function operandPair(a: number, b: number, isCount: boolean): string {
+  if (isCount) return `${count(a)} → ${count(b)}`;
+  for (const dp of [2, 3, 4]) {
+    if (a.toFixed(dp) !== b.toFixed(dp)) return `${a.toFixed(dp)} → ${b.toFixed(dp)}`;
+  }
+  return `${a.toFixed(2)} = ${b.toFixed(2)}`;
+}
 
 /**
  * Labels state the *direction the factor moved*, never the direction its name
@@ -695,18 +759,97 @@ export function decompose(from: DecompositionRow, to: DecompositionRow): Decompo
   const values = shapley(a, b);
   const terms = TERMS.map((t, i) => {
     const moved = b[i] - a[i];
-    const dir = moved >= 0 ? "More" : "Fewer";
-    const priceDir = moved >= 0 ? "Higher" : "Lower";
-    const label = t.kind === "price" ? `${priceDir} ${t.label}` : `${dir} ${t.label}`;
-    const fmt = (v: number) => (t.key === "guests" ? count(v) : v.toFixed(2));
-    return { ...t, label, value: values[i], operand: `${fmt(a[i])} → ${fmt(b[i])}` };
+    // A factor that did not move gets a neutral label. "More" against an
+    // unchanged figure is the OV-7 defect in words rather than in formatting.
+    const dir = moved === 0 ? "Unchanged" : moved > 0 ? "More" : "Fewer";
+    const priceDir = moved === 0 ? "Unchanged" : moved > 0 ? "Higher" : "Lower";
+    const label =
+      moved === 0
+        ? `${t.label} unchanged`
+        : t.kind === "price"
+          ? `${priceDir} ${t.label}`
+          : `${dir} ${t.label}`;
+    return {
+      ...t,
+      label,
+      value: values[i],
+      operand: operandPair(a[i], b[i], t.key === "guests"),
+    };
   });
+
+  /**
+   * ── The parts sum to the modelled change, not to the recorded one (C-2) ──
+   *
+   * The caption under this table has always claimed the parts sum to the whole
+   * exactly. **They did not.** The four Shapley terms come to +$8,669.48 while
+   * the headline read +$8,651.47 — $18.01 out, under a sentence asserting there
+   * is no residual, with two of the four parts shown to the cent.
+   *
+   * Nothing is wrong with the decomposition. Shapley on a multiplicative model
+   * sums exactly to the difference of the products, and it does here to the
+   * cent. What it does *not* sum to is `to.revenue − from.revenue`, because the
+   * four factors are stored rounded to four decimals and their product is
+   * therefore not quite the recorded revenue: $694,164.34 modelled against
+   * $694,163.65 recorded at the start, $702,833.82 against $702,815.12 at the
+   * end.
+   *
+   * So the headline becomes the **modelled** change, which is the quantity the
+   * four bars actually explain, and the gap to the recorded change is published
+   * beside it rather than absorbed silently into whichever bar is largest. An
+   * exactness claim a reader cannot check spends trust it has not earned; one
+   * they can check, and which reconciles, earns it back.
+   */
+  const modelledChange = values.reduce((s, v) => s + v, 0);
+  const recordedChange = to.revenue - from.revenue;
+
   return {
     from, to,
-    revenueChange: to.revenue - from.revenue,
+    revenueChange: modelledChange,
+    recordedChange,
+    /** Recorded minus modelled. Rounding in the stored factors, nothing else. */
+    reconciliation: recordedChange - modelledChange,
     terms,
     real: terms.filter((t) => t.kind === "real").reduce((s, t) => s + t.value, 0),
     price: terms.filter((t) => t.kind === "price").reduce((s, t) => s + t.value, 0),
+  };
+}
+
+/**
+ * What the cohort window actually spans. **C-5.**
+ *
+ * ── Two different numbers were being printed as one ────────────────────────
+ *
+ * The snapshot stores `days: 607`, and it is correct for what it measures: the
+ * span from the **first cohort's month to the last cohort's month**, 1 November
+ * 2024 to 1 July 2026. Twenty-one monthly intakes fall in that span, which is
+ * also correct.
+ *
+ * The page then printed 607 as the length of the **observation window** — "these
+ * identify people by loyalty scan over 607 days" — and that is a different
+ * quantity. Members who joined in July 2026 are observed to the end of July, so
+ * the window runs to 31 July 2026: **638 days**, not 607. The render rule
+ * compared the wrong one of the two against its threshold as well.
+ *
+ * Both figures are real and both are now named for what they are. Nothing about
+ * the data changes; what changes is that the sentence and the arithmetic agree.
+ */
+export function cohortWindow(c: Cohorts): {
+  /** First intake month to last intake month. The snapshot's own `days`. */
+  intakeSpanDays: number;
+  /** First intake month to the close of the last intake's month. */
+  observationDays: number;
+  cohortCount: number;
+} {
+  const start = new Date(`${c.window.start}T00:00:00Z`);
+  const lastMonth = new Date(`${c.window.end}T00:00:00Z`);
+  // The close of the month the last cohort joined in.
+  const close = new Date(Date.UTC(lastMonth.getUTCFullYear(), lastMonth.getUTCMonth() + 1, 0));
+  const day = 86_400_000;
+  return {
+    intakeSpanDays: Math.round((lastMonth.getTime() - start.getTime()) / day),
+    // Inclusive of both endpoints: a window covering one day is one day long.
+    observationDays: Math.round((close.getTime() - start.getTime()) / day) + 1,
+    cohortCount: c.cohorts.length,
   };
 }
 

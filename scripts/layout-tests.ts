@@ -124,26 +124,147 @@ async function main() {
         !html.includes("What this report is standing on"),
         "the coverage report is back in the middle of the page");
       // The check badge is what survives the panel: it states the count and it
-      // is a link, so the evidence is still one click from the page that
-      // dropped the long version. A static span reading "5 checks pass" is what
-      // v1 shipped, so the assertion is on the anchor, not on the words.
-      check("the check badge is still on Overview and is a link",
-        /<a[^>]*>(?:(?!<\/a>)[\s\S])*checks (?:pass|failing)/.test(html),
-        "the badge is absent or is no longer a link to the evidence");
+      // opens the evidence, so the register is still one click from the page
+      // that dropped the long version. A static span reading "5 checks pass" is
+      // what v1 shipped, so the assertion is on the control, not on the words.
+      //
+      // **It is a button now, not a link, and that is the C-4 fix.** As a link
+      // it pointed at `#checks`, whose host section had been deleted from this
+      // page — so this assertion passed for several builds while the badge went
+      // nowhere at all. Matching on `<a>` is precisely what let that through.
+      // The general anchor-resolves check below is the half that would have
+      // caught it, and it runs on every page rather than only this one.
+      check("the check badge is still on Overview and opens the register",
+        /<button[^>]*aria-expanded[^>]*>(?:(?!<\/button>)[\s\S])*checks (?:pass|failing)/.test(html),
+        "the badge is absent or no longer opens the evidence");
 
       // ── The two findings are open, not folded ────────────────────────────
       //
       // `Disclosure` keeps its result line visible either way, so this is not a
       // correctness rule — it is the editorial one that replaced the trust
       // panel. A finding behind a click is a finding nobody reads.
-      for (const finding of ["Where the change came from", "What members and everyone else actually buy"]) {
-        const i = html.indexOf(finding);
-        if (i < 0) continue;
-        const block = html.slice(i, i + 2000);
-        check(`"${finding}" is open by default`,
-          /<details[^>]*\sopen/.test(block),
-          "it renders folded");
+      // "Where the change came from" is still a `Disclosure`, so its fold must
+      // be open. The basket block stopped being one entirely (OV-9): it is the
+      // most immediately actionable thing on the page and it was last on the
+      // longest page in the build, so it moved up and became a plain card.
+      // Asserting `<details open>` on it would now assert the old shape back.
+      {
+        const i = html.indexOf("Where the change came from");
+        if (i >= 0) {
+          check(`"Where the change came from" is open by default`,
+            /<details[^>]*\sopen/.test(html.slice(i, i + 2000)),
+            "it renders folded");
+        }
       }
+      {
+        const heading = "What members and everyone else actually buy";
+        const i = html.indexOf(heading);
+        if (i >= 0) {
+          const block = html.slice(i, i + 4000);
+          // Not behind any fold at all — open or otherwise. A closed `<details>`
+          // opening between the heading and the table would hide the finding,
+          // which is the thing this rule has always been about.
+          check(`"${heading}" is not behind a fold`,
+            !/<details(?![^>]*\sopen)/.test(block),
+            "a closed fold sits between the heading and the table");
+          // And the finding itself is on the page, not only its title.
+          check(`"${heading}" states its finding on the face`,
+            /the rate everybody else does/.test(block),
+            "the headline sentence is missing");
+        }
+      }
+    }
+
+    // ── The drawer pattern, and the rule that governs what may go in it ───
+    //
+    // Task 0 of the Build 5 review: five panels independently asked for their
+    // explanatory prose to move behind a button, and the value of that is
+    // entirely in it being **one** pattern rather than five. So the affordance
+    // is asserted to exist and to be the same object everywhere — a trigger
+    // that names itself, in a panel header.
+    //
+    // The rule the drawer exists under is asserted separately and negatively,
+    // below: the sentences that change how a figure must be read stay on the
+    // face. Those are the ones a roomy container invites an author to sweep
+    // away, and each of them has a history of nearly being swept.
+    if (isReport && !isPlaceholder) {
+      const triggers = [...html.matchAll(/data-explain-drawer[^>]*/g)].map((m) => m[0]);
+      if (triggers.length) {
+        check("every explain drawer names itself for a screen reader",
+          triggers.every((t) => /aria-label="[^"]+"/.test(t)),
+          "a drawer trigger has no aria-label");
+      }
+    }
+
+    if (isOverview) {
+      // Overruled on 17 August and again in Build 5: the size of the selection
+      // share may move into a tooltip, the fact of it may not. A screenshot of
+      // a KPI card travels without its caption.
+      //
+      // Scoped to the tile that makes the claim. Where the within-person
+      // estimate cannot be made — Meat Flour Wine — the tile refuses instead
+      // and carries a longer statement in place of the figure, which is a
+      // different and stronger caveat rather than a missing one.
+      if (html.includes("A member is associated with")) {
+        check("the selection caveat is on the face of the KPI row",
+          html.includes("Association, not effect"),
+          "the tile has stopped saying the gap is association");
+      }
+      // OV-6 reduced this block by moving the uplift band and its take-up
+      // working into a drawer. What could not move with it is the label that
+      // stops the trade at stake being read as uplift.
+      check("the opportunity still says trade at stake is not uplift",
+        html.includes("This is trade at stake, not uplift"),
+        "the distinction has been dropped");
+      // C-2: the exactness claim is now checkable, so it must also be stated
+      // against the quantity it is actually true of.
+      const g = html.indexOf("Where the change came from");
+      if (g >= 0 && html.includes("Modelled change")) {
+        check("the decomposition reconciles modelled against recorded revenue",
+          /rounding in the\s*(?:<!-- -->)?\s*four stored factors|rounding in the four stored factors/.test(
+            html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
+          ),
+          "the sum claim no longer says what the difference is");
+      }
+    }
+
+    if (name.endsWith("/behaviour")) {
+      // BH-7. The chart is liked precisely for the thing it does not prove, so
+      // the correction cannot follow the method into the drawer.
+      check("the retention refusal is still on the face",
+        html.includes("What we cannot yet tell you"),
+        "the refusal has moved behind a click");
+      check("the burn-down still corrects the growth reading",
+        html.replace(/<[^>]+>/g, "").includes("enrolment outrunning churn"),
+        "the stack now reads as retention improving");
+      // The clock-change banner is the reason the wall exists.
+      check("the member-tier wall still declares the clock change",
+        html.includes("runs on a different clock"),
+        "the wall no longer says the population changed");
+    }
+
+    // ── Every in-page anchor resolves to something (C-4) ──────────────────
+    //
+    // The header chip read "27 checks pass · 1 to review" and linked to
+    // `#checks`. Nothing on any page carried that id: the anchor's host section
+    // had been removed from Overview and was rendered nowhere at all. The badge
+    // was the first thing a technical buyer clicks, it is the build's own claim
+    // to rigour, and it went nowhere for several builds — while a layout test
+    // asserting the badge "is a link" passed the whole time.
+    //
+    // A claim that cannot be opened is a claim. This asserts the general rule
+    // rather than the one instance, because the specific failure was not that
+    // *this* anchor broke — it was that nothing was watching any of them.
+    {
+      const targets = new Set(
+        [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]),
+      );
+      const dead = [...html.matchAll(/href="#([^"]+)"/g)]
+        .map((m) => m[1])
+        .filter((t) => t !== "" && t !== "top" && !targets.has(t));
+      check("every in-page anchor resolves to an element on the page",
+        dead.length === 0,
+        dead.length ? `${[...new Set(dead)].map((d) => `#${d}`).join(", ")} points at nothing` : "");
     }
 
     // ── A refusal is stated with its reason, and never left blank ──────────

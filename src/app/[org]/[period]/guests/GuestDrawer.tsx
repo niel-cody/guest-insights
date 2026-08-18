@@ -216,7 +216,7 @@ function WhoTheyAre({ g, org, items }: { g: Guest; org: Org; items: Items | null
       "Scanned",
       g.tier === "member"
         ? `${count(g.scannedOrders)} of ${count(g.orders)} orders`
-        : "never — recognised by card only",
+        : "never — recognised by payment card only",
     ],
   ];
 

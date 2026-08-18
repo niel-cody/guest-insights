@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { EmptyState } from "@/components/ui/Primitives";
 import { WEEKDAYS } from "@/lib/weekdays";
 import { SEGMENT_COLOUR, SEGMENT_LABEL, count, money, pct } from "@/lib/metrics";
@@ -67,11 +70,29 @@ export function SegmentBasket({ rows, windowLabel }: { rows: Bucket[]; windowLab
       available: true,
     },
     {
-      key: "atv",
-      title: "Average transaction value",
-      note: "What the till sees. Diverges from spend per visit wherever a guest buys more than once a day.",
-      value: (r: Bucket) => r.spend / (r.orders ?? 1),
-      format: (v: number) => money(v),
+      /**
+       * ── BH-5: average transaction value became orders per visit ──────────
+       *
+       * The two panels were near-duplicates and the note that spotted it was
+       * right. Spend per visit is $13.40 for Regulars and average transaction
+       * value is $11.69: **the same ranking, the same story**, differing only
+       * by how often a guest buys twice in a day. Two of three panels telling
+       * one story is a third of the block spent saying nothing new.
+       *
+       * So the demoted panel is replaced by **the quantity the two differed
+       * by**. Orders per visit is not shown anywhere else in the product, it is
+       * genuinely interesting — it says which segments come back twice in a day
+       * rather than once — and average transaction value is not lost, because
+       * spend per visit divided by this panel reproduces it exactly.
+       *
+       * Spend per visit keeps the headline slot of the pair, because a visit is
+       * the unit an operator can influence. A till transaction is not.
+       */
+      key: "ordersPerVisit",
+      title: "Orders per visit",
+      note: "How often a visit is more than one transaction. Spend per visit divided by this is the average transaction value.",
+      value: (r: Bucket) => (r.orders ?? 0) / r.visits,
+      format: (v: number) => v.toFixed(2),
       available: hasOrders,
     },
     {
@@ -133,7 +154,7 @@ export function SegmentBasket({ rows, windowLabel }: { rows: Bucket[]; windowLab
       {!hasOrders && (
         <EmptyState
           tone="warning"
-          title="Average transaction value and items per visit are not drawn"
+          title="Orders per visit and items per visit are not drawn"
           body={
             <>
               <p>
@@ -164,6 +185,19 @@ export function SegmentBasket({ rows, windowLabel }: { rows: Bucket[]; windowLab
 }
 
 /**
+ * A segment too small to shade. **BH-6.**
+ *
+ * The Lapsed row read `0 / 0 / 0 / 0 / 46 / 54 / 0` — 36 people spread across
+ * two days of the week, rendered at the same visual weight as a row carrying
+ * tens of thousands of visits. Shading says "this is a pattern"; two days out of
+ * seven from three dozen people is not a pattern, it is what happens when a tiny
+ * denominator meets a percentage. The row is listed and its shape is withheld,
+ * which is the same treatment every other under-powered figure in this build
+ * gets.
+ */
+const MIN_VISITS_TO_SHADE = 400;
+
+/**
  * When each segment comes — day of week, and time of day.
  *
  * ── This is customer analysis, which is why it survives when the trading
@@ -177,25 +211,54 @@ export function SegmentBasket({ rows, windowLabel }: { rows: Bucket[]; windowLab
  * passing trade do not come at the same time**, and any shift you plan around
  * one of them is being planned against the other.
  *
+ * ── The unit is on the face now, and it is switchable (BH-6) ───────────────
+ *
+ * The note that found this was exact: *"it's not 100% clear whether this is
+ * visits or revenue."* It was visits, the subtitle said "cut by who the guest is
+ * rather than by how busy the venue was", and that answers a different question
+ * than the one being asked. A grid of bare percentages with no unit is a grid a
+ * reader has to guess at, and half of them will guess revenue.
+ *
+ * So the unit is named in each table's own heading, and it is a **toggle rather
+ * than a second table** — same grid, one control, so the comparison happens in
+ * place. Two tables side by side is how a reader ends up comparing a cell in one
+ * against a cell in the other and getting a number that means nothing.
+ *
  * ── Shares down a segment, never across ────────────────────────────────────
  *
- * Each row sums to 100% of that segment's own visits. Absolute counts would rank
- * every row by segment size and say nothing but "Regulars visit a lot", which is
- * already on the page three times. The comparison the reader is invited to make
- * is between the *shapes* of two rows.
+ * Each row sums to 100% of that segment's own visits (or revenue). Absolute
+ * counts would rank every row by segment size and say nothing but "Regulars
+ * visit a lot", which is already on the page three times. The comparison the
+ * reader is invited to make is between the *shapes* of two rows.
  */
 export function SegmentTiming({
-  rows, dayparts, windowLabel,
+  rows, dayparts,
 }: {
   rows: SegmentBehaviourRow[];
   dayparts: readonly Daypart[];
-  windowLabel: string;
 }) {
+  const [metric, setMetric] = useState<"visits" | "revenue">("visits");
+  const weightOf = (r: SegmentBehaviourRow) => (metric === "visits" ? r.visits : r.spend);
+  const unit = metric === "visits" ? "visits" : "revenue";
+
   const segments = [...new Set(rows.map((r) => r.segment))].sort(
     (a, b) =>
       rows.filter((r) => r.segment === b).reduce((x, r) => x + r.visits, 0) -
       rows.filter((r) => r.segment === a).reduce((x, r) => x + r.visits, 0),
   );
+
+  /**
+   * Which segments are shaded, decided once for both tables.
+   *
+   * The two tables used to make this decision independently — the daypart view
+   * filtered its columns and the day-of-week view did not — so they could show
+   * different rows and a reader comparing them was comparing two populations.
+   * The floor is on visits in both, whichever metric is displayed, because how
+   * much evidence a row rests on does not change when you switch to money.
+   */
+  const visitsOf = (seg: string) =>
+    rows.filter((r) => r.segment === seg).reduce((a, r) => a + r.visits, 0);
+  const thin = new Set(segments.filter((seg) => visitsOf(seg) < MIN_VISITS_TO_SHADE));
 
   // A daypart the business barely trades in is not a finding about a segment.
   const daypartTotals = new Map<string, number>();
@@ -206,13 +269,13 @@ export function SegmentTiming({
   const views = [
     {
       key: "dow" as const,
-      title: "Which days they come",
+      title: `Which days they come, by ${unit}`,
       columns: WEEKDAYS.map((d) => ({ key: String(d.dow), label: d.label, long: d.long })),
       bucket: (r: SegmentBehaviourRow) => String(r.dow),
     },
     {
       key: "daypart" as const,
-      title: "What time they come",
+      title: `What time they come, by ${unit}`,
       columns: carrying.map((d) => ({ key: d.key, label: d.label, long: d.label })),
       bucket: (r: SegmentBehaviourRow) => r.daypart,
     },
@@ -220,27 +283,64 @@ export function SegmentTiming({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* The control, above both tables because it governs both. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-medium tracking-wide text-ink-muted uppercase">Measured in</span>
+        <div role="group" aria-label="Measured in" className="flex rounded-lg border border-line p-0.5">
+          {([
+            { key: "visits" as const, label: "Visits" },
+            { key: "revenue" as const, label: "Revenue" },
+          ]).map((o) => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setMetric(o.key)}
+              aria-pressed={metric === o.key}
+              className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                metric === o.key ? "bg-surface-hover text-ink" : "text-ink-secondary hover:text-ink"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-[12px] text-ink-muted">
+          every cell is a share of that segment&apos;s own {unit}
+        </span>
+      </div>
+
       {views.map((view) => {
-        // share[segment][columnKey] of that segment's own visits.
+        // share[segment][columnKey] of that segment's own visits or revenue.
         const table = segments.map((seg) => {
           const mine = rows.filter((r) => r.segment === seg);
-          const total = mine.reduce((a, r) => a + r.visits, 0) || 1;
+          const total = mine.reduce((a, r) => a + weightOf(r), 0) || 1;
           const cells = view.columns.map((c) => ({
             key: c.key,
             label: c.label,
             long: c.long,
-            visits: mine.filter((r) => view.bucket(r) === c.key).reduce((a, r) => a + r.visits, 0),
+            weight: mine.filter((r) => view.bucket(r) === c.key).reduce((a, r) => a + weightOf(r), 0),
           }));
-          return { seg, total, cells: cells.map((c) => ({ ...c, share: c.visits / total })) };
+          return {
+            seg,
+            total,
+            thin: thin.has(seg),
+            visits: visitsOf(seg),
+            cells: cells.map((c) => ({ ...c, share: c.weight / total })),
+          };
         });
-        const max = Math.max(...table.flatMap((t) => t.cells.map((c) => c.share)), 0.01);
+        // The scale is set by the rows that are actually shaded, so one
+        // under-powered row cannot flatten every other row on the table.
+        const max = Math.max(
+          ...table.filter((t) => !t.thin).flatMap((t) => t.cells.map((c) => c.share)),
+          0.01,
+        );
 
         return (
           <figure key={view.key} className="m-0">
             <figcaption className="mb-2">
               <h4 className="text-[13px] font-semibold text-ink">{view.title}</h4>
               <p className="mt-0.5 max-w-[95ch] text-[11px] leading-relaxed text-ink-muted">
-                Each row is one segment&apos;s own visits, split across the week and totalling 100%. Read
+                Each row is one segment&apos;s own {unit}, split across the week and totalling 100%. Read
                 across a row for that segment&apos;s shape;{" "}
                 <strong className="text-ink-secondary">do not read down a column</strong>, because the rows
                 are different sizes.
@@ -273,24 +373,36 @@ export function SegmentTiming({
                           {SEGMENT_LABEL[row.seg] ?? row.seg}
                         </span>
                       </th>
-                      {row.cells.map((c) => (
-                        <td key={c.key} className="p-0">
-                          <div
-                            className="flex h-7 items-center justify-center rounded-[3px]"
-                            style={{
-                              background:
-                                c.visits === 0
-                                  ? "transparent"
-                                  : `color-mix(in srgb, ${SEGMENT_COLOUR[row.seg]} ${(0.1 + (c.share / max) * 0.9) * 100}%, transparent)`,
-                              border: c.visits === 0 ? "1px dashed var(--line)" : "1px solid transparent",
-                            }}
-                            title={`${SEGMENT_LABEL[row.seg] ?? row.seg} · ${c.long} · ${pct(c.share, 1)} of their visits (${count(c.visits)})`}
-                            aria-label={`${SEGMENT_LABEL[row.seg] ?? row.seg}, ${c.long}: ${pct(c.share, 1)} of their visits`}
-                          >
-                            <span className="tnum text-[10px] text-ink">{pct(c.share, 0).replace("%", "")}</span>
-                          </div>
+                      {row.thin ? (
+                        <td
+                          colSpan={view.columns.length}
+                          className="px-2 text-[11px] text-ink-muted"
+                        >
+                          {count(row.visits)} visits — too few to read a weekly shape from, so none is
+                          drawn
                         </td>
-                      ))}
+                      ) : (
+                        row.cells.map((c) => (
+                          <td key={c.key} className="p-0">
+                            <div
+                              className="flex h-7 items-center justify-center rounded-[3px]"
+                              style={{
+                                background:
+                                  c.weight === 0
+                                    ? "transparent"
+                                    : `color-mix(in srgb, ${SEGMENT_COLOUR[row.seg]} ${(0.1 + Math.min(c.share / max, 1) * 0.9) * 100}%, transparent)`,
+                                border: c.weight === 0 ? "1px dashed var(--line)" : "1px solid transparent",
+                              }}
+                              title={`${SEGMENT_LABEL[row.seg] ?? row.seg} · ${c.long} · ${pct(c.share, 1)} of their ${unit} (${
+                                metric === "visits" ? count(c.weight) : money(c.weight)
+                              })`}
+                              aria-label={`${SEGMENT_LABEL[row.seg] ?? row.seg}, ${c.long}: ${pct(c.share, 1)} of their ${unit}`}
+                            >
+                              <span className="tnum text-[10px] text-ink">{pct(c.share, 0).replace("%", "")}</span>
+                            </div>
+                          </td>
+                        ))
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -299,14 +411,6 @@ export function SegmentTiming({
           </figure>
         );
       })}
-
-      <p className="max-w-[100ch] text-[12px] leading-relaxed text-ink-muted">
-        Whole population, enrolled people only, {windowLabel}. Both axes are venue-local: day of week and
-        daypart come from the localised trading timestamp, never from UTC. Shading is on a single scale
-        across both tables, so a segment with a flat week looks flat rather than being normalised into
-        looking peaked. Dayparts carrying under 0.5% of visits are not shown — a period the business does
-        not trade in is not a fact about a segment.
-      </p>
     </div>
   );
 }

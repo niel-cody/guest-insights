@@ -2,12 +2,161 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.5.0`** — the version and commit render in the app header on every
+**Current: `v0.6.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.6.0 — the review pass on Overview and Behaviour
+
+Fifteen sticky notes from the Build 5 whiteboard, blended with the eleven
+arithmetic defects the Operator Council found on 17 and 18 August. Guests is
+deliberately out of scope. Six of the eleven defects sat on these two pages and
+all six are closed here.
+
+### The vocabulary changed, and every screen inherits it
+
+**"Card" meant payment card everywhere in this build, and a loyalty member also
+carries a card.** So "card guest" read as "loyalty card guest" to exactly the
+audience the product is for, and "known versus unknown members" was the confusion
+that came back from demos — the only item on the board sourced from real people
+rather than from the team or the council.
+
+| Concept | Was | Is now |
+|---|---|---|
+| Anyone the product can recognise again | Known guest | **Guest** |
+| Recognised by payment card, never enrolled | Card | **Recognised** |
+| Enrolled in the loyalty programme | Member | **Member**, unchanged |
+| Identity by payment instrument | Card tier | **Payment identity** |
+| Identity by loyalty scan | Member tier | **Loyalty identity** |
+
+Declared once in `lib/lexicon.ts` and read from there, because the words are on
+the nav, both header chips, the Customers filter, the tier control, four KPI
+cards, the segment definitions and the guest grid's Tier column — and a rename
+done nine times is a rename that misses two.
+
+**Internal keys did not change.** `tier === "card"` is still `"card"` in the URL
+contract, the extract and every snapshot on disk. A data migration to fix a
+labelling problem would invalidate every saved link for no gain a reader can see.
+
+### One drawer pattern, replacing five requests for the same thing
+
+Five notes independently asked for explanatory prose to move off the panel face
+and into a side drawer. Built once as `ExplainDrawer`, with two sections — *what
+this is showing* and *how it is made* — and one rule that decides what may go in:
+
+> **Anything that changes how a number should be read stays visible. Anything
+> that explains how the number was built moves into the drawer.**
+
+So refusals, confidence intervals, selection warnings and population constraints
+never move. A drawer is roomy, and a roomy container invites a tired author to
+sweep a caveat into it.
+
+Applied to: the nesting block, the segment boundary rules ("Explain segments"),
+the opportunity's take-up working, the basket index method, the trading-shape
+provenance, the daypart construction, the segment-timing method, and the cohort
+reconciliation and render rule.
+
+### Corrections
+
+- **The Shapley parts did not sum to the whole**, under a caption claiming they
+  did. The four terms came to **+$8,669.48** against a headline of **+$8,651.47**
+  — $18.01 out, with two parts shown to the cent. Nothing was wrong with the
+  decomposition: it sums exactly to the difference of the *factor products*, and
+  the recorded revenue change is a different quantity because the four factors are
+  stored rounded to four decimals. The headline is now the modelled change, and
+  the gap to recorded revenue is published beside it.
+- **It is drawn as an actual waterfall now.** Four bars all anchored at zero meant
+  a reader could not check the sum claim by eye. The bars step, and a fifth column
+  carries the total.
+- **"Price per item" became "average item price."** Revenue over items moves when
+  you raise a price and moves identically when the mix shifts toward pricier
+  items. The old name asserted the first. This build cannot separate the two — it
+  needs item-level price history the extract does not carry — and now says so.
+- **"More items per visit" read `1.95 → 1.95`**, a label stating a direction its
+  own digits did not show. Operand precision is chosen rather than fixed.
+- **The check badge linked to `#checks`, which existed on no page.** The anchor's
+  host section was removed from Overview and is rendered nowhere. It was the first
+  thing a technical buyer clicks, and it went nowhere for several builds while a
+  layout test asserting the badge "is a link" passed the whole time. The register
+  now travels with the chip. **A new test asserts every in-page anchor resolves**,
+  because the failure was not that this anchor broke — it was that nothing was
+  watching any of them.
+- **The previous-period gap was off by one.** Apr 2025 against May 2026 reported
+  13 missing months; the missing months are May 2025 to Apr 2026, which is **12**.
+  It appeared on the segment grid and in the density-change note.
+- **The cohort window carried two different numbers as one.** 607 days is the span
+  from the first intake month to the last; the *observation* window runs to the
+  close of that month and is **638 days**. The render rule was tested against the
+  wrong one.
+- **"5 periods this business trades in" sat above a table disclosing 8.** Both
+  figures are now in the sentence.
+- **Three member-order figures appeared with nothing reconciling them** — 62,107
+  orders, 52,844 bridged, 55,070 visits, 17% apart. They are nested in the drawer,
+  and the daypart table now carries member, recognised and unidentified order
+  counts that sum to the row, so nobody has to reverse one out of a rounded share.
+- **The basket footnote described ten groups the table did not render.** They are
+  rendered, with counts and without an index.
+- **The repeat-rate panel published a corrected figure with the method nowhere.**
+  The correction moves it five points against the uncorrected rate the segment
+  table on the same page implies. Both figures are on the face now.
+
+### Overview
+
+- **The KPI row is uniform.** The 97% selection share moved into the tooltip; the
+  sentence "Association, not effect — see below" stays on the face, because it is
+  what stops the 4.9× being misused and a screenshot travels without its caption.
+- **One control for one concept.** Overview discarded its `searchParams`, so the
+  filter bar's `Customers` did nothing on this page while the grid's own `TIER`
+  control worked. The grid's control is gone and both the grid and the composition
+  bars beneath it now follow the bar.
+- **"Are your members worth more?" gets a verdict line** above the six panels,
+  stating the conclusion they support. The panels stay at equal weight —
+  demoting the two that disagree would answer the question the block exists to
+  refuse to answer.
+- **"The opportunity" is about a third of its former length.** The uplift band
+  moved into the drawer *with its confidence interval and take-up working
+  attached*, rather than stranding a range away from its estimate.
+- **"Where the change came from" has a second view**: the four factors indexed
+  and plotted over the months inside the window. It does not reach back to the
+  earlier readable period, because the months between failed card capture and a
+  line across them would be plotting the outage.
+- **The basket block moved up and out of its fold.** It is the most immediately
+  actionable thing on the page and it was last on the longest page in the build.
+
+### Behaviour
+
+- **The daypart table says which population it covers** and splits orders by
+  member, recognised and unidentified.
+- **"What each segment actually buys" replaced a duplicate panel.** Spend per
+  visit and average transaction value told the same story with the same ranking.
+  The demoted one is now **orders per visit** — the quantity the two differed by,
+  shown nowhere else, and the number that says which segments come back twice in
+  a day.
+- **"When each segment comes" says whether it is visits or revenue**, and it is a
+  toggle rather than a second table. The Lapsed row — 36 people across two days —
+  is listed unshaded rather than drawn as a pattern.
+- **The cross-venue section has a single-venue state.** Four blocks there are
+  structurally empty at one venue, which is the common case for the real product
+  even though it is not the case in this dataset.
+- **The cross-venue bars are Oolio purple.** They were the only orange-ramp chart
+  on either page, reading an identity-tier token for something that is not an
+  identity fact.
+- **The retention section lost its mountain of text** and kept every correction.
+  The clock-change banner, the refusal, and "that growth is enrolment outrunning
+  churn, not retention improving" all stay on the face — the chart is liked
+  precisely for the thing it does not prove.
+
+### Decisions recorded
+
+- **Segments, not cohorts.** A cohort here is an intake month nobody ever leaves;
+  these six buckets are the opposite by design, and both appear on one page.
+- The nesting block and the commentary sentence were both kept; only the method
+  moved.
 
 ---
 

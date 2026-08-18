@@ -302,7 +302,7 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   const monthsInWindow = coverage.monthly.filter((m) => m.month >= win.start && m.month <= win.end);
   checks.push(ok(
     "window.cardMonthsOnly",
-    "Every month rendered is a month the card tier can be trusted in.",
+    "Every month rendered is a month the payment identity can be trusted in.",
     "`Card months available 12 of 25`, where eight pre-dated both venues trading and carried zero card revenue.",
     monthsInWindow.length === coverage.monthly.length && coverage.monthly.every((m) => org.cardTier.months.includes(m.month)),
     `${coverage.monthly.length} months rendered · ${org.cardTier.months.length} admitted · window ${win.start} → ${win.end}`,

@@ -1,3 +1,4 @@
+import { InfoButton } from "@/components/ui/InfoButton";
 import { count, delta, money, pct, ratio } from "@/lib/metrics";
 import type { ValueClaim } from "@/lib/metrics";
 
@@ -80,8 +81,26 @@ function Panel({ claim }: { claim: ValueClaim }) {
 
   return (
     <div className="bg-surface-raised px-4 py-3.5">
-      <h3 className={`text-[13px] font-semibold ${refused ? "text-ink-secondary" : "text-ink"}`}>
-        {claim.question}
+      {/* ── The method, behind a button (C-3) ─────────────────────────────
+          `note` carries how a panel's figure is constructed and **was rendered
+          nowhere**. On most panels that was a small loss. On the repeat-rate
+          panel it was a real defect: that figure is corrected, the correction
+          moves it five points against the uncorrected rate the segment table on
+          the same page implies, and the reader was given no way to find out why
+          the two disagree.
+
+          It is a button and not open prose because it is method — read once,
+          then never again — and six panels each carrying three lines of it is
+          the wall this block was trimmed to stop being. What went on the face
+          instead is the pair of figures and the direction, in `basis`, because
+          those are part of the figure. */}
+      <h3 className={`flex items-start gap-1.5 text-[13px] font-semibold ${refused ? "text-ink-secondary" : "text-ink"}`}>
+        <span>{claim.question}</span>
+        {claim.note && (
+          <span className="mt-0.5">
+            <InfoButton label={`How "${claim.question}" is measured`}>{claim.note}</InfoButton>
+          </span>
+        )}
       </h3>
 
       {refused ? (

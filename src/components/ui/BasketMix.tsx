@@ -96,6 +96,42 @@ export function BasketMix({
               </tr>
             );
           })}
+
+          {/* ── The suppressed groups, actually shown (OV-9) ─────────────────
+              The footnote below has always said these are "shown without an
+              index rather than with a confident one". **They were not shown at
+              all.** The table drew only the measured rows, so a reader was told
+              about ten groups they could not see, under a table of eight.
+
+              A sentence that describes a thing the page does not do is worse
+              than either doing it or not claiming it, so they are drawn: their
+              counts are real and worth reading, and only the ratio is withheld.
+              The withheld ratio says so in words, which is the same treatment
+              every other refusal in this build gets. */}
+          {suppressed.length > 0 && (
+            <>
+              <tr className="border-t-2 border-t-line-strong">
+                <td colSpan={4} className="pt-3 pb-1 text-[11px] tracking-wide text-ink-muted uppercase">
+                  Below the evidence floor — counts shown, index withheld
+                </td>
+              </tr>
+              {suppressed.map((r) => (
+                <tr key={r.key} className="border-b border-line last:border-b-0">
+                  <th scope="row" className="py-2 pr-3 text-left font-medium text-ink-secondary">
+                    {r.label}
+                    <span className="block text-[11px] font-normal text-ink-muted">
+                      {count(r.lines)} lines · {money(r.memberRevenue + r.nonMemberRevenue)}
+                    </span>
+                  </th>
+                  <td className="tnum px-3 py-2 text-right text-ink-secondary">{pct(r.memberShare, 1)}</td>
+                  <td className="tnum px-3 py-2 text-right text-ink-secondary">{pct(r.nonMemberShare, 1)}</td>
+                  <td className="py-2 pl-3 text-[12px] text-ink-muted">
+                    Not published — under {count(minLines)} lines on one side
+                  </td>
+                </tr>
+              ))}
+            </>
+          )}
         </tbody>
       </table>
 
@@ -110,9 +146,10 @@ export function BasketMix({
         Shares are of each side&apos;s own product lines, so a group does not index high merely because
         members buy more overall. {suppressed.length > 0 && (
           <>
-            {suppressed.length} group{suppressed.length === 1 ? "" : "s"} carry fewer than {count(minLines)}{" "}
-            lines on one side and are shown without an index rather than with a confident one — a ratio
-            computed on a handful of lines moves on the next fortnight.{" "}
+            The {suppressed.length} group{suppressed.length === 1 ? "" : "s"} in the lower block carry fewer
+            than {count(minLines)} lines on one side, so they are listed with their counts and{" "}
+            <strong className="font-medium text-ink-secondary">without an index</strong> rather than with a
+            confident one — a ratio computed on a handful of lines moves on the next fortnight.{" "}
           </>
         )}
         <strong className="font-medium text-ink-secondary">

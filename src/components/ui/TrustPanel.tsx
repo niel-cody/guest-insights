@@ -8,6 +8,7 @@ import type { Check } from "@/lib/checks";
 import type { CoverageState } from "@/lib/metrics";
 import { count, dayLabel, monthLabel, pct, attributionPct } from "@/lib/metrics";
 import type { Snapshot } from "@/lib/types";
+import { IDENTITY_LABEL } from "@/lib/lexicon";
 
 /**
  * §5.7. The trust panel — **a panel inside Overview, not a report.**
@@ -67,7 +68,7 @@ export function TrustPanel({
               "Which guests cross venues, and how much more they are worth than guests who had the same opportunity and did not.",
               "What enrolling somebody is actually worth, separated from what was already true of the people who enrol.",
               cohorts?.grading.renders
-                ? `On the member tier only, over ${count(cohorts.grading.days)} days: cohort retention, tenure and survival.`
+                ? `On the loyalty identity only, over ${count(cohorts.grading.days)} days: cohort retention, tenure and survival.`
                 : null,
             ]
               .filter(Boolean)
@@ -110,7 +111,7 @@ export function TrustPanel({
         </p>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <WindowCard
-            title="Card tier"
+            title={IDENTITY_LABEL.card}
             identity="payment card"
             window={`${dayLabel(org.window.start)} – ${dayLabel(org.window.end)}`}
             days={org.window.days}
@@ -121,7 +122,7 @@ export function TrustPanel({
             cannot="growth, trend, year-on-year, lifetime, churn"
           />
           <WindowCard
-            title="Member tier"
+            title={IDENTITY_LABEL.member}
             identity="loyalty scan"
             window={
               cohorts
@@ -150,7 +151,7 @@ export function TrustPanel({
           <strong className="text-ink-secondary">
             The next claim unlocks in November 2026
           </strong>
-          , when the member tier reaches 24 complete months and a trend claim becomes available.
+          , when the loyalty identity reaches 24 complete months and a trend claim becomes available.
         </p>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-muted">
           Selecting a range longer than a tier supports scopes the answer to the tier that does support it

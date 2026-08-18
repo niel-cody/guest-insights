@@ -2,13 +2,16 @@ import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Pill } from "@/components/ui/Primitives";
 import { InfoButton } from "@/components/ui/InfoButton";
+import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
+import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
+import { TIER_LABEL } from "@/lib/lexicon";
 import { IconArrow } from "@/components/shell/Icons";
 import { CohortLens } from "@/components/charts/CohortLens";
 import { SegmentBasket, SegmentTiming } from "@/components/charts/SegmentBehaviour";
 import { getPeriods, getAllOrgs, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import {
-  count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
+  cohortWindow, count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
   DAYPART_TRADE_FLOOR,
 } from "@/lib/metrics";
 
@@ -97,6 +100,13 @@ export default async function BehaviourPage({
     return row ? row.orders / prevTotalOrders : null;
   };
 
+  /**
+   * C-5. The snapshot's `days` is the span between the first and last intake
+   * months; the observation window runs to the close of the last intake's
+   * month and is a month longer. Both were being printed as the same number.
+   */
+  const cw = cohorts ? cohortWindow(cohorts) : null;
+
   const cv = network.crossVenue;
   const bands = [1, 2, 3, 4].map((b) => {
     const rows = cv.byBand.filter((r) => (b === 4 ? r.venueBand >= 4 : r.venueBand === b));
@@ -123,27 +133,63 @@ export default async function BehaviourPage({
           <Card
             title="What kind of business this trades as"
             subtitle={`Derived from ${count(totalOrders)} orders, ${win}. Not declared — read off the density distribution.`}
+            explain={
+              <ExplainDrawer
+                label="How the trading shape is derived"
+                title="What kind of business this trades as"
+                showing={
+                  <>
+                    <p>
+                      One statement rather than a label. It names which parts of the day carry the trade and
+                      how much, and whether the week is flat or weekend-shaped.
+                    </p>
+                    <p>
+                      It is a fact about the density distribution, not a classification —{" "}
+                      <strong>nothing here is a type this business has been assigned.</strong>
+                    </p>
+                  </>
+                }
+                made={
+                  <>
+                    {/* BH-3: the two grey lines under the grid move in here.
+                        They are provenance — why there is no archetype label —
+                        which is the definition of something that explains how a
+                        statement was built rather than how to read it. */}
+                    <p>
+                      <strong>Stated as a fact rather than as an archetype.</strong> A single label for{" "}
+                      {org.venues.length} venues across the states this estate trades in would describe none
+                      of them well, and this report&apos;s own outlier detection says they are not alike. It
+                      is useless at four mixed venues, useless at {org.venues.length}, and tautological at
+                      one.
+                    </p>
+                    <p>
+                      A confidence score used to sit beside it and was removed: it was undefined and
+                      self-contradicting, and no denominator on the page yielded the number it printed.
+                    </p>
+                    <p>
+                      <strong>Weekend share is a null result and is reported as one.</strong>{" "}
+                      {pct(dayparts.weekendBaseline, 1)} against a {pct(2 / 7, 1)} calendar baseline is
+                      no difference. It is stated in the sentence rather than given a card of its own,
+                      because presenting no-difference at headline size teaches an owner to distrust the
+                      figures beside it.
+                    </p>
+                    <p>
+                      Density is share of orders, so a business that simply got busier everywhere does not
+                      change shape here.
+                    </p>
+                  </>
+                }
+              />
+            }
           >
             {/* ── Three cards became one statement ────────────────────────────
                 **The archetype label has gone.** "High-Throughput Breakfast" was
                 an unprovenanced framework name cited as authority on the face of
-                a customer report, computed at organisation level across 19
-                venues in three states that this build's own outlier detection
-                says are not alike. It is useless at four mixed venues, useless
-                at 620, and tautological at one. The fact underneath it is true
-                and worth stating, so the fact stays and the label goes.
-
-                **Confidence has gone.** It was undefined and self-contradicting:
-                two primary periods of five is 40%, not 70%, and the note saying
-                it would read higher against all eight was describing a
-                concentration measure that *rises* when you add empty periods,
-                which is perverse. Neither denominator yields either number.
-
-                **Weekend share has gone from the hero row.** 28.0% against a
-                28.6% calendar baseline is a null result, and presenting
-                no-difference at card size teaches an owner to distrust the cards
-                beside it. It survives as the baseline sentence under the grid,
-                which is where it is actually used. */}
+                a customer report, computed at organisation level across venues
+                in three states that this build's own outlier detection says are
+                not alike. The fact underneath it is true and worth stating, so
+                the fact stays and the label goes. The reasoning moved into the
+                drawer with BH-3; only the fact is on the face. */}
             <p className="max-w-[95ch] text-[15px] leading-relaxed text-ink">
               <strong>
                 {identity.primary.map((d) => d.label).join(" and ")} together carry{" "}
@@ -153,15 +199,16 @@ export default async function BehaviourPage({
                 )}{" "}
                 of all orders
               </strong>{" "}
-              — {count(totalOrders)} orders across {identity.tradingPeriods} periods this business actually
-              trades in, {win}. Weekend trade is {pct(dayparts.weekendBaseline, 1)} against a{" "}
+              — {count(totalOrders)} orders across the{" "}
+              {/* C-6. This read "5 periods this business actually trades in" above
+                  a table that discloses 8, and a reader counting rows found a
+                  contradiction that was really a definition. Both figures are now
+                  in the sentence, so the claim and the table agree by
+                  construction. */}
+              {identity.tradingPeriods} of {dayparts.periods.length} periods in the day this business
+              actually trades in, {win}. Weekend trade is {pct(dayparts.weekendBaseline, 1)} against a{" "}
               {pct(2 / 7, 1)} calendar baseline, so the week is flat: this is a weekday-shaped business,
               not a weekend-shaped one.
-            </p>
-            <p className="mt-2 max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
-              Stated as a fact rather than as an archetype. A single label for {org.venues.length} venues
-              across the states this estate trades in would describe none of them well, and this report&apos;s
-              own outlier detection says they are not alike.
             </p>
           </Card>
 
@@ -181,15 +228,83 @@ export default async function BehaviourPage({
               being planned against the other. */}
 
           {/* ── the daypart table, the precision layer (§8 rule 6) ───────── */}
+          {/* ── §6.2 the daypart table, the precision layer (§8 rule 6) ──────
+              BH-2. Two things were missing and the note that found them was
+              right on both counts.
+
+              **It did not say which population it covers.** The table is all
+              trade — every order, identified or not — and only one column was
+              member-aware. A reader reasonably assumed "guests" meant the
+              identified population, which is a different and much smaller
+              number.
+
+              **It carried a member share and nothing to compare it against.**
+              Member share alone cannot tell a GM whether Lunch is genuinely
+              quiet or merely unrecognised, which is exactly the question the
+              section directly below it asks. So the orders now split three
+              ways — members, recognised guests, and orders no card resolved —
+              and the split is on the face rather than derivable from one
+              percentage. It also closes the third of the three member-order
+              figures in C-1: a reader reverse-computing member orders from a
+              rounded share got a number 65 orders adrift, and now does not have
+              to. */}
           <Card
             title="Dayparts, by density"
-            subtitle={`Where the trade actually sits, sorted by density.${
+            subtitle={`Where the trade actually sits, sorted by density. All trade — every order, whether or not anybody was identified.${
               prevRun ? ` Change is against ${prevRun.label}.` : ""
             }`}
             padded={false}
+            explain={
+              <ExplainDrawer
+                label="How the daypart table is built"
+                title="Dayparts, by density"
+                showing={
+                  <>
+                    <p>
+                      Every order in the window, bucketed by the hour it was placed and sorted by how much
+                      of the trade sits there. <strong>Density is share of orders</strong>, so a business
+                      that got busier everywhere shows no movement — what moves is the shape of the
+                      trading day.
+                    </p>
+                    <p>
+                      The identity columns split those orders three ways:{" "}
+                      <strong>{TIER_LABEL.member}</strong> placed by somebody enrolled,{" "}
+                      <strong>{TIER_LABEL.card}</strong> placed by somebody identified only by their
+                      payment card, and <strong>Unidentified</strong> where no card could be resolved at
+                      all. The three sum to the order count on the same row.
+                    </p>
+                    <p>
+                      The <strong>Guests →</strong> link on each row opens the guest grid filtered to that
+                      daypart, across both identity methods — not members only.
+                    </p>
+                  </>
+                }
+                made={
+                  <>
+                    <p>
+                      Dayparts are venue-local: the hour comes from the localised trading timestamp, never
+                      from UTC, so a venue in a different state buckets against its own clock.
+                    </p>
+                    <p>
+                      Periods carrying under {pct(DAYPART_TRADE_FLOOR, 1)} of orders are folded into one
+                      line rather than given a row each. Two orders in three months across{" "}
+                      {org.venues.length} venues is a mis-keyed till, not a dinner service, and a full row
+                      would give it the same ink as a period carrying{" "}
+                      {count(Math.max(...carrying.map((d) => d.orders)))}.
+                    </p>
+                    <p>
+                      Member orders here sum to {count(snap.coverage.totals.memberOrders)}, which is every order
+                      placed by an enrolled person. That is a larger figure than the bridged subset the
+                      recognition tile on Overview is measured against, and the two are reconciled in that
+                      tile&apos;s own drawer.
+                    </p>
+                  </>
+                }
+              />
+            }
           >
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-[13px]">
+              <table className="w-full min-w-[980px] text-[13px]">
                 <thead>
                   <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
                     <th className="px-5 py-2.5 text-left font-medium">Daypart</th>
@@ -210,9 +325,10 @@ export default async function BehaviourPage({
                               <strong className="text-ink">
                                 That earlier period is not the previous quarter.
                               </strong>{" "}
-                              It ends {prevRun.gapMonths} months before this window opens. The months between
-                              are not in the snapshot at all, because card capture failed in them, so a shift
-                              that took a year to happen arrives here looking like one period of movement.
+                              <strong className="text-ink">{prevRun.gapMonths} months are missing between
+                              the two.</strong> They are not in the snapshot at all, because card capture
+                              failed in them, so a shift that took a year to happen arrives here looking
+                              like one period of movement.
                             </p>
                           </InfoButton>
                         </span>
@@ -220,7 +336,26 @@ export default async function BehaviourPage({
                     )}
                     <th className="px-3 py-2.5 text-right font-medium">Revenue density</th>
                     <th className="px-3 py-2.5 text-right font-medium">Weekend</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Member share</th>
+                    {/* BH-2: the split, not just the share. */}
+                    <th className="px-3 py-2.5 text-right font-medium">{TIER_LABEL.member}</th>
+                    <th className="px-3 py-2.5 text-right font-medium">{TIER_LABEL.card}</th>
+                    {/* The remainder, so the three identity columns add up to
+                        the order count on the same row. Two columns that sum to
+                        less than the total beside them is a reader doing
+                        subtraction to find out whether something is missing. */}
+                    <th className="px-3 py-2.5 text-right font-medium">Unidentified</th>
+                    <th className="px-3 py-2.5 text-right font-medium whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1">
+                        Member share
+                        <InfoButton label="What member share is a share of" align="end">
+                          <p>
+                            Member orders as a share of <strong className="text-ink">all</strong> orders in
+                            that period, including the ones no card could be resolved for. It is not a share
+                            of identified orders, which would run higher and describe a different thing.
+                          </p>
+                        </InfoButton>
+                      </span>
+                    </th>
                     <th className="px-5 py-2.5" />
                   </tr>
                 </thead>
@@ -251,6 +386,15 @@ export default async function BehaviourPage({
                       >
                         {pct(d.weekendShare, 1)}
                       </td>
+                      <td className="tnum px-3 py-2 text-right text-ink-secondary">
+                        {count(d.memberOrders)}
+                      </td>
+                      <td className="tnum px-3 py-2 text-right text-ink-secondary">
+                        {count(d.cardOrders)}
+                      </td>
+                      <td className="tnum px-3 py-2 text-right text-ink-muted">
+                        {count(d.orders - d.memberOrders - d.cardOrders)}
+                      </td>
                       <td
                         className="tnum px-3 py-2 text-right"
                         style={{ color: d.memberShare < memberShareOverall ? "var(--warning)" : "var(--ink-secondary)" }}
@@ -262,7 +406,7 @@ export default async function BehaviourPage({
                           href={`/${org.slug}/${period}/guests?daypart=${d.key}`}
                           className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline"
                         >
-                          Guests <IconArrow className="h-3 w-3" />
+                          All guests <IconArrow className="h-3 w-3" />
                         </Link>
                       </td>
                     </tr>
@@ -272,7 +416,7 @@ export default async function BehaviourPage({
                       closed line so a reader knows exactly what is inside. */}
                   {negligible.length > 0 && (
                     <tr className="border-b border-line last:border-b-0">
-                      <td colSpan={prevRun ? 8 : 7} className="px-5 py-2">
+                      <td colSpan={prevRun ? 11 : 10} className="px-5 py-2">
                         <details>
                           <summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] text-ink-secondary marker:hidden hover:text-ink">
                             <span className="text-ink-muted">›</span>
@@ -321,6 +465,20 @@ export default async function BehaviourPage({
                     {prevRun && <td className="px-3 py-2.5 text-right font-semibold text-ink-muted">—</td>}
                     <td className="tnum px-3 py-2.5 text-right font-semibold">100.0%</td>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">{pct(dayparts.weekendBaseline, 1)}</td>
+                    <td className="tnum px-3 py-2.5 text-right font-semibold">
+                      {count(dayparts.periods.reduce((a, d) => a + d.memberOrders, 0))}
+                    </td>
+                    <td className="tnum px-3 py-2.5 text-right font-semibold">
+                      {count(dayparts.periods.reduce((a, d) => a + d.cardOrders, 0))}
+                    </td>
+                    <td className="tnum px-3 py-2.5 text-right font-semibold text-ink-muted">
+                      {count(
+                        dayparts.periods.reduce(
+                          (a, d) => a + d.orders - d.memberOrders - d.cardOrders,
+                          0,
+                        ),
+                      )}
+                    </td>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">{pct(memberShareOverall, 1)}</td>
                     <td />
                   </tr>
@@ -373,7 +531,44 @@ export default async function BehaviourPage({
             )}
           </Card>
 
-          {/* ── §6.4 cross-venue: three views, and nothing else ──────────── */}
+          {/* ── §6.4 cross-venue: three views, and the single-venue case ─────
+              BH-4. At one venue four blocks in this section are structurally
+              empty: the stat block, the venues-per-guest distribution, the
+              per-venue shared-base ranking, and the two-levels note. Nothing
+              here was written for n=1, and single-site is the common case for
+              the real product even though it is not the case in this dataset —
+              the council rated the gap a defect rather than a scoping choice
+              and that is the right reading.
+
+              **An empty state rather than hiding the section.** Hiding is
+              cheaper and would be honest, but a merchant considering a second
+              site is exactly the merchant who should be able to see what this
+              section would tell them. What is refused is any *figure*: a
+              crossing rate at one venue is 0% by construction and drawing it
+              would be reporting the estate shape as a customer behaviour. */}
+          {org.venues.length < 2 ? (
+            <Card title="Guests who use more than one venue">
+              <EmptyState
+                title={`${org.name} trades from one venue, so there is nothing to cross`}
+                body={
+                  <>
+                    <p>
+                      This section measures guests who use more than one of your sites — how many there
+                      are, how many sites they use, and what share of each venue&apos;s own base is shared
+                      with another. All four of those are undefined at a single venue, and a crossing rate
+                      of 0% here would be a fact about your estate rather than about your guests.
+                    </p>
+                    <p className="mt-2">
+                      <strong className="text-ink">It fills in the day a second venue opens.</strong> Guests
+                      who use more than one site visit and spend materially more than guests who do not, at
+                      every merchant this build has measured — so this is the section that tells you whether
+                      a second site grew the business or split it.
+                    </p>
+                  </>
+                }
+              />
+            </Card>
+          ) : (
           <Card
             title="Guests who use more than one venue"
             subtitle={`Overlap, not a causal claim — and it partly reflects venue size and proximity. ${win}.`}
@@ -431,7 +626,7 @@ export default async function BehaviourPage({
                         key={b.band}
                         style={{
                           width: `${(b.people / bandTotal) * 100}%`,
-                          background: `color-mix(in srgb, var(--tier-card) ${25 + i * 25}%, transparent)`,
+                          background: `color-mix(in srgb, var(--brand-purple) ${25 + i * 25}%, transparent)`,
                         }}
                         aria-label={`${b.band === 4 ? "4 or more" : b.band} venues: ${count(b.people)} guests`}
                       />
@@ -444,7 +639,7 @@ export default async function BehaviourPage({
                           <th scope="row" className="flex items-center gap-2 py-1.5 text-left font-normal text-ink">
                             <span
                               className="h-2.5 w-2.5 rounded-[3px]"
-                              style={{ background: `color-mix(in srgb, var(--tier-card) ${25 + i * 25}%, transparent)` }}
+                              style={{ background: `color-mix(in srgb, var(--brand-purple) ${25 + i * 25}%, transparent)` }}
                             />
                             {b.band === 4 ? "4 or more venues" : `${b.band} venue${b.band === 1 ? "" : "s"}`}
                           </th>
@@ -468,6 +663,17 @@ export default async function BehaviourPage({
                   <strong className="text-ink">Expressed as a share, never a count</strong> — raw counts rank
                   by venue size, so the biggest venues would top the list for being big.
                 </p>
+                {/* Named rather than left for the reader to work out: this
+                    ranking is substantially a map. A GM cannot move their venue
+                    closer to other venues, so read as a league table it invites
+                    an action nobody can take. The three states underneath are
+                    what the row actually supports. */}
+                <p className="mt-1.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-muted">
+                  <strong className="text-ink-secondary">This ranks geography more than performance.</strong>{" "}
+                  A venue high on this list is near other venues; one at the bottom is not, and no manager
+                  can move their site. Read it as three states — clustered, partly shared, island — rather
+                  than as a league table.
+                </p>
                 {venueCross.length === 0 ? (
                   <div className="mt-3">
                     <EmptyState
@@ -487,7 +693,7 @@ export default async function BehaviourPage({
                             <div className="h-2.5 w-full rounded-sm bg-surface-sunken">
                               <div
                                 className="h-full rounded-sm"
-                                style={{ width: `${v.share * 100}%`, background: "var(--tier-card)" }}
+                                style={{ width: `${v.share * 100}%`, background: "var(--brand-purple)" }}
                               />
                             </div>
                           </td>
@@ -556,6 +762,7 @@ export default async function BehaviourPage({
               </p>
             </div>
           </Card>
+          )}
 
           {/* ── §6.6 what each segment buys, and when they come ─────────────
               The two sections that replace "The trading week", and the reason
@@ -563,7 +770,13 @@ export default async function BehaviourPage({
               by till, which is the cut only this report can make. */}
           <Card
             title="What each segment actually buys"
-            subtitle="The lifecycle buckets from Overview, read through the basket rather than the visit count."
+            subtitle="The lifecycle buckets from Overview, read through the basket rather than the visit count. Enrolled people only."
+            explain={
+              <SegmentsExplainer
+                lapsedDays={org.calibration.lapsedDays}
+                lapsedGuests={memberSegments.find((r) => r.segment === "lapsed")?.guests ?? 0}
+              />
+            }
           >
             <SegmentBasket rows={memberSegments} windowLabel={win} />
             <p className="mt-4 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
@@ -575,12 +788,64 @@ export default async function BehaviourPage({
             </p>
           </Card>
 
+          {/* BH-6. The unit is in each table's heading and switchable; the
+              method paragraph that used to close this block is in the drawer.
+              See `SegmentTiming`. */}
           <Card
             title="When each segment comes"
-            subtitle="Day of week and time of day, cut by who the guest is rather than by how busy the venue was."
+            subtitle="Day of week and time of day, cut by who the guest is rather than by how busy the venue was. Enrolled people only."
+            explain={
+              <ExplainDrawer
+                label="How the segment timing grids are built"
+                title="When each segment comes"
+                showing={
+                  <>
+                    <p>
+                      Two grids over the same population: which days a segment comes, and what time of day.
+                      Every cell is a share of <strong>that segment&apos;s own</strong> visits or revenue, so
+                      each row totals 100%.
+                    </p>
+                    <p>
+                      <strong>Read across a row, never down a column.</strong> The rows are wildly different
+                      sizes, so a column comparison is mostly a comparison of segment populations — which is
+                      already answered on Overview.
+                    </p>
+                    <p>
+                      A segment with too few visits to support a weekly shape is listed and left unshaded
+                      rather than drawn. Shading a row built from a few dozen people says &quot;this is a
+                      pattern&quot; about noise.
+                    </p>
+                  </>
+                }
+                made={
+                  <>
+                    <p>
+                      Whole population, {win}, enrolled people only. Both axes are{" "}
+                      <strong>venue-local</strong>: day of week and daypart come from the localised trading
+                      timestamp, never from UTC, so a venue in another state buckets against its own clock.
+                    </p>
+                    <p>
+                      Shading runs on a single scale across both tables, so a segment with a flat week looks
+                      flat rather than being normalised into looking peaked.
+                    </p>
+                    <p>
+                      Dayparts carrying under 0.5% of visits are not shown — a period the business does not
+                      trade in is not a fact about a segment.
+                    </p>
+                    <p>
+                      It is measured in the warehouse on everybody, and deliberately{" "}
+                      <strong>not</strong> derived from the guest list this product ships to the browser.
+                      That set over-selects high spenders and its coverage varies by segment from 97% to
+                      53%, so a timing profile taken from it would describe the guests who were sampled
+                      rather than the guests who came.
+                    </p>
+                  </>
+                }
+              />
+            }
           >
             {segmentBehaviour && segmentBehaviour.length > 0 ? (
-              <SegmentTiming rows={segmentBehaviour} dayparts={org.dayparts} windowLabel={win} />
+              <SegmentTiming rows={segmentBehaviour} dayparts={org.dayparts} />
             ) : (
               <EmptyState
                 title="Not in this snapshot"
@@ -622,44 +887,99 @@ export default async function BehaviourPage({
               className="border-b border-line px-5 py-3.5"
               style={{ background: "color-mix(in srgb, var(--tier-member) 7%, transparent)" }}
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-[15px] font-semibold text-ink">Member retention over 21 months</h2>
-                <Pill tone="member">Member tier · a different population</Pill>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-[15px] font-semibold text-ink">
+                    Member retention over {cw ? cw.cohortCount : 21} months
+                  </h2>
+                  <Pill tone="member">Loyalty identity · a different population</Pill>
+                </div>
+                {/* ── BH-7: the mountain of text moves, the corrections do not ──
+                    Five paragraphs of preamble before the chart and three
+                    sections after it. What moves in here is the reconciliation
+                    between the two member counts and the render rule — both are
+                    *how this is built*.
+
+                    What deliberately stays on the face: the clock-change banner
+                    directly below, because it changes how every figure in this
+                    section must be read, and "What we cannot yet tell you"
+                    inside the lens, because the chart is liked precisely for the
+                    thing it does not prove. The stack goes up because enrolment
+                    outran churn, not because retention improved, and that
+                    correction sits with the chart rather than behind a click —
+                    otherwise this reads as a success story it does not
+                    support. */}
+                {cohorts && cw && (
+                  <ExplainDrawer
+                    label="How the retention section is built"
+                    title="Member retention"
+                    showing={
+                      <>
+                        <p>
+                          Each band is the members who first scanned in one month. Its thickness at any
+                          point is how many of them were still visiting that month, so{" "}
+                          <strong>a band that narrows is an intake burning down</strong> and one that holds
+                          its width is an intake that stuck.
+                        </p>
+                        <p>
+                          Read the bottom band left to right to follow the oldest group you have. New
+                          intakes stack on top as they join.
+                        </p>
+                      </>
+                    }
+                    made={
+                      <>
+                        <p>
+                          <strong>Why there are more members here than on Overview.</strong> Overview counts{" "}
+                          {count(snap.members.crossSection.member.people)} enrolled people{" "}
+                          <em>seen in the {snap.org.window.days}-day payment-card window</em>. The cohorts
+                          here count{" "}
+                          {count(cohorts.cohorts.reduce((a, c) => a + c.members, 0))} people who have{" "}
+                          <em>ever scanned</em> across {count(cw.observationDays)} days, including everybody
+                          who stopped coming before that window opened. Neither is wrong and neither is a
+                          subset you can subtract from the other.
+                        </p>
+                        <p>
+                          <strong>Two window figures, and they measure different things.</strong> The
+                          intakes span {count(cw.intakeSpanDays)} days from the first cohort&apos;s month to
+                          the last cohort&apos;s month — {cw.cohortCount} monthly intakes. The{" "}
+                          <em>observation</em> window runs to the close of that last month, which is{" "}
+                          {count(cw.observationDays)} days. The second is the one the render rule is tested
+                          against.
+                        </p>
+                        <p>
+                          <strong>Why retention renders here and refuses above.</strong> A lapse-dependent
+                          figure needs a window at least twice the lapse threshold, so that both states are
+                          observable: {cohorts.grading.thresholdDays} days of silence to say somebody
+                          lapsed, and another {cohorts.grading.thresholdDays} watching them beforehand to
+                          say they did not. That is {cohorts.grading.requiredDays} days.{" "}
+                          <strong>
+                            This section has {count(cw.observationDays)} and clears it; the payment-card
+                            window has {snap.org.window.days} and does not.
+                          </strong>
+                        </p>
+                        <p>
+                          The window is the earliest month whose loyalty scanning passes grading, not the
+                          month the business started, and it grows by a month every month — so this chart
+                          gets longer and the claims it can carry get stronger with time.
+                        </p>
+                      </>
+                    }
+                  />
+                )}
               </div>
-              <p className="mt-1 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+
+              {/* The clock-change banner stays. It is the reason the wall exists
+                  and it changes how every figure below it must be read. */}
+              <p className="mt-1.5 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
                 <strong className="text-ink">Everything below this line runs on a different clock.</strong>{" "}
                 The figures above identify people by payment card over {snap.org.window.days} days and cover{" "}
                 {pct(cov.identifiedRevenueShare, 1)} of revenue. These identify people by loyalty scan over{" "}
-                {cohorts ? count(cohorts.grading.days) : "—"} days and cover roughly{" "}
+                {cw ? count(cw.observationDays) : "—"} days and cover roughly{" "}
                 {cohorts ? pct(cohorts.coverage.at(-1)?.coverage ?? 0, 0) : "—"} of orders. They are not the
                 same guests, and <strong className="text-ink">no figure here may be combined with a figure
                 above it</strong>.
               </p>
-              <p className="mt-1.5 max-w-[100ch] text-[12px] leading-relaxed text-ink-muted">
-                Retention renders here and refuses above for one reason: the render rule is keyed on the
-                tier. {cohorts ? count(cohorts.grading.days) : "—"} days against an{" "}
-                {cohorts?.grading.thresholdDays ?? 90}-day threshold clears the {cohorts?.grading.requiredDays ?? 180}{" "}
-                it needs; the card tier&apos;s {snap.org.window.days} does not.
-              </p>
-              {/* ── The two member counts, reconciled where they collide ──────
-                  Overview says 4,966 members. The triangle below counts many
-                  more. Both are right and they are different questions: one is
-                  members seen in the 92-day card window, the other is everybody
-                  who has ever scanned across 21 months. A reader who meets the
-                  second without the first has been handed a 2.3× discrepancy
-                  under a banner telling them not to combine figures across the
-                  line — which is exactly the moment they will try. */}
-              {cohorts && (
-                <p className="mt-2 max-w-[100ch] rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
-                  <strong className="text-ink">Why there are more members below than above.</strong> The
-                  Overview counts {count(snap.members.crossSection.member.people)} enrolled people{" "}
-                  <em>seen in the {snap.org.window.days}-day card window</em>. The cohorts below count{" "}
-                  {count(cohorts.cohorts.reduce((a, c) => a + c.members, 0))} people who have{" "}
-                  <em>ever scanned</em> across {count(cohorts.grading.days)} days, including everybody who
-                  stopped coming before this window opened. Neither is wrong and neither is a subset you
-                  can subtract from the other — they answer different questions on different clocks.
-                </p>
-              )}
             </header>
             <div className="p-5">
               {cohorts ? (

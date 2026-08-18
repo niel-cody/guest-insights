@@ -6,6 +6,7 @@ import { PeriodPicker } from "@/components/ui/PeriodPicker";
 import type { Period, Periods } from "@/lib/periods";
 import type { Org } from "@/lib/types";
 import { SEGMENT_LABEL, dayLabel } from "@/lib/metrics";
+import { TIER_LABEL } from "@/lib/lexicon";
 import {
   activeFilters, cleared, isFiltered, parseView, toQuery,
   type SearchParams, type View,
@@ -140,10 +141,14 @@ export function FilterBar({
             // Cards view of the segment grid.
             set({ tier: v === "all" ? null : (v as View["tier"]) })
           }
+          /* BH-1. "Card only" read as "loyalty card only" to the audience
+             this product is for, because a member carries a card too. The
+             labels come from the lexicon so the filter, the grid's tier
+             control and the guest grid's Tier column cannot drift apart. */
           options={[
-            { value: "all", label: "All customers" },
-            { value: "member", label: "Members" },
-            { value: "card", label: "Card only" },
+            { value: "all", label: TIER_LABEL.all },
+            { value: "member", label: TIER_LABEL.member },
+            { value: "card", label: TIER_LABEL.card },
           ]}
         />
 
@@ -152,7 +157,7 @@ export function FilterBar({
           value={view.segment ?? "all"}
           note={
             view.tier === "card"
-              ? "On a card, Lapsed and Slipping mean the card stopped appearing — a reissue looks the same"
+              ? "On a recognised guest, Lapsed and Slipping mean the payment card stopped appearing — a reissue looks the same"
               : undefined
           }
           onChange={(v) => set({ segment: v === "all" ? null : (v as View["segment"]) })}

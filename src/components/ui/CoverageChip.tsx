@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { CoverageState } from "@/lib/metrics";
 import { monthLabel, pct, attributionPct} from "@/lib/metrics";
 import { IconChevron } from "../shell/Icons";
+import { IDENTITY_LABEL, IDENTITY_NOUN } from "@/lib/lexicon";
 
 /**
  * The one always-visible honesty object, gain-framed.
@@ -39,10 +40,10 @@ export function CoverageChip({
       >
         <span className="flex h-2 w-2 rounded-full" style={{ background: complete ? "var(--good)" : "var(--warning)" }} />
         <span className="font-medium text-ink">
-          Card tier: recognising {attributionPct(state.identifiedRevenueShare)} of revenue
+          {IDENTITY_LABEL.card}: recognising {attributionPct(state.identifiedRevenueShare)} of revenue
         </span>
         {scope === "mixed" && (
-          <span className="text-[12px] text-ink-muted">· member tier below differs</span>
+          <span className="text-[12px] text-ink-muted">· {IDENTITY_NOUN.member} below differs</span>
         )}
         <IconChevron className={`h-4 w-4 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
       </button>

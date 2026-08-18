@@ -1,3 +1,5 @@
+import { TIER_LABEL } from "@/lib/lexicon";
+import { SEGMENT_LABEL } from "@/lib/metrics";
 /**
  * The URL parameter contract. Release blocker B2.
  *
@@ -220,8 +222,11 @@ export function cleared(v: View): View {
 export function activeFilters(v: View): { key: keyof View; label: string; value: string }[] {
   const out: { key: keyof View; label: string; value: string }[] = [];
   if (v.venue.length) out.push({ key: "venue", label: "Locations", value: `${v.venue.length} selected` });
-  if (v.segment) out.push({ key: "segment", label: "Segment", value: v.segment });
-  if (v.tier) out.push({ key: "tier", label: "Customers", value: v.tier });
+  // The chip states what the reader is looking at, so it has to use the word
+  // the reader chose it by. It printed the raw key — "card" — which is the one
+  // word BH-1 removed from the surface for reading as "loyalty card".
+  if (v.segment) out.push({ key: "segment", label: "Segment", value: SEGMENT_LABEL[v.segment] ?? v.segment });
+  if (v.tier) out.push({ key: "tier", label: "Customers", value: TIER_LABEL[v.tier] });
   if (v.daypart) out.push({ key: "daypart", label: "Daypart", value: v.daypart });
   if (v.band != null) out.push({ key: "band", label: "Value band", value: `Band ${v.band}` });
   if (v.minVisits != null) out.push({ key: "minVisits", label: "Visits", value: `${v.minVisits}+` });

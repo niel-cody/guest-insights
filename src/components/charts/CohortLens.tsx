@@ -78,21 +78,19 @@ export function CohortLens({ cohorts }: { cohorts: Cohorts }) {
           traded for six years and meets a retention chart that opens in
           November 2024 needs to be told which of those two facts they are
           looking at *before* they read it, not in a footnote after. */}
-      <div className="rounded-lg border border-line bg-surface-sunken px-4 py-3">
-        <p className="text-[13px] leading-relaxed text-ink">
-          <strong>
-            Member data is available from {monthLabel(cohorts.window.start)}
-          </strong>{" "}
-          — {count(grading.days)} days, {rows.length} monthly cohorts, to{" "}
-          {monthLabel(cohorts.window.end)}.
-        </p>
-        <p className="mt-1.5 max-w-[100ch] text-[12px] leading-relaxed text-ink-muted">
-          This is the earliest month whose loyalty scanning passes grading, not the month the business
-          started. <strong className="text-ink-secondary">It grows by a month every month</strong>, so this
-          chart gets longer and the claims it can carry get stronger with time. The next one it unlocks is a
-          twenty-four month trend floor.
-        </p>
-      </div>
+      {/* BH-7. This was five lines; it is one. The fact that has to survive is
+          *where the record starts*, because an owner who has traded for six
+          years and meets a chart opening in November 2024 will otherwise read
+          the opening of the chart as the opening of their business. Why that
+          month, and how long the window is in days, moved into the section's
+          drawer — both are provenance. */}
+      <p className="text-[13px] leading-relaxed text-ink">
+        <strong>Member data starts in {monthLabel(cohorts.window.start)}</strong> — {rows.length} monthly
+        intakes to {monthLabel(cohorts.window.end)}.{" "}
+        <span className="text-ink-secondary">
+          That is the first month whose loyalty scanning passes grading, not the month the business started.
+        </span>
+      </p>
 
       <BurnDown cohorts={cohorts} />
 

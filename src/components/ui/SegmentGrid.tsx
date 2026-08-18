@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { IconArrow, IconChevron } from "@/components/shell/Icons";
-import { InfoButton } from "@/components/ui/InfoButton";
+import { TIER_LABEL } from "@/lib/lexicon";
+import { useTier, type Tier } from "@/lib/use-tier";
 import {
-  SEGMENT_COLOUR, count, delta, money, pct, segmentLadder, SEGMENT_LABEL, type VisitBandRow,
+  SEGMENT_COLOUR, count, delta, money, pct, SEGMENT_LABEL, type VisitBandRow,
 } from "@/lib/metrics";
 
 /**
@@ -35,7 +36,27 @@ import {
  * in the remaining rows would silently re-base against a smaller denominator.
  * Columns are a view. Rows are the population.
  *
- * ── The tier control, and why it changes the rows ──────────────────────────
+ * ── The tier control lives in the filter bar, not here (OV-3) ──────────────
+ *
+ * This grid used to own a local `TIER: Members / Cards / All` control, and the
+ * filter bar upstairs owned `Customers: All / Members / Recognised`. **Two
+ * controls for the same concept on one screen, and nothing said which won.**
+ * The same defect was raised against the old Group control in the 17 August
+ * review; it had simply moved to a new place.
+ *
+ * It was worse than a duplicate. Overview discarded its `searchParams`
+ * entirely, so the *global* control — the one in the bar, the one that looks
+ * authoritative, the one every other report obeys — did nothing at all on this
+ * page, while the local one worked. A reader who set Customers to Members and
+ * saw the grid not move had been told something false about the product.
+ *
+ * So there is now one control, in the bar, and this grid reads it from the URL.
+ * The rows, the subtitle, the denominators and the drill-through links all
+ * follow it. `Rows: Lifecycle / Visits` stays local, and correctly so: it is
+ * not a population filter, it is a choice of axis over whatever population the
+ * bar has selected.
+ *
+ * ── Why the tier changes what the rows can be ──────────────────────────────
  *
  * Cards are the bigger half of this business — 19,940 people and $1.3m against
  * 4,966 and $795k — and until now the grid could not show them at all. It still
@@ -74,18 +95,12 @@ type Row = {
  */
 export type PreviousPeriod = {
   label: string;
+  /** Months missing between the two runs. Zero means a true previous period. */
   gapMonths: number;
   rows: Row[];
 };
 
-export type Tier = "member" | "card" | "all";
 type Group = "lifecycle" | "visits";
-
-const TIERS: { key: Tier; label: string }[] = [
-  { key: "member", label: "Members" },
-  { key: "card", label: "Cards" },
-  { key: "all", label: "All" },
-];
 
 type ColumnKey =
   | "people" | "peopleShare" | "visits" | "visitShare"
@@ -106,7 +121,7 @@ const COLUMNS: { key: ColumnKey; label: string; needsPrevious?: boolean; note: s
 const DEFAULT_ON: ColumnKey[] = ["people", "peopleShare", "spend", "spendShare", "perHead"];
 
 export function SegmentGrid({
-  lifecycleRows, visitRows, excludedCards, orgSlug, period, lapsedDays, lapsedGuests, previous,
+  lifecycleRows, visitRows, excludedCards, orgSlug, period, previous,
 }: {
   /**
    * Lifecycle rows per tier.
@@ -122,14 +137,18 @@ export function SegmentGrid({
   excludedCards: { people: number; spend: number };
   orgSlug: string;
   period: string;
-  lapsedDays: number;
-  lapsedGuests: number;
   previous: PreviousPeriod | null;
 }) {
   const [on, setOn] = useState<Set<ColumnKey>>(new Set(DEFAULT_ON));
   const [picking, setPicking] = useState(false);
-  const [tier, setTier] = useState<Tier>("member");
   const [group, setGroup] = useState<Group>("lifecycle");
+
+  /**
+   * The tier comes from the URL, which is where the filter bar writes it.
+   * Shared with the composition bars below through `useTier`, so the two
+   * cannot end up describing different populations under one heading.
+   */
+  const [tier, setTier] = useTier();
 
   // Lifecycle is offered where the snapshot can actually express it. It is not
   // a tier rule any more — the classifier runs on cards too — but an older
@@ -195,8 +214,6 @@ export function SegmentGrid({
     return { v: delta(c, 1), tone: c >= 0 ? "var(--good)" : "var(--loss)" };
   }
 
-  const ladder = segmentLadder(lapsedDays);
-
   /** Where a row sends the reader, on whichever axis is showing. */
   function drillTo(r: Row | VisitBandRow): string {
     const q = new URLSearchParams();
@@ -220,14 +237,34 @@ export function SegmentGrid({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ── tier, and what the rows can be ─────────────────────────────────── */}
+      {/* ── what the rows can be, and which population they are drawn on ─────
+          There is no tier control here any more. It is the `Customers` control
+          in the filter bar, which this grid now reads and writes — one control
+          for one concept, on a screen that used to carry two.
+
+          What stays is the statement of which population is showing, because
+          removing the control must not remove the answer: a reader looking at
+          this table has to be able to see what it covers without scrolling back
+          up to the bar to check. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Segmented
-          legend="Tier"
-          value={tier}
-          options={TIERS}
-          onChange={(t) => setTier(t)}
-        />
+        <span className="inline-flex items-center gap-2 text-[12px] text-ink-secondary">
+          <span className="tracking-wide uppercase">Showing</span>
+          <span className="rounded-md border border-line bg-surface-sunken px-2 py-1 font-medium text-ink">
+            {TIER_LABEL[tier]}
+          </span>
+          <span className="text-ink-muted">
+            — set by <strong className="font-medium text-ink-secondary">Customers</strong> in the filter bar
+          </span>
+          {tier !== "all" && (
+            <button
+              type="button"
+              onClick={() => setTier("all")}
+              className="rounded-md px-1.5 py-0.5 text-[12px] font-medium text-accent hover:bg-surface-hover"
+            >
+              show all
+            </button>
+          )}
+        </span>
         <Segmented
           legend="Rows"
           value={effectiveGroup}
@@ -239,15 +276,20 @@ export function SegmentGrid({
         />
         {!canLifecycle && (
           <span className="text-[12px] text-ink-muted">
-            This snapshot carries no lifecycle verdict for {tier === "card" ? "cards" : "this tier"} — the
-            classifier now runs on both tiers, and the figures arrive on the next extract.
+            This snapshot carries no lifecycle verdict for{" "}
+            {tier === "card" ? "recognised guests" : "this population"} — the classifier now runs on both
+            identity methods, and the figures arrive on the next extract.
           </span>
         )}
       </div>
 
       <p className="text-[13px] text-ink-secondary">
         <strong className="tnum text-ink">{count(totals.guests)}</strong>{" "}
-        {tier === "member" ? "enrolled people" : tier === "card" ? "card-recognised people" : "people"}
+        {tier === "member"
+          ? "enrolled people"
+          : tier === "card"
+            ? "people recognised by payment card and never enrolled"
+            : "people, enrolled and recognised together"}
         {effectiveGroup === "lifecycle"
           ? ", classified against their own visit cadence."
           : ", grouped by how many times they came."}{" "}
@@ -379,10 +421,11 @@ export function SegmentGrid({
             The previous period is not last quarter, and the comparison says so.
           </strong>{" "}
           It is {previous.label} — the most recent earlier run of months whose card capture this build will
-          read, which ends {previous.gapMonths} months before this window opens. The months in between are
-          not absent from the chart; they are absent from the snapshot, because card capture failed in them
-          and a figure drawn across that gap would be measuring the outage. A segment somebody moved into
-          during those months arrives here looking like a change that happened over one period.
+          read. <strong className="text-ink-secondary">{previous.gapMonths} months are missing between the
+          two</strong>, and they are not absent from the chart; they are absent from the snapshot, because
+          card capture failed in them and a figure drawn across that gap would be measuring the outage. A
+          segment somebody moved into during those months arrives here looking like a change that happened
+          over one period.
         </p>
       )}
 
@@ -397,7 +440,7 @@ export function SegmentGrid({
       {tier !== "member" && effectiveGroup === "lifecycle" && (
         <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
           <strong className="text-ink-secondary">
-            On a card, Lapsed and Slipping mean the card stopped appearing.
+            Without a loyalty record, Lapsed and Slipping mean the payment card stopped appearing.
           </strong>{" "}
           A member keeps one identity across a reissued card because the membership carries it; an anonymous
           card does not, so a reissue looks identical to somebody who stopped coming and these two rows carry
@@ -408,72 +451,32 @@ export function SegmentGrid({
       )}
 
       {/* ── What a card view leaves out, stated rather than dropped ─────────
-          The card tier is non-members with two or more visits, so a whole
+          Recognised guests are non-members with two or more visits, so a whole
           population sits outside it — and it is not small. Dropping it silently
           would make the tier totals unreconcilable against the coverage figures
           on the same page, which is the defect this build exists to not ship. */}
       {tier !== "member" && excludedCards.people > 0 && (
         <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
           <strong className="text-ink-secondary">
-            {count(excludedCards.people)} cards seen exactly once are not in this view
+            {count(excludedCards.people)} payment cards seen exactly once are not in this view
           </strong>{" "}
-          — {money(excludedCards.spend)} between them. A card is only counted as a person on its second
+          — {money(excludedCards.spend)} between them. A payment card is only counted as a person on its second
           visit: one sighting is a transaction you can see, not a customer you can count, and there is no
           cadence to place it against. Members are counted from the moment they enrol, which is why the
-          one-visit row is present on the member tier and absent here.
+          one-visit row is present for members and absent here.
         </p>
       )}
 
-      {/* ── §4.5 the boundary rules, behind a button ────────────────────────
-          These used to sit open beneath the table as a numbered list plus a
-          paragraph — roughly 150 words of definition under a six-row table,
-          every time anybody loaded the page. It is reference material: read
-          once, argued with once, and then never needed again by the same
-          person. What it is *not* is a caveat, so it is allowed to fold. */}
-      <div
-        className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-sunken px-4 py-2.5"
-        hidden={effectiveGroup !== "lifecycle"}
-      >
-        <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-          Where the boundaries fall
-        </span>
-        <InfoButton label="How the lifecycle segments are defined">
-          <strong className="block text-[12px] text-ink">Read top to bottom, first match wins.</strong>
-          <ol className="mt-1.5 flex flex-col gap-1">
-            {ladder.map((l, i) => (
-              <li key={l.key} className="flex gap-1.5">
-                <span className="tnum shrink-0 text-ink-muted">{i + 1}.</span>
-                <span>
-                  <strong className="text-ink" style={{ color: SEGMENT_COLOUR[l.key] }}>
-                    {SEGMENT_LABEL[l.key]}
-                  </strong>{" "}
-                  — {l.rule}
-                </span>
-              </li>
-            ))}
-          </ol>
-          <p className="mt-2">
-            The rules overlap on purpose and the order settles it — at this merchant every one of the{" "}
-            {count(lapsedGuests)} Lapsed people has exactly one visit, so without the ordering they would be
-            Seen once as well.
-          </p>
-          <p className="mt-1.5">
-            An inferred verdict needs <strong className="text-ink">three visits</strong>: with two you have
-            exactly one gap, and a broken habit is not estimable from one observation. Slipping and Regulars
-            are measured against <strong className="text-ink">each guest&apos;s own cadence</strong>, never a
-            rule applied to everybody.
-          </p>
-          <p className="mt-1.5">
-            Only enrolled people are classified. A card cannot be told apart from a card that was reissued,
-            so a lifecycle verdict on one would be a guess — the field is empty at source rather than hidden
-            here.
-          </p>
-        </InfoButton>
-        <span className="text-[12px] text-ink-muted">
-          six segments, first match wins — {SEGMENT_LABEL.regular} is ten or more visits and still inside
-          their own usual gap
-        </span>
-      </div>
+      {/* ── §4.5 the boundary rules have moved to the panel header ─────────
+          They are now "Explain segments" in this card's header, rendered by
+          `SegmentsExplainer` — OV-4, and the first instance of the Task 0
+          drawer pattern. They used to sit here at the foot of the table as a
+          strip with an info icon, which put a definition below the thing it
+          defines and gave this one panel an affordance no other panel had.
+
+          Written once and used on both pages: the same six buckets are the rows
+          of two panels on Behaviour, and three copies of a definition is how
+          two of them come to be wrong. */}
     </div>
   );
 }
@@ -483,7 +486,7 @@ export function SegmentGrid({
  *
  * A disabled option keeps its slot rather than disappearing, for the same reason
  * a refused figure does: its absence would change how the remaining options
- * read. Somebody who never sees "Lifecycle" offered on the card tier concludes
+ * read. Somebody who never sees "Lifecycle" offered for recognised guests concludes
  * the grid cannot do it at all, rather than that this tier cannot.
  */
 function Segmented<T extends string>({

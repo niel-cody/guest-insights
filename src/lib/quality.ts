@@ -79,7 +79,7 @@ export function qualityFindings(
         `Everything that needs contact details — a message, an offer, a booking reminder — ` +
         `is limited to this ${pct(memberShare, 0)}.`,
       unlocks:
-        "Reaching a guest between visits. The card tier can tell you who to recognise at the counter, but only enrolment lets you contact them.",
+        "Reaching a guest between visits. Payment identity can tell you who to recognise at the counter, but only enrolment lets you contact them.",
       owner: "Venue",
     });
   }
@@ -98,7 +98,7 @@ export function qualityFindings(
         `${dead.reduce((a, q) => a + q.txns, 0).toLocaleString("en-AU")} transactions. ` +
         `The field was populated, so no existing coverage check would have caught it.`,
       unlocks:
-        "Any card-tier history: the 24-month trend, cohort retention, and whether card guests are returning at all before the repair date.",
+        "Any payment-identity history: the 24-month trend, cohort retention, and whether recognised guests are returning at all before the repair date.",
       owner: "Oolio",
     });
   }
@@ -107,7 +107,7 @@ export function qualityFindings(
       id: "par-degraded",
       severity: "material",
       title: `Card recognition was partial in ${degraded.length} month${degraded.length > 1 ? "s" : ""}`,
-      detail: "Some terminals wrote a per-card reference and others did not, so those months undercount card guests rather than missing them entirely.",
+      detail: "Some terminals wrote a per-card reference and others did not, so those months undercount recognised guests rather than missing them entirely.",
       unlocks: "A continuous card-tier series across the repair boundary.",
       owner: "Oolio",
     });

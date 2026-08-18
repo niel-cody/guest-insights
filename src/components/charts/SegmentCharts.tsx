@@ -1,4 +1,8 @@
+"use client";
+
 import { SEGMENT_COLOUR, SEGMENT_INK, SEGMENT_LABEL, count, money, pct } from "@/lib/metrics";
+import { TIER_LABEL } from "@/lib/lexicon";
+import { useTier, type Tier } from "@/lib/use-tier";
 
 /**
  * What replaced the dumbbell, and what the dumbbell replaced.
@@ -66,12 +70,39 @@ type Row = {
 /** The inline percentage only renders where the band can hold it. */
 const LABEL_FLOOR = 0.06;
 
+/**
+ * ── It follows the same control as the grid above it (OV-3) ────────────────
+ *
+ * This used to be handed member-tier rows and nothing else, which was correct
+ * while the grid was members-only too. It stopped being correct the moment the
+ * grid started following the filter bar: the two objects sit inside one card,
+ * under one heading, and a reader switching Customers to *All guests* would
+ * have seen a 24,906-person table above a 4,966-person chart with nothing
+ * saying they were different populations.
+ *
+ * Two objects in one card that disagree about who they describe is the exact
+ * class of defect this build exists to remove, so both read `useTier` and both
+ * relabel with it.
+ */
 export function SegmentComposition({
-  rows, windowLabel,
+  rowsByTier, windowLabel,
 }: {
-  rows: Row[];
+  rowsByTier: Record<Tier, Row[]>;
   windowLabel: string;
 }) {
+  const [tier] = useTier();
+  const rows = rowsByTier[tier];
+
+  /** The population noun, so every label below changes with the control. */
+  const people =
+    tier === "member" ? "enrolled people"
+    : tier === "card" ? "recognised people"
+    : "identified people";
+
+  // A tier the snapshot cannot classify by lifecycle draws nothing rather than
+  // an empty set of bars. The grid above states the reason in place.
+  if (!rows || rows.length === 0) return null;
+
   const totals = {
     guests: rows.reduce((a, r) => a + r.guests, 0) || 1,
     visits: rows.reduce((a, r) => a + r.visits, 0) || 1,
@@ -81,8 +112,8 @@ export function SegmentComposition({
   const bars = [
     {
       key: "guests" as const,
-      label: "Members",
-      note: `${count(totals.guests)} enrolled people`,
+      label: TIER_LABEL[tier],
+      note: `${count(totals.guests)} ${people}`,
     },
     {
       key: "visits" as const,
@@ -112,10 +143,10 @@ export function SegmentComposition({
     <figure className="m-0">
       <figcaption className="mb-3">
         <h3 className="text-[14px] font-semibold text-ink">
-          How your member base turns into visits and spend
+          How this base turns into visits and spend
         </h3>
         <p className="mt-0.5 max-w-[85ch] text-[12px] leading-relaxed text-ink-secondary">
-          Each segment&apos;s share of enrolled members, of visits and of spend, over {windowLabel}. Every
+          Each segment&apos;s share of {people}, of visits and of spend, over {windowLabel}. Every
           bar totals 100%. <strong className="text-ink">These are three compositions of the same people,
           not a movement between them</strong> — nobody turns into a visit.
         </p>
@@ -169,8 +200,8 @@ export function SegmentComposition({
 
       {most && least && most !== least && (
         <p className="mt-2.5 max-w-[85ch] text-[12px] leading-relaxed text-ink-secondary">
-          <strong className="text-ink">{most.label}</strong> are {pct(share(most, "guests"), 1)} of your
-          enrolled people and {pct(share(most, "visits"), 1)} of your visits — they are carrying the
+          <strong className="text-ink">{most.label}</strong> are {pct(share(most, "guests"), 1)} of your{" "}
+          {people} and {pct(share(most, "visits"), 1)} of your visits — they are carrying the
           programme. <strong className="text-ink">{least.label}</strong> are{" "}
           {pct(share(least, "guests"), 1)} of the people and {pct(share(least, "visits"), 1)} of the visits.
           The distance between those two pairs is the shape of the opportunity, and it is the reason a single
@@ -178,7 +209,8 @@ export function SegmentComposition({
         </p>
       )}
       <p className="mt-1.5 max-w-[85ch] text-[11px] leading-relaxed text-ink-muted">
-        Shares are of enrolled people only — the same denominator as the grid above. Bands are drawn to
+        Shares are of {people} — the same denominator as the grid above, and it changes with the same
+        control. Bands are drawn to
         exact width with no minimum, so a segment worth a fraction of a percent renders as a hairline rather
         than being inflated to a readable one. Percentages label the bands that can hold them; the rest are
         in the grid.

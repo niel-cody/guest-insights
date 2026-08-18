@@ -5,6 +5,7 @@ import { getPeriods, getAllOrgs, getGuests, getSnapshot } from "@/lib/data";
 import { count, coverageState, money, pct, tileCount, windowShort } from "@/lib/metrics";
 import { GuestGrid, GROUPS, type GroupKey } from "./GuestGrid";
 import { GridControls } from "./GridControls";
+import { IDENTITY_LABEL, TIER_LABEL } from "@/lib/lexicon";
 
 export const dynamic = "force-static";
 
@@ -83,9 +84,9 @@ export default async function GuestsPage({
                     — cash and unbridged trade carry no identity at all.
                   </p>
                   <p className="mt-1.5">
-                    &quot;Classifiable&quot; is the smaller number: enrolled, or seen on a card more than
-                    once. A card seen once is a transaction, not yet a customer, and nothing about a habit
-                    can be inferred from it.
+                    &quot;Classifiable&quot; is the smaller number: enrolled, or seen on a payment card
+                    more than once. A card seen once is a transaction, not yet a customer, and nothing about
+                    a habit can be inferred from it.
                   </p>
                 </>
               }
@@ -95,7 +96,7 @@ export default async function GuestsPage({
               value={count(tileCount(cs.member.people))}
               accent="var(--tier-member)"
               detail={<>{pct(cs.member.people / Math.max(population, 1), 0)} of the base</>}
-              meta={<>Member tier · {windowShort(org.window)}</>}
+              meta={<>{IDENTITY_LABEL.member} · {windowShort(org.window)}</>}
               info={
                 <>
                   <p>
@@ -112,13 +113,13 @@ export default async function GuestsPage({
               }
             />
             <Tile
-              label="Recognised by card"
+              label={TIER_LABEL.card}
               value={count(tileCount(cs.nonMember.people))}
               accent="var(--tier-card)"
               detail={
                 <>{pct(cs.nonMember.people / Math.max(population, 1), 0)} of the base, never enrolled</>
               }
-              meta={<>Card tier · {windowShort(org.window)}</>}
+              meta={<>{IDENTITY_LABEL.card} · {windowShort(org.window)}</>}
               info={
                 <>
                   <p>

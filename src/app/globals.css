@@ -31,6 +31,18 @@
   --accent:         #6c4ef2;
   --accent-soft:    #efecff;
 
+  /*
+    Oolio deep purple, for the one chart that is deliberately on brand.
+
+    BH-4 asked for the cross-venue bars to pivot onto brand. They were the only
+    orange-ramp chart on either page — they read the card-identity token, which
+    is an *identity tier* colour, and crossing between venues is not an identity
+    fact. So the bars take the brand purple and the tier ramp keeps its meaning.
+    Value is design.oolio.dev/colours deep purple #673ab6, darkened here so it
+    holds against a light ground and lifted in dark mode.
+  */
+  --brand-purple:   #5b2fa8;
+
   /* Identity tiers. Ordinal by certainty, not by brand. */
   --tier-member:       #2a78d6;
   --tier-card:         #eb6834;
@@ -91,6 +103,7 @@
     --line:           #2c2d33;
     --line-strong:    #3a3c44;
     --accent-soft:    #262046;
+    --brand-purple:      #a98eda;
     --tier-member:       #3987e5;
     --tier-card:         #d95926;
     --tier-unattributed: #4a4c55;
@@ -122,6 +135,7 @@
   --line:           #2c2d33;
   --line-strong:    #3a3c44;
   --accent-soft:    #262046;
+  --brand-purple:      #a98eda;
   --tier-member:       #3987e5;
   --tier-card:         #d95926;
   --tier-unattributed: #4a4c55;

@@ -11,6 +11,7 @@ import type { Guest, Guests, Items, Org } from "@/lib/types";
 import { unpackGuests } from "@/lib/guest-columns";
 import { parseView, toQuery, type SearchParams, type View } from "@/lib/url-state";
 import { track } from "@/lib/instrument";
+import { TIER_LABEL } from "@/lib/lexicon";
 
 const PAGE = 100;
 const DEFAULT_SORT: SortKey = "spend";
@@ -115,8 +116,8 @@ const COLUMNS: Column[] = [
 /** What the `Group` control in the filter bar groups by. */
 const GROUPS = {
   none: { label: "None", of: () => "" },
-  tier: { label: "Tier", of: (g: Guest) => (g.tier === "member" ? "Members" : "Card only") },
-  segment: { label: "Segment", of: (g: Guest) => (g.segment ? SEGMENT_LABEL[g.segment] : "No verdict — card tier") },
+  tier: { label: "Identified by", of: (g: Guest) => (g.tier === "member" ? TIER_LABEL.member : TIER_LABEL.card) },
+  segment: { label: "Segment", of: (g: Guest) => (g.segment ? SEGMENT_LABEL[g.segment] : "No verdict") },
   band: { label: "Value band", of: (g: Guest) => `${BAND_LABEL[g.valueBand - 1]} fifth` },
   venue: { label: "Home venue", of: (g: Guest) => g.homeStore },
 } as const;

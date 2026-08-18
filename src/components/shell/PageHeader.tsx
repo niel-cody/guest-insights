@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { CoverageChip } from "@/components/ui/CoverageChip";
-import { CheckBadge } from "@/components/ui/Primitives";
+import { ChecksDrawer } from "@/components/ui/ChecksDrawer";
 import { FilterBar } from "@/components/shell/FilterBar";
 import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
@@ -60,7 +60,11 @@ export function PageHeader({
             figure where the member-tier content starts. */}
         <div className="flex items-center gap-2">
           {actions}
-          {checks && <CheckBadge href="#checks" checks={checks} />}
+          {/* C-4. This was `<CheckBadge href="#checks" />` and `#checks` did not
+              exist on any page — the anchor's host section was removed from
+              Overview and is now rendered nowhere. The register travels with the
+              chip instead, so it cannot come apart from it again. */}
+          {checks && <ChecksDrawer checks={checks} />}
           {coverage && <CoverageChip state={coverage} scope={coverageScope} />}
         </div>
       </div>

@@ -226,7 +226,7 @@ export function explainWindow(org: Org): WindowExplanation {
     window: w,
     claim,
     reason:
-      `The window is the most recent unbroken run of months in which the card tier can be trusted. ` +
+      `The window is the most recent unbroken run of months in which payment identity can be trusted. ` +
       `Of ${q.length} complete months tested, ${usable} passed the card-capture grading and ` +
       `${rejected.length} were rejected and named. ` +
       (stranded > 0

@@ -4,24 +4,37 @@ import { IconAlert, IconCheck, IconInfo } from "../shell/Icons";
 import { InfoButton } from "./InfoButton";
 
 export function Card({
-  title, subtitle, right, children, className = "", padded = true,
+  title, subtitle, right, explain, children, className = "", padded = true,
 }: {
   title?: string;
   subtitle?: string;
   right?: ReactNode;
+  /**
+   * The panel's `ExplainDrawer`, in the one place it is allowed to sit.
+   *
+   * It is a named slot rather than something a page drops into `right`, because
+   * the whole value of Task 0's pattern is that the affordance is in the **same
+   * place on every panel**. A reader learns it once. Passed through `right` it
+   * would sit wherever that panel's author happened to put it, and five panels
+   * later there is no pattern, only five buttons.
+   */
+  explain?: ReactNode;
   children: ReactNode;
   className?: string;
   padded?: boolean;
 }) {
   return (
     <section className={`overflow-hidden rounded-xl border border-line bg-surface-raised ${className}`}>
-      {(title || right) && (
+      {(title || right || explain) && (
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-3.5">
           <div>
             {title && <h2 className="text-[15px] font-semibold text-ink">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-[13px] text-ink-secondary">{subtitle}</p>}
           </div>
-          {right}
+          <div className="flex shrink-0 items-center gap-2">
+            {right}
+            {explain}
+          </div>
         </header>
       )}
       <div className={padded ? "p-5" : ""}>{children}</div>

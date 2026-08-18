@@ -155,17 +155,32 @@ export function previousReadable(
   const prev = all.periods[i + 1];
   if (!prev) return null;
 
+  /**
+   * ── The gap is the months that are missing, not the months between the
+   *    two calendar labels (C-6) ─────────────────────────────────────────────
+   *
+   * This counted from the *month containing* `prev.end` to the month containing
+   * `current.start`, which is one more than the number of months actually
+   * absent. A run ending 30 April 2025 against a window opening 1 May 2026
+   * reported **13 months** when the missing months are May 2025 to April 2026 —
+   * **12**. The figure appears on the face of the segment grid and inside the
+   * density-change explanation, so it was wrong in two places at once.
+   *
+   * Counting the absent months directly also makes the adjacency test read as
+   * what it means: zero missing months is a true previous period.
+   */
   const d = (s: string) => new Date(`${s}T00:00:00Z`);
-  const gapMonths =
+  const monthsBetween =
     (d(current.start).getUTCFullYear() - d(prev.end).getUTCFullYear()) * 12 +
     (d(current.start).getUTCMonth() - d(prev.end).getUTCMonth());
+  const gapMonths = Math.max(0, monthsBetween - 1);
 
   return {
     period: prev,
     gapMonths,
     label: `${monthName(prev.start)} – ${monthName(prev.end)}`,
-    // A run that ends the month before this one opens is a true previous period.
-    adjacent: gapMonths <= 1,
+    // No missing months at all is a true previous period.
+    adjacent: gapMonths === 0,
   };
 }
 
