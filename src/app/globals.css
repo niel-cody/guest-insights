@@ -42,6 +42,35 @@
   --gain-reactivated:  #86b6ef;
   --loss:              #e34948;
 
+  /*
+    Lifecycle segments — the one ramp that is deliberately on brand.
+
+    These are their own tokens rather than borrowed flow colours, because the
+    two ramps answer different questions and repointing one would silently
+    recolour the other. §5.4's three composition bars carry a colour from bar to
+    bar and the eye has to track it across three panels, so the ramp has to hold
+    together as a set rather than as six independent picks.
+
+    Oolio deep purple carries the two engaged segments at two steps of the same
+    hue, because Regulars and Established are the same kind of customer at two
+    depths and a hue change between them would read as a category change.
+    New takes brand green: it is the only segment that is unambiguously good
+    news, and green is the one colour an operator reads that way without being
+    told. The at-risk pair stay warm, and Seen once stays neutral — it is the
+    largest group in most hospitality businesses and colouring it red would
+    editorialise the single most common fact about the estate.
+
+    Values are the Oolio palette (design.oolio.dev/colours): deep purple
+    #673ab6 and green #4caf50, with the light-mode steps darkened far enough to
+    hold white text and the dark-mode steps lifted to hold dark text.
+  */
+  --segment-regular:     #5e35b1;
+  --segment-established: #b39ddb;
+  --segment-new:         #439f46;
+  --segment-slipping:    var(--warning);
+  --segment-lapsed:      var(--loss);
+  --segment-once:        var(--tier-unattributed);
+
   --good:     #1baf7a;
   --warning:  #eda100;
   --critical: #d63b30;
@@ -73,6 +102,11 @@
     --warning:  #c98500;
     --critical: #e05a50;
     --grid:     #26262b;
+    /* The two purples swap depth in dark mode so the lighter step stays the
+       lighter one against the ground it actually sits on. */
+    --segment-regular:     #a98eda;
+    --segment-established: #6b54a6;
+    --segment-new:         #5fbf63;
   }
 }
 
@@ -99,6 +133,9 @@
   --warning:  #c98500;
   --critical: #e05a50;
   --grid:     #26262b;
+  --segment-regular:     #a98eda;
+  --segment-established: #6b54a6;
+  --segment-new:         #5fbf63;
 }
 
 @theme inline {

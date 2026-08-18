@@ -19,10 +19,16 @@ type Tab = "who" | "noticed" | "behave";
  *
  * ── The tabs are named as answers, not as objects ──────────────────────────
  *
- * Stats / Commentary / Visits became **Who they are / What we noticed / How they
- * behave**, so the drawer reads as a person rather than as a record. The URL keys
- * moved with the names: a link carrying `tab=stats` after the tab stopped being
- * called Stats is a small lie that outlives everybody who knew about it.
+ * Stats / Commentary / Visits became **Who they are / What we noticed / When and
+ * where they visit**, so the drawer reads as a person rather than as a record.
+ * The URL keys moved with the names: a link carrying `tab=stats` after the tab
+ * stopped being called Stats is a small lie that outlives everybody who knew
+ * about it.
+ *
+ * The third tab was "How they behave", which was one label over two different
+ * questions — *when* somebody comes and *where* they go — presented as one
+ * undifferentiated scroll. The label now names both, and each has its own
+ * heading below.
  */
 export function GuestDrawer({
   guest: g, org, items, unmasked, crossVenueShare, tab, onTab, onClose, onPrev, onNext,
@@ -70,10 +76,18 @@ export function GuestDrawer({
         </header>
 
         <nav className="flex gap-1 border-b border-line px-3" role="tablist">
+          {/* "How they behave" was one tab holding two answers that were never
+              distinguished — a heatmap of *when* somebody comes and a bar list
+              of *where* they go, stacked with nothing to say they were separate
+              questions. The tab now names both, and the content below carries a
+              heading for each. Same two visuals, both kept: the heatmap was
+              right (weekday down the side, time across) and the venue bars were
+              right; what was missing was the sentence saying they answer
+              different things. */}
           {([
             ["who", "Who they are"],
             ["noticed", "What we noticed"],
-            ["behave", "How they behave"],
+            ["behave", "When and where they visit"],
           ] as [Tab, string][]).map(([key, label]) => (
             <button
               key={key}
@@ -469,17 +483,28 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
         </p>
       </div>
 
-      <DayMatrix
-        columns={weeks.map((wk) => ({ key: wk.key, label: wk.label }))}
-        cells={cells}
-        max={max}
-        hue={g.tier === "member" ? "var(--tier-member)" : "var(--tier-card)"}
-        population={`all ${count(g.visits)} ${org.labels.visits}, none omitted`}
-        window={`${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`}
-        cellHeight={26}
-        rowLabelWidth={36}
-        compact
-      />
+      {/* ── when ────────────────────────────────────────────────────────── */}
+      <div>
+        <h3 className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
+          When they visit
+        </h3>
+        <p className="mt-0.5 mb-2 text-[12px] leading-relaxed text-ink-muted">
+          Weekday down the side, calendar week across, one cell per day, shaded by what they spent. Which
+          days they own, whether they vanish at weekends, and the run of blanks that is the only individual
+          slip signal a {org.window.days}-day window can honestly give.
+        </p>
+        <DayMatrix
+          columns={weeks.map((wk) => ({ key: wk.key, label: wk.label }))}
+          cells={cells}
+          max={max}
+          hue={g.tier === "member" ? "var(--tier-member)" : "var(--tier-card)"}
+          population={`all ${count(g.visits)} ${org.labels.visits}, none omitted`}
+          window={`${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`}
+          cellHeight={26}
+          rowLabelWidth={36}
+          compact
+        />
+      </div>
 
       {/* ── The venue mix, as text ───────────────────────────────────────────
           This was a thirteen-column strip of coloured blocks with no axis, no
@@ -495,8 +520,12 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
       {venuesUsed.length > 1 && (
         <div>
           <h3 className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-            Where they go
+            Where they visit
           </h3>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">
+            The split across your sites, longest bar first. This is a ranking rather than a shape, which is
+            why it is bars and not a second grid — the time axis is already above.
+          </p>
           <table className="mt-1.5 w-full text-[12px]">
             <tbody>
               {venueSplit.map((v) => (
@@ -558,7 +587,3 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
   );
 }
 
-/** Stable per-venue colours for the ribbon. Hue rotation, so six read apart. */
-function venueColour(i: number): string {
-  return `oklch(0.62 0.13 ${(i * 47) % 360})`;
-}

@@ -64,18 +64,29 @@ export default async function GuestsPage({
       />
       <Page>
         <div className="mx-auto max-w-[1300px] space-y-5">
+          {/* Same four-line-and-a-button pattern as Overview. See `Tile`: the
+              method folds, the grain and window do not. */}
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label={`Known ${org.labels.guests}`}
               value={count(tileCount(population))}
               accent="var(--gain-returning)"
-              footnote={
+              detail={<>{count(segments.population)} of them classifiable</>}
+              meta={<>Person grain · {windowShort(org.window)}</>}
+              info={
                 <>
-                  {count(segments.population)} classifiable — a card becomes a person on its second visit
-                  <span className="mt-1 block text-ink-muted">
-                    Person grain · {windowShort(org.window)} · not the number of customers served, which is
-                    unknowable
-                  </span>
+                  <p>
+                    Everybody identified by payment card in the window, enrolled or not.{" "}
+                    <strong className="text-ink">
+                      Not the number of customers you served, which is unknowable
+                    </strong>{" "}
+                    — cash and unbridged trade carry no identity at all.
+                  </p>
+                  <p className="mt-1.5">
+                    &quot;Classifiable&quot; is the smaller number: enrolled, or seen on a card more than
+                    once. A card seen once is a transaction, not yet a customer, and nothing about a habit
+                    can be inferred from it.
+                  </p>
                 </>
               }
             />
@@ -83,13 +94,20 @@ export default async function GuestsPage({
               label="Enrolled members"
               value={count(tileCount(cs.member.people))}
               accent="var(--tier-member)"
-              footnote={
+              detail={<>{pct(cs.member.people / Math.max(population, 1), 0)} of the base</>}
+              meta={<>Member tier · {windowShort(org.window)}</>}
+              info={
                 <>
-                  {pct(cs.member.people / Math.max(population, 1), 0)} of the base
-                  <span className="mt-1 block text-ink-muted">
-                    Resolved through the card as well as the scan, so a member who forgot to scan is still
-                    counted once
-                  </span>
+                  <p>
+                    People with a loyalty record. Resolved{" "}
+                    <strong className="text-ink">through the card as well as the scan</strong>, so a member
+                    who forgot to scan is still counted once rather than appearing twice — once as a member
+                    and once as an anonymous card.
+                  </p>
+                  <p className="mt-1.5">
+                    These are the only people who carry a name and the only people who carry a lifecycle
+                    verdict.
+                  </p>
                 </>
               }
             />
@@ -97,12 +115,23 @@ export default async function GuestsPage({
               label="Recognised by card"
               value={count(tileCount(cs.nonMember.people))}
               accent="var(--tier-card)"
-              footnote={
+              detail={
+                <>{pct(cs.nonMember.people / Math.max(population, 1), 0)} of the base, never enrolled</>
+              }
+              meta={<>Card tier · {windowShort(org.window)}</>}
+              info={
                 <>
-                  {pct(cs.nonMember.people / Math.max(population, 1), 0)} of the base, never enrolled
-                  <span className="mt-1 block text-ink-muted">
-                    No name, email or phone exists for any of these people
-                  </span>
+                  <p>
+                    A payment card seen more than once, belonging to somebody who has never enrolled. You can
+                    recognise them at the counter.{" "}
+                    <strong className="text-ink">You cannot contact them</strong> — no name, email or phone
+                    exists for any of these people, which is why their rows carry a reference instead of a
+                    name.
+                  </p>
+                  <p className="mt-1.5">
+                    They carry no lifecycle verdict either: a reissued card is indistinguishable from a
+                    customer who stopped coming.
+                  </p>
                 </>
               }
             />
@@ -110,12 +139,25 @@ export default async function GuestsPage({
               label="Seen only once"
               value={count(tileCount(onceGuests))}
               accent="var(--warning)"
-              footnote={
+              detail={
                 <>
                   {pct(onceGuests / Math.max(population, 1), 0)} of the base · {money(onceSpend)} between them
-                  <span className="mt-1 block text-ink-muted">
-                    No second visit inside the window. The majority case in most hospitality businesses
-                  </span>
+                </>
+              }
+              meta={<>Person grain · {windowShort(org.window)}</>}
+              info={
+                <>
+                  <p>
+                    No second visit inside the window.{" "}
+                    <strong className="text-ink">The majority case in most hospitality businesses</strong>,
+                    and not a failure state — it is the normal shape of a customer base, which is why it is
+                    not coloured as a problem elsewhere in this report.
+                  </p>
+                  <p className="mt-1.5">
+                    It is a floor rather than a fact: somebody whose first visit fell in the last week of the
+                    window has had no opportunity to return, and the window cannot tell them apart from
+                    somebody who chose not to.
+                  </p>
                 </>
               }
             />

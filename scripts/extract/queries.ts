@@ -469,10 +469,68 @@ ${PEOPLE},
 ${classifiedFor(lapseDays, w.end)}
 SELECT TIER, SEGMENT, VALUE_BAND,
   COUNT(*) AS GUESTS, SUM(VISITS) AS VISITS, SUM(SPEND) AS SPEND,
+  SUM(ORDERS) AS ORDERS, SUM(ITEMS) AS ITEMS,
   MIN(SPEND) AS MIN_SPEND, MAX(SPEND) AS MAX_SPEND,
   AVG(VISITS) AS AVG_VISITS, AVG(SPEND) AS AVG_SPEND,
   COUNT_IF(VENUES > 1) AS MULTI_VENUE
 FROM c GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`;
+}
+
+/**
+ * Basket shape and visit timing, by lifecycle segment, at **whole-population
+ * grain**.
+ *
+ * ── Why this query exists rather than the obvious client-side derivation ───
+ *
+ * Every quantity here is already sitting in the guest working set the grid
+ * loads, and computing it there would have taken twenty lines and no warehouse
+ * round trip. It would also have been wrong, and wrong in a way that flatters
+ * the finding.
+ *
+ * The working set is the top of the value distribution **in full** plus a
+ * hash-ordered sample of the tail. Its coverage therefore varies by segment —
+ * measured against the population it is 97% of Regulars and 53% of Lapsed — and
+ * because it over-selects high spenders, spend per visit within a segment comes
+ * out high by up to 14 points on exactly the low-frequency segments. The
+ * headline this data produces is that Regulars have the *smallest* baskets and
+ * Seen once the largest, and the sampling bias inflates the Seen once end. The
+ * missingness runs in the direction of the answer, which is the same test that
+ * withholds the per-cover comparison on Overview.
+ *
+ * So it is measured on everybody, in the warehouse, once.
+ *
+ * ── The grain, stated because two of these are easy to misread ────────────
+ *
+ * `visits` is person-day-at-a-venue, so `COUNT(*)` is visits and `SUM(ORDERS)`
+ * is transactions — two coffees an hour apart is one visit and two orders. That
+ * distinction is the whole reason average transaction value and spend per visit
+ * are different numbers here, and publishing either without the other invites
+ * the reader to conclude the frequent customer is the low-value one.
+ *
+ * **Party size is deliberately absent.** Covers are recorded on a minority of
+ * orders at one of the two organisations and the missingness correlates with
+ * order size, so a per-head figure by segment would be a comparison between the
+ * top of one distribution and all of another. Items per visit is published
+ * instead and named as what it is: items, not people.
+ */
+export function segmentBehaviourQuery({ orgId, w, pairs, lapseDays, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${PEOPLE},
+${classifiedFor(lapseDays, w.end)}
+SELECT
+  c.SEGMENT,
+  DAYOFWEEK(v.D) AS DOW,
+  v.DAYPART,
+  COUNT(*) AS VISITS,
+  SUM(v.ORDERS) AS ORDERS,
+  SUM(v.SPEND) AS SPEND,
+  SUM(v.ITEMS) AS ITEMS,
+  COUNT(DISTINCT v.PERSON_ID) AS PEOPLE
+FROM visits v
+JOIN c ON c.PERSON_ID = v.PERSON_ID
+WHERE c.SEGMENT IS NOT NULL
+GROUP BY 1, 2, 3
+ORDER BY 1, 2, 3`;
 }
 
 /**

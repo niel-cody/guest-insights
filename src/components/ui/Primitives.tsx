@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { IconAlert, IconCheck, IconInfo } from "../shell/Icons";
+import { InfoButton } from "./InfoButton";
 
 export function Card({
   title, subtitle, right, children, className = "", padded = true,
@@ -32,25 +33,41 @@ export function Card({
  * A headline figure. Tiles round to the nearest ten by contract — a front page
  * that reads 412 invites an argument about the 2, and the 2 is never the point.
  *
- * ── There is no `hint` prop, and that is deliberate ────────────────────────
+ * ── Four lines, and the fifth is behind a button ───────────────────────────
  *
- * This used to take a `hint` string and render an info icon with a `title`
- * attribute. §8 rule 7 removes the whole mechanism: **hover does not exist on
- * touch**, a caveat nobody can reach is a caveat nobody reads, and a tile that
- * needs a tooltip to be understood is not finished. The prototype this replaces
- * shipped four info icons that rendered nothing at all when clicked.
+ * The tile is deliberately short, in a fixed order, because four of these sit
+ * across the top of a page and a reader takes them in as a row rather than one
+ * at a time:
  *
- * Everything a reader needs is in `footnote`, in smaller always-visible type.
- * That is not a downgrade — it is the caveat arriving without being asked for,
- * which is the only way it reaches the reader who is in a hurry.
+ *   1. `label`    — what this is
+ *   2. `value`    — the figure
+ *   3. `detail`   — the one supporting figure that makes it readable
+ *   4. `meta`     — tier and window: which population, over what
+ *   5. `info`     — the method, behind a button
+ *
+ * Lines 3 and 4 stay on the face because they are **part of the figure, not an
+ * explanation of it**: the grain, the window and the denominator are what stop
+ * a number being ambiguous, and a build whose contract is that every figure
+ * carries them cannot put them behind a click.
+ *
+ * Line 5 is the method — the thing a reader asks once and never again — and it
+ * is the only thing that folds. See `InfoButton` for why the mechanism came
+ * back and what conditions it came back under. **A caveat or a refusal is never
+ * line 5**; those go in `footnote`, which is always visible.
  */
 export function Tile({
-  label, value, accent = "var(--accent)", footnote, refused = false,
+  label, value, accent = "var(--accent)", detail, meta, info, footnote, refused = false,
 }: {
   label: string;
   value: string;
   accent?: string;
-  /** Always visible. Population, window and denominator live here. */
+  /** Line 3. The one supporting figure — a split, a share, a comparison. */
+  detail?: ReactNode;
+  /** Line 4. Tier and window. Which population this counts, and over what. */
+  meta?: ReactNode;
+  /** Line 5, behind a button beside the label. Method and provenance only. */
+  info?: ReactNode;
+  /** Always visible, below everything. Caveats and refusal reasons live here. */
   footnote?: ReactNode;
   /**
    * A figure this build declines to publish.
@@ -73,7 +90,10 @@ export function Tile({
       className="rounded-xl border border-line bg-surface-raised px-5 py-4"
       style={{ borderLeft: `3px solid ${accent}` }}
     >
-      <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">{label}</span>
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">{label}</span>
+        {info && <InfoButton label={`About ${label.toLowerCase()}`} align="end">{info}</InfoButton>}
+      </div>
       {refused && (
         <div className="mt-1.5 text-[13px] font-semibold text-ink-secondary">Not published</div>
       )}
@@ -84,6 +104,8 @@ export function Tile({
       >
         {value}
       </div>
+      {detail && <div className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{detail}</div>}
+      {meta && <div className="mt-1 text-[12px] leading-relaxed text-ink-muted">{meta}</div>}
       {footnote && <div className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{footnote}</div>}
     </div>
   );

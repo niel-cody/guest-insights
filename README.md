@@ -231,7 +231,16 @@ not support. Two years of chrome over four months of usable data is how eighteen
 figures came to contradict each other in v1.
 
 Stated on the surface, because it is a real cost: no year-on-year anything, no
-cohort retention triangle, no lifetime value, no member history to trend.
+lifetime value, no card-tier history to trend.
+
+**Periods are readable runs, not quarters.** Coffee Guru has three, and they are
+not adjacent — the current one opens thirteen months after the previous one
+closes, because every month between failed card capture. So every
+previous-period comparison in the product carries its gap: the segment grid's
+change columns and the daypart density column both name the period they are
+against and how far away it is. A change column labelled "previous period"
+across a thirteen-month hole reads as one quarter of movement and is a year of
+it, most of which happened where nothing was measured.
 
 ---
 
@@ -241,7 +250,7 @@ Seven surfaces became five.
 
 | Screen | Answers |
 |---|---|
-| **Overview** | Where you sit. Attribution, the member headline, where members stand, flow, growth |
+| **Overview** | Where you sit. Attribution, the member headline, the segment grid, how members become visits and spend, growth |
 | **Members** | The value case: six ways, association against effect, the opportunities, the refusals |
 | **Guest list** | Grid and drawer. Masked by default, paginated, value band and daypart |
 | **Trade density** | Eight dayparts, trading identity, member penetration, daypart standardisation |
@@ -272,6 +281,10 @@ Daypart Specialist — far more concentrated than the Premium Dining archetype's
   state (Seen once, New, Lapsed) rests on the calendar and needs no minimum.
 - Tiles round to the nearest ten. **Grids and exports never round.** A figure
   shown beside its operands is computed from the operands as displayed.
+- A tile is four lines and a button: what it is, the figure, one supporting
+  figure, then tier and window. **The grain, window and denominator never fold** —
+  they are part of the figure. Only the method goes behind the button, and the
+  button cannot open empty.
 - A personal cadence is never filled in from the org median. If a guest has no
   cadence, the surface says nothing.
 - **Only enrolled people have a name.** A card-recognised guest is shown as a
@@ -371,5 +384,17 @@ sensitivity dial, pooling views, cross-venue overlap, postcode.
 
 Held for want of data, not appetite: cohort retention curves and any lifetime
 value figure — three months cannot carry either. Expected-next-visit with
-confidence bands is the next thing worth building, and the survival curve the
+confidence bands is the next thing worth building, and the Kaplan-Meier fit the
 thresholds now come from is most of the work.
+
+**Two panels are drawn but not yet populated.** Average transaction value and
+items per visit by segment, and the segment-by-daypart timing grid, need columns
+that are in the extract now and not in the shipped snapshots. They light up on
+the next `npm run extract`. Both are deliberately *not* derived from the guest
+working set the grid already ships to the browser: that set is the top of the
+value distribution in full plus a hash sample of the tail, its coverage runs
+from 97% of Regulars to 53% of Lapsed, and it overstates spend per visit by up
+to fourteen points on exactly the low-frequency segments. The finding those
+panels carry is that the most frequent guests have the *smallest* baskets, and
+the bias inflates the other end of that comparison — the same test that
+withholds the per-cover figure.

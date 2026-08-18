@@ -1,32 +1,58 @@
-import { SEGMENT_COLOUR, SEGMENT_LABEL, count, money, pct } from "@/lib/metrics";
+import { SEGMENT_COLOUR, SEGMENT_INK, SEGMENT_LABEL, count, money, pct } from "@/lib/metrics";
 
 /**
- * What replaced three charts.
+ * What replaced the dumbbell, and what the dumbbell replaced.
  *
- * ── What went, and why ────────────────────────────────────────────────────
+ * ── The history, because it explains the shape ─────────────────────────────
  *
- * **The log-log scatter is gone.** Its own footnote admitted the legend counted
- * occupied pixels rather than people. It could not draw two of the six segments
- * at all, because Slipping and Lapsed are defined on time since the last visit,
- * which was on neither axis. And it plotted 24,906 people directly beside a
- * table of 4,966 under a single heading, which is an instruction to read them as
- * a pair when they are different populations. The segment table takes the width
- * it was competing for.
+ * **A log-log scatter and two treemaps went first.** The scatter's own footnote
+ * admitted its legend counted occupied pixels rather than people, and it could
+ * not draw two of the six segments at all — Slipping and Lapsed are defined on
+ * time since the last visit, which was on neither axis. The treemaps re-encoded
+ * two columns that were already visible to the dollar in the table beside them,
+ * in a geometry that is worse at the job: area is near the bottom of the
+ * perceptual ranking and rectangles of different aspect ratios cannot be
+ * compared by eye at all.
  *
- * **Both treemaps are gone.** They re-encoded two columns that were already
- * visible to the dollar in the table beside them, in a geometry that is worse at
- * the job — area is near the bottom of the perceptual ranking and rectangles of
- * different aspect ratios cannot be compared by eye at all. The revenue treemap
- * also drew four of six segments legibly while quoting an all-six total.
+ * **Then a dumbbell replaced them**, running each segment's bar from its share
+ * of visits to its share of revenue. That was right about the finding — the
+ * *gap* between two shares is the thing worth acting on — and wrong about two
+ * things. It dropped the population entirely, so the reader could see that
+ * Regulars take 73% of visits and 68% of spend without ever learning they are
+ * 28% of the people, which is the fact that makes the other two interesting.
+ * And a bar running left-to-right between two points reads as movement: it
+ * invited "72.9% *became* 67.6%", which is not what the data says. These are
+ * three separate compositions of the same population, not a flow.
  *
- * **What replaces them is the thing neither of them showed.** The finding is not
- * that Regulars are large in traffic, or that Regulars are large in revenue. It
- * is the *gap* between those two shares — a segment that is 28% of your people
- * and 67% of your revenue is a different business problem from one that is 27%
- * of your people and 5% of your revenue. Two treemaps put that comparison across
- * two panels and made the reader hold one shape in their head while looking at
- * the other. One diverging bar puts it on a single position scale, which is the
- * channel people actually read accurately.
+ * ── Three aligned 100% bars ────────────────────────────────────────────────
+ *
+ * Members → Visits → Spend, each totalling 100%, same colour per segment in
+ * each. The question the table answers is *who is in each segment and what are
+ * they worth*. The question this answers is different and is the reason it
+ * earns the space: **how does each segment's importance change as you move from
+ * people, to behaviour, to money?**
+ *
+ * The comparison happens on position along a shared axis, which is the channel
+ * people read accurately, and it happens between bars that are stacked directly
+ * above each other so the eye travels vertically rather than across a legend.
+ *
+ * ── Not a Sankey, deliberately ─────────────────────────────────────────────
+ *
+ * Members → Visits → Spend is tempting to draw as a flow and it is not one.
+ * These are not the same units moving between states: a person is not converted
+ * into a visit, and a visit is not converted into a dollar in any sense a
+ * ribbon would be honest about. A Sankey would assert causal movement the data
+ * does not contain. Three aligned compositions give the comparison without
+ * making the claim.
+ *
+ * ── Bands are exact, and small ones are hairlines ──────────────────────────
+ *
+ * No minimum band width. A floor would be the honest choice on a heatmap cell,
+ * where the question is *did anything happen here* — but these bars total 100%
+ * by construction and a floored band would make them total more, which breaks
+ * the one promise the chart makes. A segment at 0.1% of visits renders as a
+ * hairline, which is what 0.1% looks like. The exact figures are in the grid
+ * directly above.
  */
 
 type Row = {
@@ -37,104 +63,126 @@ type Row = {
   spend: number;
 };
 
-/**
- * Share of traffic against share of revenue, per segment, on one axis.
- *
- * Bars run from the visit share to the revenue share. A bar pointing right is a
- * segment worth more than its footfall; pointing left, less. The length is the
- * size of the mismatch, which is the quantity worth acting on and the one
- * quantity neither treemap encoded.
- */
-export function SegmentGap({
+/** The inline percentage only renders where the band can hold it. */
+const LABEL_FLOOR = 0.06;
+
+export function SegmentComposition({
   rows, windowLabel,
 }: {
   rows: Row[];
   windowLabel: string;
 }) {
-  const totalVisits = rows.reduce((a, r) => a + r.visits, 0) || 1;
-  const totalSpend = rows.reduce((a, r) => a + r.spend, 0) || 1;
+  const totals = {
+    guests: rows.reduce((a, r) => a + r.guests, 0) || 1,
+    visits: rows.reduce((a, r) => a + r.visits, 0) || 1,
+    spend: rows.reduce((a, r) => a + r.spend, 0) || 1,
+  };
 
-  const points = rows.map((r) => ({
-    ...r,
-    visitShare: r.visits / totalVisits,
-    spendShare: r.spend / totalSpend,
-  }));
+  const bars = [
+    {
+      key: "guests" as const,
+      label: "Members",
+      note: `${count(totals.guests)} enrolled people`,
+    },
+    {
+      key: "visits" as const,
+      label: "Visits",
+      note: `${count(totals.visits)} visits`,
+    },
+    {
+      key: "spend" as const,
+      label: "Spend",
+      note: money(totals.spend),
+    },
+  ];
 
-  // A shared scale across every bar (§8 rule 1). Independent scales would make
-  // the smallest mismatch look like the largest.
-  const max = Math.max(...points.map((p) => Math.max(p.visitShare, p.spendShare)), 0.05);
+  const share = (r: Row, key: "guests" | "visits" | "spend") => r[key] / totals[key];
 
-  const W = 420;
-  const LABEL = 96;
-  /**
-   * Room reserved to the right of the plot for the value labels.
-   *
-   * Without it the largest segment's bar reaches the right edge and its own
-   * label — the numbers that make the bar readable — renders outside the
-   * viewBox and simply disappears. The segment with the biggest mismatch is the
-   * one most worth reading, so it is exactly the wrong one to lose.
-   */
-  const LABEL_ROOM = 96;
-  const plot = W - LABEL - 8;
-  const x = (share: number) => LABEL + (share / max) * plot;
+  // The reading line is computed, never written. It names whichever segment has
+  // the largest gap between its share of people and its share of visits, in
+  // whichever direction — so it stays true on a merchant whose shape is the
+  // opposite of this one's.
+  const carrying = [...rows].sort(
+    (a, b) => (share(b, "visits") - share(b, "guests")) - (share(a, "visits") - share(a, "guests")),
+  );
+  const most = carrying[0];
+  const least = carrying.at(-1);
 
   return (
     <figure className="m-0">
-      <figcaption className="mb-2">
+      <figcaption className="mb-3">
         <h3 className="text-[14px] font-semibold text-ink">
-          Who drives traffic, and who delivers revenue
+          How your member base turns into visits and spend
         </h3>
-        <p className="mt-0.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-secondary">
-          Each bar runs from a segment&apos;s share of <strong>visits</strong> to its share of{" "}
-          <strong>revenue</strong>. Pointing right means worth more than its footfall; left, less. The
-          length of the bar is the size of the mismatch, and the mismatch is the finding —{" "}
-          {count(totalVisits)} visits and {money(totalSpend)} from enrolled people · {windowLabel}.
+        <p className="mt-0.5 max-w-[85ch] text-[12px] leading-relaxed text-ink-secondary">
+          Each segment&apos;s share of enrolled members, of visits and of spend, over {windowLabel}. Every
+          bar totals 100%. <strong className="text-ink">These are three compositions of the same people,
+          not a movement between them</strong> — nobody turns into a visit.
         </p>
       </figcaption>
 
-      <svg viewBox={`0 0 ${W + LABEL_ROOM} ${points.length * 30 + 26}`} className="w-full" role="img"
-        aria-label={points
-          .map((p) => `${p.label}: ${pct(p.visitShare, 1)} of visits, ${pct(p.spendShare, 1)} of revenue`)
-          .join(". ")}>
-        {points.map((p, i) => {
-          const y = i * 30 + 16;
-          const from = x(p.visitShare);
-          const to = x(p.spendShare);
-          const right = to >= from;
-          return (
-            <g key={p.segment}>
-              <text x={LABEL - 6} y={y + 4} textAnchor="end" fontSize={11} fill="var(--ink)">
-                {p.label}
-              </text>
-              <line x1={Math.min(from, to)} x2={Math.max(from, to)} y1={y} y2={y}
-                stroke={right ? "var(--good)" : "var(--warning)"} strokeWidth={7} strokeLinecap="round"
-                opacity={0.85} />
-              {/* Visits: hollow. Revenue: filled. One mark is where they are,
-                  the other is what they are worth. */}
-              <circle cx={from} cy={y} r={4.5} fill="var(--surface-raised)"
-                stroke={SEGMENT_COLOUR[p.segment] ?? "var(--ink-muted)"} strokeWidth={2} />
-              <circle cx={to} cy={y} r={4.5} fill={SEGMENT_COLOUR[p.segment] ?? "var(--ink-muted)"} />
-              <text x={Math.max(from, to) + 9} y={y + 4} fontSize={10} className="tnum"
-                fill="var(--ink-secondary)">
-                {pct(p.visitShare, 1)} → {pct(p.spendShare, 1)}
-              </text>
-            </g>
-          );
-        })}
-        <line x1={LABEL} x2={LABEL} y1={4} y2={points.length * 30 + 4} stroke="var(--line)" />
-      </svg>
+      <div className="flex flex-col gap-3">
+        {bars.map((bar) => (
+          <div key={bar.key}>
+            <div className="mb-1 flex items-baseline justify-between gap-3">
+              <span className="text-[12px] font-medium text-ink">{bar.label}</span>
+              <span className="tnum text-[11px] text-ink-muted">{bar.note}</span>
+            </div>
+            <div className="flex h-9 w-full overflow-hidden rounded-md">
+              {rows.map((r) => {
+                const s = share(r, bar.key);
+                if (s <= 0) return null;
+                return (
+                  <div
+                    key={r.segment}
+                    className="flex items-center justify-center overflow-hidden"
+                    style={{
+                      width: `${s * 100}%`,
+                      background: SEGMENT_COLOUR[r.segment] ?? "var(--ink-muted)",
+                      color: SEGMENT_INK[r.segment] ?? "#ffffff",
+                    }}
+                    title={`${r.label} · ${pct(s, 1)} of ${bar.label.toLowerCase()}`}
+                    aria-label={`${r.label}: ${pct(s, 1)} of ${bar.label.toLowerCase()}`}
+                  >
+                    {s >= LABEL_FLOOR && (
+                      <span className="tnum text-[11px] font-medium">{pct(s, 0)}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
 
-      <figcaption className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-ink-muted bg-transparent" />
-          share of visits
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-full bg-ink-muted" />
-          share of revenue
-        </span>
-        <span>Shares are of enrolled people only — the same denominator as the table.</span>
+      <figcaption className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {rows.map((r) => (
+          <span key={r.segment} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-[3px]"
+              style={{ background: SEGMENT_COLOUR[r.segment] ?? "var(--ink-muted)" }}
+            />
+            {r.label}
+          </span>
+        ))}
       </figcaption>
+
+      {most && least && most !== least && (
+        <p className="mt-2.5 max-w-[85ch] text-[12px] leading-relaxed text-ink-secondary">
+          <strong className="text-ink">{most.label}</strong> are {pct(share(most, "guests"), 1)} of your
+          enrolled people and {pct(share(most, "visits"), 1)} of your visits — they are carrying the
+          programme. <strong className="text-ink">{least.label}</strong> are{" "}
+          {pct(share(least, "guests"), 1)} of the people and {pct(share(least, "visits"), 1)} of the visits.
+          The distance between those two pairs is the shape of the opportunity, and it is the reason a single
+          average member is not a useful object.
+        </p>
+      )}
+      <p className="mt-1.5 max-w-[85ch] text-[11px] leading-relaxed text-ink-muted">
+        Shares are of enrolled people only — the same denominator as the grid above. Bands are drawn to
+        exact width with no minimum, so a segment worth a fraction of a percent renders as a hairline rather
+        than being inflated to a readable one. Percentages label the bands that can hold them; the rest are
+        in the grid.
+      </p>
     </figure>
   );
 }

@@ -546,11 +546,12 @@ async function extractPeriod(
     query<Row>(Q.guestListQuery(calArgs)),
   ]);
 
-  console.log("  day grid, cross-venue share, scatter…");
-  const [dayGrid, venueCross, scatterRows] = await Promise.all([
+  console.log("  day grid, cross-venue share, scatter, segment behaviour…");
+  const [dayGrid, venueCross, scatterRows, segmentBehaviour] = await Promise.all([
     query<Row>(Q.dayGridQuery(args)),
     query<Row>(Q.venueCrossShareQuery(args)),
     query<Row>(Q.scatterQuery(calArgs)),
+    query<Row>(Q.segmentBehaviourQuery(calArgs)),
   ]);
 
   // Items last: they are the largest join in the extract, and everything above
@@ -1007,7 +1008,8 @@ async function extractPeriod(
     tier: String(s.TIER),
     segment: s.SEGMENT == null ? null : String(s.SEGMENT),
     valueBand: num(s.VALUE_BAND), guests: num(s.GUESTS), visits: num(s.VISITS),
-    spend: num(s.SPEND), minSpend: num(s.MIN_SPEND), maxSpend: num(s.MAX_SPEND),
+    spend: num(s.SPEND), orders: num(s.ORDERS), items: num(s.ITEMS),
+    minSpend: num(s.MIN_SPEND), maxSpend: num(s.MAX_SPEND),
     avgVisits: r2(num(s.AVG_VISITS)), avgSpend: r2(num(s.AVG_SPEND)), multiVenue: num(s.MULTI_VENUE),
   }));
   const truePopulation = segmentRows.reduce((a, s) => a + s.guests, 0);
@@ -1109,6 +1111,18 @@ async function extractPeriod(
     population: truePopulation, rows: segmentRows,
     gapHistogram: gapHist.map((r) => ({ days: num(r.DAYS), n: num(r.N) })),
   });
+
+  // Segment × day × daypart, whole population. Its own file rather than a
+  // widening of `segments`, because it is a different grain — visits, not
+  // people — and merging two grains into one file is how a consumer comes to
+  // sum a person count across day-of-week rows.
+  write(org.slug, period, "segmentBehaviour", segmentBehaviour.map((r) => ({
+    segment: String(r.SEGMENT),
+    dow: num(r.DOW),
+    daypart: String(r.DAYPART),
+    visits: num(r.VISITS), orders: num(r.ORDERS),
+    spend: r2(num(r.SPEND)), items: num(r.ITEMS), people: num(r.PEOPLE),
+  })));
 
   write(org.slug, period, "venueMonthly", venueMonthly.map((r) => ({
     month: day(r.MONTH), storeId: String(r.STORE_ID), storeName: String(r.STORE_NAME),

@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { cache } from "react";
 import type {
   Cohorts, Coverage, DayGrid, Dayparts, GuestRows, Guests, Items, Members, Network, Org,
-  Scatter, Snapshot, VenueCrossRow,
+  Scatter, SegmentBehaviourRow, Snapshot, VenueCrossRow,
 } from "./types";
 import { unpackGuests } from "./guest-columns";
 import type { Periods } from "./periods";
@@ -62,7 +62,7 @@ export const getOrg = cache(
 export const getSnapshot = cache(async (slug: string, period: string): Promise<Snapshot> => {
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
   ] = await Promise.all([
     read<Snapshot["org"]>(slug, period, "org"),
     read<Snapshot["coverage"]>(slug, period, "coverage"),
@@ -77,11 +77,12 @@ export const getSnapshot = cache(async (slug: string, period: string): Promise<S
     read<Snapshot["network"]>(slug, period, "network"),
     read<Snapshot["venueMonthly"]>(slug, period, "venueMonthly"),
     read<Items>(slug, period, "items").catch(() => null),
+    read<SegmentBehaviourRow[]>(slug, period, "segmentBehaviour").catch(() => null),
     getCohorts(slug),
   ]);
   return {
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
   };
 });
 

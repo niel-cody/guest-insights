@@ -111,10 +111,39 @@ async function main() {
         );
       }
 
-      // ── §5.7: coverage is a panel here, not a report ─────────────────────
-      check("the trust panel is inside Overview", html.includes("What this report is standing on"));
-      check("the claim is stated before the price",
-        html.indexOf("What this report can tell you") < html.indexOf("And what it cannot"));
+      // ── §5.7: the trust panel is gone from Overview ──────────────────────
+      //
+      // It used to be asserted *present* here. "What this report is standing
+      // on" was the most rigorous panel in the build sitting in the middle of
+      // the page an operator opens to ask what is happening to their customers,
+      // and it taught them to scroll past the middle — which is where the two
+      // findings now live. The rigour did not move into a fold; it was already
+      // reachable from every screen. What is asserted instead is that the two
+      // things that made the panel load-bearing are still true.
+      check("the trust panel has left Overview",
+        !html.includes("What this report is standing on"),
+        "the coverage report is back in the middle of the page");
+      // The check badge is what survives the panel: it states the count and it
+      // is a link, so the evidence is still one click from the page that
+      // dropped the long version. A static span reading "5 checks pass" is what
+      // v1 shipped, so the assertion is on the anchor, not on the words.
+      check("the check badge is still on Overview and is a link",
+        /<a[^>]*>(?:(?!<\/a>)[\s\S])*checks (?:pass|failing)/.test(html),
+        "the badge is absent or is no longer a link to the evidence");
+
+      // ── The two findings are open, not folded ────────────────────────────
+      //
+      // `Disclosure` keeps its result line visible either way, so this is not a
+      // correctness rule — it is the editorial one that replaced the trust
+      // panel. A finding behind a click is a finding nobody reads.
+      for (const finding of ["Where the change came from", "What members and everyone else actually buy"]) {
+        const i = html.indexOf(finding);
+        if (i < 0) continue;
+        const block = html.slice(i, i + 2000);
+        check(`"${finding}" is open by default`,
+          /<details[^>]*\sopen/.test(block),
+          "it renders folded");
+      }
     }
 
     // ── A refusal is stated with its reason, and never left blank ──────────
@@ -150,13 +179,52 @@ async function main() {
         `a refusal at offset ${m.index} is struck through — say it, do not scar it`);
     }
 
-    // ── §8 rule 7: no info icons ───────────────────────────────────────────
+    // ── §8 rule 7, replaced rather than deleted ────────────────────────────
     //
-    // The prototype shipped four that rendered nothing at all. The mechanism is
-    // gone from `Tile`, so this guards against it being reintroduced.
-    check("no info icon sits beside a tile label",
-      !/uppercase[^>]*>[^<]*<\/span>\s*<span[^>]*cursor-help/.test(html),
-      "a cursor-help element follows a tile label");
+    // The old rule was "no info icons anywhere", written after the prototype
+    // shipped four that **rendered nothing at all** when clicked. That rule has
+    // been lifted: the tiles were carrying three lines of prose each, and four
+    // of those across the top of a page is a wall a reader skims — the same
+    // failure the rule prevented, reached from the other side.
+    //
+    // What replaces it is the two conditions the reversal came with, asserted
+    // on the rendered output rather than trusted to the component:
+    //
+    //   1. it is a real button, so it works on touch and by keyboard;
+    //   2. it cannot be empty, which is the original defect.
+    //
+    // `cursor-help` is still banned outright. It is the CSS of a hover-only
+    // affordance and it has no keyboard or touch story at all.
+    check("no hover-only help cursor anywhere",
+      !/cursor-help/.test(html),
+      "a cursor-help element is back — hover is not an affordance on touch");
+
+    // Every info trigger is a <button> that declares its state and names
+    // itself. Matched on `data-info-button`, which `InfoButton` stamps on all
+    // of them — matching the aria-label instead would only find the ones `Tile`
+    // generates, and the hand-written ones are exactly the ones likely to be
+    // built wrong.
+    for (const m of html.matchAll(/data-info-button=""/g)) {
+      const el = html.slice(Math.max(0, m.index - 300), m.index + 300);
+      check("an info trigger is a real button",
+        /<button[^>]*data-info-button/.test(el),
+        `the trigger at offset ${m.index} is not a <button>`);
+      check("an info trigger declares its expanded state",
+        /aria-expanded/.test(el),
+        `the trigger at offset ${m.index} has no aria-expanded`);
+      check("an info trigger names itself for assistive tech",
+        /aria-label="[^"]+"/.test(el),
+        `the trigger at offset ${m.index} has no aria-label`);
+    }
+
+    // The reversal is conditional on the buttons existing where the prose was
+    // removed from. A page whose tiles lost their explanation and gained no
+    // button has quietly deleted the explanation.
+    if (isOverview || name.endsWith("/guests")) {
+      check("the tiles carry their explanation behind a button",
+        (html.match(/data-info-button/g) ?? []).length >= 4,
+        `${(html.match(/data-info-button/g) ?? []).length} info buttons on a page with four tiles`);
+    }
 
     // ── §8 rule 2: no dual vertical axes, ever ─────────────────────────────
     check("no chart declares a second vertical axis", !html.includes("data-second-axis"));

@@ -43,7 +43,7 @@ async function load(slug: string, period: string): Promise<Fixture> {
 
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, segmentBehaviour, cohorts,
   ] = await Promise.all([
     read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
     read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
@@ -56,13 +56,14 @@ async function load(slug: string, period: string): Promise<Fixture> {
     read<Snapshot["venueMonthly"]>("venueMonthly"),
     read<Guests>("guests"),
     read<Snapshot["items"]>("items"),
+    read<Snapshot["segmentBehaviour"]>("segmentBehaviour").catch(() => null),
     // Org grain, not period grain — the member tier is not a card period. §4.3.
     orgRead<Snapshot["cohorts"]>("cohorts").catch(() => null),
   ]);
   return {
     snap: {
       org, coverage, lifecycle, decomposition, segments, members, dayparts,
-      dayGrid, venueCross, scatter, network, venueMonthly, items, cohorts,
+      dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts,
     },
     guests: { sampled: guests.sampled, population: guests.population, rows: unpackGuests(guests) },
   };

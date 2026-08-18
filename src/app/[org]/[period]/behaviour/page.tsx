@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
-import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
+import { Card, EmptyState, Pill } from "@/components/ui/Primitives";
+import { InfoButton } from "@/components/ui/InfoButton";
 import { IconArrow } from "@/components/shell/Icons";
-import { TradingWeek } from "@/components/charts/TradingWeek";
 import { CohortLens } from "@/components/charts/CohortLens";
+import { SegmentBasket, SegmentTiming } from "@/components/charts/SegmentBehaviour";
 import { getPeriods, getAllOrgs, getSnapshot } from "@/lib/data";
+import { previousReadable } from "@/lib/periods";
 import {
-  count, coverageState, money, pct, tradingIdentity, windowShort, DAYPART_TRADE_FLOOR,
+  count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
+  DAYPART_TRADE_FLOOR,
 } from "@/lib/metrics";
-import type { DaypartRow } from "@/lib/types";
 
 export const dynamic = "force-static";
 
@@ -36,7 +38,11 @@ export default async function BehaviourPage({
   const orgs = await getAllOrgs();
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
-  const { org, dayparts, dayGrid, venueCross, network, cohorts } = snap;
+  const { org, dayparts, venueCross, network, cohorts, segments, segmentBehaviour } = snap;
+  // Enrolled people only, same roll-up and therefore the same numbers as the
+  // segment grid on Overview. Two screens computing this twice is how they come
+  // to disagree, so they call one function.
+  const memberSegments = rollUpSegments(segments, "member");
   const cov = coverageState(org, snap.coverage);
   const identity = tradingIdentity(dayparts);
   const w = dayparts.window;
@@ -70,6 +76,26 @@ export default async function BehaviourPage({
       shortfallOrders: Math.round(d.orders * (memberShareOverall - d.memberShare)),
     }))
     .sort((a, b) => b.shortfallOrders - a.shortfallOrders);
+
+  /**
+   * The previous readable period, for the density change column.
+   *
+   * Deliberately not called "last quarter" anywhere on the surface: consecutive
+   * entries in `periods` are consecutive *readable runs*, and the months between
+   * them are missing because card capture failed in them. The gap travels with
+   * the figure so the column cannot be read as one period of movement.
+   */
+  const prevRun = previousReadable(periods, period);
+  const prevDayparts = prevRun ? (await getSnapshot(slug, prevRun.period.id)).dayparts : null;
+  const prevTotalOrders = prevDayparts
+    ? prevDayparts.periods.reduce((a, d) => a + d.orders, 0)
+    : 0;
+  /** Density then against density now, so the column is share-of-trade, not volume. */
+  const densityBefore = (key: string): number | null => {
+    if (!prevDayparts || !prevTotalOrders) return null;
+    const row = prevDayparts.periods.find((d) => d.key === key);
+    return row ? row.orders / prevTotalOrders : null;
+  };
 
   const cv = network.crossVenue;
   const bands = [1, 2, 3, 4].map((b) => {
@@ -139,33 +165,27 @@ export default async function BehaviourPage({
             </p>
           </Card>
 
-          {/* ── §6.2 the heatmap, above the table ────────────────────────── */}
-          <Card
-            title="The trading week"
-            subtitle="Day of week against daypart, both in venue-local time. Three shadings of one grid."
-          >
-            {dayGrid ? (
-              <TradingWeek
-                dayGrid={dayGrid}
-                dayparts={org.dayparts}
-                totalOrders={totalOrders}
-                totalRevenue={totalRevenue}
-                memberShareOverall={memberShareOverall}
-                windowLabel={win}
-                breakfastOrders={dayparts.periods.find((d) => d.key === "breakfast")?.orders ?? 0}
-              />
-            ) : (
-              <EmptyState
-                title="No day grid in this snapshot"
-                body="The day-of-week by daypart cells are extracted separately. This snapshot predates them."
-              />
-            )}
-          </Card>
+          {/* ── §6.2 "The trading week" has been removed ──────────────────────
+              It was a 7×8 grid of all trade by day of week and daypart, with a
+              metric toggle. Nothing was wrong with it and it is not coming back
+              here, because it answers a **product and operations** question —
+              when is the venue busy, when should it roster — and this is the
+              customer report. A sales report already carries that grid, and two
+              reports drawing the same axes off two extracts is how they come to
+              disagree in a meeting.
+
+              The same axes cut **by who the guest is** do belong here, and they
+              are now in "When each segment comes" below. That is the question
+              only this report can answer: your regulars and your passing trade
+              do not come at the same time, and a shift planned around one is
+              being planned against the other. */}
 
           {/* ── the daypart table, the precision layer (§8 rule 6) ───────── */}
           <Card
             title="Dayparts, by density"
-            subtitle="The precision layer under the grid. Sorted by order density, which the calendar above cannot be."
+            subtitle={`Where the trade actually sits, sorted by density.${
+              prevRun ? ` Change is against ${prevRun.label}.` : ""
+            }`}
             padded={false}
           >
             <div className="overflow-x-auto">
@@ -175,6 +195,29 @@ export default async function BehaviourPage({
                     <th className="px-5 py-2.5 text-left font-medium">Daypart</th>
                     <th className="px-3 py-2.5 text-right font-medium">Orders</th>
                     <th className="px-3 py-2.5 text-right font-medium">Order density</th>
+                    {prevRun && (
+                      <th className="px-3 py-2.5 text-right font-medium whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          Change
+                          <InfoButton label="How the density change is computed" align="end">
+                            <p>
+                              This period&apos;s share of orders against{" "}
+                              <strong className="text-ink">{prevRun.label}</strong>, in percentage points.
+                              Both figures are shares, so a business that simply got busier everywhere shows
+                              no change here — what moves is the <em>shape</em> of the trading day.
+                            </p>
+                            <p className="mt-1.5">
+                              <strong className="text-ink">
+                                That earlier period is not the previous quarter.
+                              </strong>{" "}
+                              It ends {prevRun.gapMonths} months before this window opens. The months between
+                              are not in the snapshot at all, because card capture failed in them, so a shift
+                              that took a year to happen arrives here looking like one period of movement.
+                            </p>
+                          </InfoButton>
+                        </span>
+                      </th>
+                    )}
                     <th className="px-3 py-2.5 text-right font-medium">Revenue density</th>
                     <th className="px-3 py-2.5 text-right font-medium">Weekend</th>
                     <th className="px-3 py-2.5 text-right font-medium">Member share</th>
@@ -194,6 +237,9 @@ export default async function BehaviourPage({
                       <td className="tnum px-3 py-2 text-right font-medium text-ink">
                         {pct(d.orders / totalOrders, 1)}
                       </td>
+                      {prevRun && (
+                        <DensityChange now={d.orders / totalOrders} before={densityBefore(d.key)} />
+                      )}
                       <td className="tnum px-3 py-2 text-right text-ink-secondary">
                         {pct(d.revenue / totalRevenue, 1)}
                       </td>
@@ -226,7 +272,7 @@ export default async function BehaviourPage({
                       closed line so a reader knows exactly what is inside. */}
                   {negligible.length > 0 && (
                     <tr className="border-b border-line last:border-b-0">
-                      <td colSpan={7} className="px-5 py-2">
+                      <td colSpan={prevRun ? 8 : 7} className="px-5 py-2">
                         <details>
                           <summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] text-ink-secondary marker:hidden hover:text-ink">
                             <span className="text-ink-muted">›</span>
@@ -270,6 +316,9 @@ export default async function BehaviourPage({
                     <th scope="row" className="px-5 py-2.5 text-left font-semibold">All trade</th>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">{count(totalOrders)}</td>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">100.0%</td>
+                    {/* Shares against shares: the total cannot move, and an
+                        em-dash says that rather than a misleading 0.0pp. */}
+                    {prevRun && <td className="px-3 py-2.5 text-right font-semibold text-ink-muted">—</td>}
                     <td className="tnum px-3 py-2.5 text-right font-semibold">100.0%</td>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">{pct(dayparts.weekendBaseline, 1)}</td>
                     <td className="tnum px-3 py-2.5 text-right font-semibold">{pct(memberShareOverall, 1)}</td>
@@ -455,6 +504,103 @@ export default async function BehaviourPage({
                 )}
               </div>
             </div>
+
+            {/* ── The second tier this report does not yet see ────────────────
+                Stated here, on the only screen that reasons about where trade
+                happens, because leaving it out is how this design fails to
+                scale and the failure is silent.
+
+                Oolio's hierarchy is two levels: **Venues**, and **Locations**
+                inside them — sometimes called Stores — which exist so a
+                merchant can split revenue within one site. This organisation
+                uses one level, so every figure above is correct as drawn and
+                nothing here is a caveat on it.
+
+                It stops being correct the moment a merchant uses the second
+                level. A venue with an inside bar, a courtyard and a function
+                room is one row in every table on this page, and "guests who use
+                more than one venue" would count somebody who moved from the
+                courtyard to the bar as loyal to one site — or, if locations
+                were naively treated as venues, would report a cross-venue rate
+                that is mostly people walking twenty metres. Those are opposite
+                errors and the data model cannot currently tell them apart,
+                because revenue centres carry no type. */}
+            <div className="mt-6 rounded-lg border border-dashed border-line-strong bg-surface-sunken px-4 py-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-[13px] font-semibold text-ink">
+                  This counts venues, and Oolio has two levels
+                </h3>
+                <Pill tone="neutral">Not a caveat here — a constraint on scaling</Pill>
+              </div>
+              <p className="mt-1.5 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                Oolio&apos;s structure is <strong className="text-ink">Venues</strong>, and{" "}
+                <strong className="text-ink">Locations</strong> — sometimes called Stores — inside them, so a
+                merchant can break revenue up within one site.{" "}
+                <strong className="text-ink">{org.name} uses one level</strong>, so every figure above is
+                measured on the thing it names and none of it is qualified by this.
+              </p>
+              <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                It matters for the next merchant. Give a venue an inside bar, a courtyard and a function
+                room, and &quot;guests who use more than one venue&quot; breaks in one of two opposite
+                directions: count locations as venues and the crossing rate is mostly people walking twenty
+                metres; roll them up and a genuine multi-site guest is indistinguishable from someone who
+                moved tables. <strong className="text-ink">Nothing in the data separates those cases</strong>{" "}
+                — a revenue centre carries no type, so there is no field that says whether two ids are two
+                businesses or two bars.
+              </p>
+              <p className="mt-2 max-w-[100ch] text-[12px] leading-relaxed text-ink-muted">
+                Recorded rather than solved. Tagging revenue centres by type is the thing that would unlock
+                it, and it is a data model change rather than a reporting one. Named here because a
+                cross-venue measure that quietly changes meaning when a customer restructures their venue is
+                worse than one that does not exist, and this is the page where somebody would find out.
+              </p>
+            </div>
+          </Card>
+
+          {/* ── §6.6 what each segment buys, and when they come ─────────────
+              The two sections that replace "The trading week", and the reason
+              it could go: this is the same material cut by customer rather than
+              by till, which is the cut only this report can make. */}
+          <Card
+            title="What each segment actually buys"
+            subtitle="The lifecycle buckets from Overview, read through the basket rather than the visit count."
+          >
+            <SegmentBasket rows={memberSegments} windowLabel={win} />
+            <p className="mt-4 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+              <strong className="text-ink">The ranking usually runs backwards from what people expect.</strong>{" "}
+              The most frequent guests tend to have the <em>smallest</em> baskets — a daily coffee is a small
+              transaction and an occasional visit is a large one — so a report that ranks segments by average
+              spend concludes your best customers are your worst. Per head over the window, on Overview, is
+              the figure that settles it, and frequency is what moves it.
+            </p>
+          </Card>
+
+          <Card
+            title="When each segment comes"
+            subtitle="Day of week and time of day, cut by who the guest is rather than by how busy the venue was."
+          >
+            {segmentBehaviour && segmentBehaviour.length > 0 ? (
+              <SegmentTiming rows={segmentBehaviour} dayparts={org.dayparts} windowLabel={win} />
+            ) : (
+              <EmptyState
+                title="Not in this snapshot"
+                body={
+                  <>
+                    <p>
+                      Segment by day of week and daypart is extracted as its own query at whole-population
+                      grain, and this snapshot predates it. It is in the extract now and appears on the next
+                      refresh.
+                    </p>
+                    <p className="mt-2">
+                      It is deliberately not derived from the guest list this product already ships to the
+                      browser. That set over-selects high spenders and its coverage varies by segment from
+                      97% to 53%, so a timing profile taken from it would describe the guests who were
+                      sampled rather than the guests who came.
+                    </p>
+                  </>
+                }
+              />
+            )}
           </Card>
 
           {/* ── §6.5 the member cohort lens, walled off ──────────────────── */}
@@ -520,5 +666,44 @@ export default async function BehaviourPage({
         </div>
       </Page>
     </>
+  );
+}
+
+/**
+ * One daypart's change in share of trade, in percentage points.
+ *
+ * ── Points, not percent ────────────────────────────────────────────────────
+ *
+ * A daypart moving from 8.3% to 9.1% of trade has gained **0.8 points**, and
+ * calling that "+9.6%" is true, useless and reliably misread as the daypart
+ * having grown by a tenth. Both figures are already shares, so points is the
+ * only unit in which the column adds up: the points across every row sum to
+ * zero by construction, which is what makes it a statement about the shape of
+ * the trading day rather than about volume.
+ *
+ * A daypart absent from the earlier period renders as an em-dash. It is not a
+ * gain of 100 points — it is a period that did not exist to be compared, and
+ * the two are different facts.
+ */
+function DensityChange({ now, before }: { now: number; before: number | null }) {
+  if (before === null) {
+    return (
+      <td className="px-3 py-2 text-right text-ink-muted" title="Not traded in the earlier period">
+        —
+      </td>
+    );
+  }
+  const points = (now - before) * 100;
+  // Under a tenth of a point is noise at this precision and is drawn as flat
+  // rather than as a signed number the reader would try to interpret.
+  const flat = Math.abs(points) < 0.1;
+  return (
+    <td
+      className="tnum px-3 py-2 text-right whitespace-nowrap"
+      style={{ color: flat ? "var(--ink-muted)" : points > 0 ? "var(--good)" : "var(--loss)" }}
+      title={`${pct(before, 1)} then, ${pct(now, 1)} now`}
+    >
+      {flat ? "flat" : `${points > 0 ? "+" : "−"}${Math.abs(points).toFixed(1)}pp`}
+    </td>
   );
 }

@@ -172,6 +172,21 @@ export type SegmentRow = {
   guests: number;
   visits: number;
   spend: number;
+  /**
+   * Transactions, against `visits` which are person-days at a venue.
+   *
+   * Both are needed and they are different questions: spend per visit is what a
+   * guest is worth each time they walk in, average transaction value is what
+   * the till sees. Two coffees an hour apart is one visit and two orders, so
+   * the two figures diverge exactly where a guest buys more than once a day —
+   * which is the behaviour that defines the most valuable segment here.
+   *
+   * Optional because snapshots extracted before these columns existed do not
+   * carry them, and a surface that reads them declines to draw rather than
+   * dividing by an absent denominator.
+   */
+  orders?: number;
+  items?: number;
   minSpend: number;
   maxSpend: number;
   avgVisits: number;
@@ -183,6 +198,27 @@ export type Segments = {
   population: number;
   rows: SegmentRow[];
   gapHistogram: { days: number; n: number }[];
+};
+
+/**
+ * Visit timing and basket shape by lifecycle segment, whole population.
+ *
+ * One row per segment, day of week and daypart. `dow` is the warehouse's
+ * `DAYOFWEEK` — Sunday is 0 — and is rotated to a Monday-first week at the
+ * presentation boundary, never here.
+ *
+ * Null on a snapshot extracted before the query existed. Every consumer guards,
+ * because the alternative to guarding is a surface that silently reads zero.
+ */
+export type SegmentBehaviourRow = {
+  segment: Segment;
+  dow: number;
+  daypart: string;
+  visits: number;
+  orders: number;
+  spend: number;
+  items: number;
+  people: number;
 };
 
 export type Guest = {
@@ -649,6 +685,8 @@ export type Snapshot = {
   network: Network;
   venueMonthly: VenueMonth[];
   items: Items | null;
+  /** Segment × day × daypart, whole population. Null before the query existed. */
+  segmentBehaviour: SegmentBehaviourRow[] | null;
   /** Member tier, 21 months. Loaded per org, not per card period — see §4.3. */
   cohorts: Cohorts | null;
 };

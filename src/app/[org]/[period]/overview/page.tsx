@@ -2,16 +2,17 @@ import Link from "next/link";
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Tile } from "@/components/ui/Primitives";
 import { IconArrow } from "@/components/shell/Icons";
-import { SegmentGap } from "@/components/charts/SegmentCharts";
+import { SegmentComposition } from "@/components/charts/SegmentCharts";
+import { SegmentGrid, type PreviousPeriod } from "@/components/ui/SegmentGrid";
 import { SelectionCorrection, ValuePanels } from "@/components/charts/ValuePanels";
-import { TrustPanel } from "@/components/ui/TrustPanel";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { GrowthWaterfall, RealVsPriceBar } from "@/components/charts/GrowthWaterfall";
 import { BasketMix } from "@/components/ui/BasketMix";
 import { getPeriods, getAllOrgs, getGuestRows, getSnapshot } from "@/lib/data";
+import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
 import {
-  SEGMENT_COLOUR, SEGMENT_LABEL, attributionPct, basketMix, basketStory, causalReading, count, coverageState,
+  attributionPct, basketMix, basketStory, causalReading, count, coverageState,
   decompose, delta, money, monthLabel, opportunityPerVenueWeek, pct, ratio, rollUpSegments,
   tileCount, valueClaims, windowShort,
 } from "@/lib/metrics";
@@ -68,7 +69,7 @@ export default async function OverviewPage({
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
 
-  const { org, coverage, segments, members, decomposition, scatter } = snap;
+  const { org, coverage, segments, members, decomposition } = snap;
   const cov = coverageState(org, coverage);
   const checks = runChecks(snap, guests);
   const w = org.window;
@@ -84,8 +85,26 @@ export default async function OverviewPage({
   // so the table is enrolled people and says so rather than quietly excluding.
   const stands = rollUpSegments(segments, "member");
   const standsTotal = stands.reduce((a, s) => a + s.guests, 0);
-  const standsSpend = stands.reduce((a, s) => a + s.spend, 0);
-  const standsVisits = stands.reduce((a, s) => a + s.visits, 0);
+
+  /**
+   * The previous comparable period, where one exists.
+   *
+   * **Not the previous quarter.** `periods` holds one entry per unbroken run of
+   * trustworthy card months, newest first, and those runs are not adjacent — the
+   * months between them failed card capture and are not in the snapshot at all.
+   * So this is the previous *readable* period, the gap is measured, and both
+   * travel with the data into the grid so the column cannot be read as
+   * quarter-on-quarter movement. Meat Flour Wine has one period and gets null,
+   * which is why the comparison columns are absent there rather than empty.
+   */
+  const prevRun = previousReadable(periods, period);
+  const previous: PreviousPeriod | null = prevRun
+    ? {
+        label: prevRun.label,
+        gapMonths: prevRun.gapMonths,
+        rows: rollUpSegments((await getSnapshot(slug, prevRun.period.id)).segments, "member"),
+      }
+    : null;
 
   const opp = members.opportunity;
   const perVenueWeek = opportunityPerVenueWeek(opp, org);
@@ -110,22 +129,46 @@ export default async function OverviewPage({
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
           {/* ── §5.2 four tiles ──────────────────────────────────────────────
-              Every tile carries a subordinate line that is **always visible**.
-              There are no info icons and no hover tooltips anywhere on this
-              page (§8 rule 7): hover does not exist on touch, and a tile that
-              needs a tooltip is not finished. The previous prototype shipped
-              four icons that rendered nothing at all. */}
+              Four lines and a button, in the same order on every tile: what it
+              is, the figure, the one supporting figure, then tier and window.
+              The method sits behind the button.
+
+              **This reverses §8 rule 7**, which removed every info icon in the
+              build after the prototype shipped four that rendered nothing at
+              all. The reversal is conditional and the conditions are enforced in
+              `InfoButton` rather than remembered: it is a real button so it
+              works on touch and by keyboard, and its content is required so it
+              cannot render empty. What has *not* moved is the grain, the window
+              and the denominator — those are part of the figure, not an
+              explanation of it, and a build whose contract is that every figure
+              carries them cannot put them behind a click. */}
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label="People you can name"
               value={count(tileCount(identifiedPeople))}
               accent="var(--tier-card)"
-              footnote={
+              detail={
                 <>
                   {count(tileCount(cs.member.people))} enrolled · {count(tileCount(cs.nonMember.people))} card only
-                  <span className="mt-1 block text-ink-muted">
-                    Card tier · {win} · identified by payment card, whether or not anybody scanned
-                  </span>
+                </>
+              }
+              meta={<>Card tier · {win}</>}
+              info={
+                <>
+                  <p>
+                    Everybody identified by their <strong className="text-ink">payment card</strong>, whether
+                    or not they ever scanned. A card seen on a scanned order belongs to that member on every
+                    other order it appears on, so a member who forgets to scan is still the same person.
+                  </p>
+                  <p className="mt-1.5">
+                    That inversion is why this figure is {count(tileCount(identifiedPeople))} rather than the{" "}
+                    {count(tileCount(cs.member.people))} a loyalty CRM would show. It is person grain, not
+                    customers served — how many people you served is unknowable.
+                  </p>
+                  <p className="mt-1.5">
+                    Cost, published rather than hidden: a card shared between two members is attributed to
+                    whichever used it more.
+                  </p>
                 </>
               }
             />
@@ -133,13 +176,26 @@ export default async function OverviewPage({
               label="Revenue you can attribute"
               value={attributionPct(cov.identifiedRevenueShare)}
               accent="var(--accent)"
-              footnote={
+              detail={
                 <>
                   {attributionPct(cov.scannedRevenueShare)} scanned ·{" "}
                   {attributionPct(cov.identifiedRevenueShare - cov.scannedRevenueShare)} added by the card
-                  <span className="mt-1 block text-ink-muted">
-                    Revenue grain · {win} · of {money(coverage.totals.revenue)} completed trade
-                  </span>
+                </>
+              }
+              meta={<>Revenue grain · {win} · of {money(coverage.totals.revenue)} trade</>}
+              info={
+                <>
+                  <p>
+                    The share of completed trade this build can put against a person.{" "}
+                    <strong className="text-ink">Revenue grain</strong> is the primary coverage measure
+                    because it is the one that says how much of the business the report describes; guest-grain
+                    coverage is never computed, because there is no honest denominator for it.
+                  </p>
+                  <p className="mt-1.5">
+                    The split matters more than the total. The scanned half is what a loyalty CRM sees. The
+                    rest is what the card adds, and it is the argument for building on the card rather than on
+                    the scan.
+                  </p>
                 </>
               }
             />
@@ -162,14 +218,33 @@ export default async function OverviewPage({
                 label="A member is associated with"
                 value={memberLift >= 1 ? ratio(memberLift) : delta(memberLift)}
                 accent="var(--tier-member)"
-                footnote={
+                detail={
                   <>
                     {money(cs.member.spendPerPerson)} against {money(cs.nonMember.spendPerPerson)}
-                    <span className="mt-1 block text-ink-muted">
-                      Association, not effect. {pct(causal.selectionShare ?? 0, 0)} of this gap was already
-                      there before anybody enrolled — see below.
-                    </span>
                   </>
+                }
+                meta={<>Person grain · {win} · enrolled against card only</>}
+                info={
+                  <>
+                    <p>
+                      Spend per enrolled person over the window, against spend per card-only person over the
+                      same window. Both columns are the same grain — people identified by card — which is the
+                      change that made this comparison expressible at all.
+                    </p>
+                    <p className="mt-1.5">
+                      The verb is <strong className="text-ink">&quot;is associated with&quot;</strong> and not
+                      &quot;is worth&quot; on purpose. A screenshot of a KPI card travels without its caption,
+                      and this one ends up in a board deck.
+                    </p>
+                  </>
+                }
+                /* The caveat stays on the face. It is not method, and it is the
+                   one sentence that stops this figure being misused. */
+                footnote={
+                  <span className="text-ink-muted">
+                    Association, not effect. {pct(causal.selectionShare ?? 0, 0)} of this gap was already
+                    there before anybody enrolled — see below.
+                  </span>
                 }
               />
             ) : (
@@ -198,18 +273,48 @@ export default async function OverviewPage({
 
                 "Fixable at the till" has gone. It is head office telling the
                 floor whose fault it is, on a card an area manager sees. */}
+            {/* The window comes off this one. It is the only tile of the four
+                whose figure is a *rate* rather than a level, and a rate over the
+                window reads as though it were accumulating — where what it
+                actually describes is a property of the till, constant across the
+                period. The denominator stays, because the denominator was doing
+                real damage unstated: this rate is over the member orders the
+                card bridge resolved, and the same numerator over every member
+                order on the page is a different and smaller number. The second
+                denominator is in the button. */}
             <Tile
               label="Members not recognised"
               value={pct(opp.unscanned.share, 0)}
               accent="var(--warning)"
-              footnote={
+              detail={
                 <>
                   {count(opp.unscanned.orders)} orders · {money(opp.unscanned.revenue)}
-                  <span className="mt-1 block text-ink-muted">
-                    Of {count(opp.unscanned.orders + members.linkage.scannedOrders)} member orders the card
-                    bridge resolved · {pct(opp.unscanned.orders / Math.max(coverage.totals.memberOrders, 1), 1)}{" "}
-                    of all {count(coverage.totals.memberOrders)} member orders · {win}
-                  </span>
+                </>
+              }
+              meta={
+                <>
+                  Of {count(opp.unscanned.orders + members.linkage.scannedOrders)} member orders the card
+                  bridge resolved
+                </>
+              }
+              info={
+                <>
+                  <p>
+                    Orders placed by somebody this build knows is a member, on which{" "}
+                    <strong className="text-ink">nobody scanned</strong>. The card identified them; the
+                    loyalty programme did not. This is the size of the recognition gap, and it is only
+                    measurable at all because membership is resolved through the card.
+                  </p>
+                  <p className="mt-1.5">
+                    Against every member order on this page rather than only the bridged ones it is{" "}
+                    {pct(opp.unscanned.orders / Math.max(coverage.totals.memberOrders, 1), 1)} of{" "}
+                    {count(coverage.totals.memberOrders)}. Both denominators are real and they answer
+                    different questions, so neither is presented alone.
+                  </p>
+                  <p className="mt-1.5">
+                    It is <strong className="text-ink">not a scorecard for the floor.</strong> A shift that
+                    never asks and a shift whose guests decline look identical here.
+                  </p>
                 </>
               }
             />
@@ -268,120 +373,34 @@ export default async function OverviewPage({
           </Card>
 
           {/* ── §5.4 where your members stand ────────────────────────────────
-              Table and charts side by side. The charts are the visual language
-              carried over from the report this replaces, because operators like
-              them and read them quickly — rebuilt on the whole population rather
-              than on the scanned sixth of it. */}
+              A grid and one chart, stacked, doing two different jobs. The grid
+              answers *who is in each segment and what are they worth* — exact
+              values, drill-through, columns the reader chooses. The chart
+              answers the question the grid cannot: *how does each segment's
+              importance change as you move from people, to behaviour, to
+              money?* Neither duplicates the other, which is the test a second
+              visual on the same data has to pass. */}
           <Card
             title="Where your members stand"
             subtitle={`${count(standsTotal)} enrolled people, classified against their own visit cadence. Every row opens the people behind it.`}
           >
-            {/* Full width. The table was sharing the row with a scatter plotting
-                a different population, which is an instruction to read the two
-                as a pair. */}
-            <div className="flex flex-col gap-6">
-              <div>
-                <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
-                      <th className="py-2 pr-3 text-left font-medium">Segment</th>
-                      <th className="px-2 py-2 text-right font-medium">People</th>
-                      <th className="px-2 py-2 text-right font-medium">Share</th>
-                      <th className="px-2 py-2 text-right font-medium">Spend</th>
-                      <th className="px-2 py-2 text-right font-medium">Per head</th>
-                      <th className="px-2 py-2 text-right font-medium">Share of spend</th>
-                      <th className="py-2 pl-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stands.map((s) => (
-                      <tr key={s.segment} className="border-b border-line last:border-b-0 hover:bg-surface-hover">
-                        <th scope="row" className="py-2 pr-3 text-left font-medium text-ink">
-                          <span className="flex items-center gap-2">
-                            <span
-                              className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
-                              style={{ background: SEGMENT_COLOUR[s.segment] }}
-                            />
-                            {SEGMENT_LABEL[s.segment]}
-                          </span>
-                        </th>
-                        <td className="tnum px-2 py-2 text-right text-ink">{count(s.guests)}</td>
-                        <td className="tnum px-2 py-2 text-right text-ink-secondary">
-                          {pct(s.guests / Math.max(standsTotal, 1), 1)}
-                        </td>
-                        <td className="tnum px-2 py-2 text-right text-ink-secondary">{money(s.spend)}</td>
-                        <td className="tnum px-2 py-2 text-right font-medium text-ink">
-                          {money(s.spend / Math.max(s.guests, 1))}
-                        </td>
-                        <td className="tnum px-2 py-2 text-right text-ink-secondary">
-                          {pct(s.spend / Math.max(standsSpend, 1), 1)}
-                        </td>
-                        <td className="py-2 pl-2 text-right">
-                          <Link
-                            href={`/${org.slug}/${period}/guests?tier=member&segment=${s.segment}`}
-                            className="inline-flex items-center gap-1 text-[12px] font-medium text-accent hover:underline"
-                          >
-                            Open <IconArrow className="h-3 w-3" />
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="flex flex-col gap-7">
+              <SegmentGrid
+                rows={stands.map((s) => ({
+                  segment: s.segment,
+                  label: s.label,
+                  guests: s.guests,
+                  visits: s.visits,
+                  spend: s.spend,
+                }))}
+                orgSlug={org.slug}
+                period={period}
+                lapsedDays={org.calibration.lapsedDays}
+                lapsedGuests={stands.find((s) => s.segment === "lapsed")?.guests ?? 0}
+                previous={previous}
+              />
 
-                {/* §4.5: the boundary rules render on the page. A GM will argue
-                    with the first verdict that says one of their regulars has
-                    gone, and "it is in the code" is not an answer. */}
-                <div className="mt-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
-                  <p className="text-[12px] font-medium tracking-wide text-ink-secondary uppercase">
-                    Where the boundaries fall
-                  </p>
-                  {/* ── The rules are ordered, and the order is the point ─────
-                      These were published as six independent definitions and
-                      they are not independent — they are a first-match ladder,
-                      and two of them genuinely overlap. Somebody seen exactly
-                      once, a long time ago, satisfies both "Seen once" and
-                      "Lapsed"; the ladder puts them in Lapsed, and at Coffee
-                      Guru that is every one of the 36 people in it.
-
-                      Published as six unordered rules, that is a contradiction a
-                      reader can find and we cannot answer. Published as a
-                      numbered ladder it is a definition. Same classifier, same
-                      people — the omission was the order. */}
-                  <ol className="mt-2 flex flex-col gap-1.5 text-[12px]">
-                    {[
-                      ["Lapsed", `no visit for ${org.calibration.lapsedDays} days, whatever else is true of them`],
-                      ["Seen once", "exactly one visit, and it was recent enough not to be Lapsed"],
-                      ["New", "two visits — one gap is not yet a habit"],
-                      ["Slipping", "three or more visits, and more than twice their own usual gap since the last one"],
-                      ["Regulars", "ten or more visits, still inside their own usual gap"],
-                      ["Established", "everybody else with three or more visits"],
-                    ].map(([k, v], i) => (
-                      <li key={k} className="flex gap-2">
-                        <span className="tnum shrink-0 text-ink-muted">{i + 1}.</span>
-                        <span>
-                          <strong className="text-ink">{k}</strong>{" "}
-                          <span className="text-ink-secondary">— {v}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="mt-2.5 max-w-[80ch] text-[12px] leading-relaxed text-ink-muted">
-                    <strong className="text-ink-secondary">Read top to bottom, first match wins.</strong>{" "}
-                    The rules overlap on purpose and the order settles it — at this merchant every one of
-                    the {count(stands.find((s) => s.segment === "lapsed")?.guests ?? 0)} Lapsed people has
-                    exactly one visit, so without the ordering they would be Seen once as well. An inferred
-                    verdict needs <strong>three visits</strong> minimum: with two you have exactly one gap,
-                    and a broken habit is not estimable from one observation. Slipping and Regulars are
-                    measured against <strong>each guest&apos;s own cadence</strong>, not a rule applied to
-                    everybody. Only enrolled people are classified — a card cannot be told apart from a card
-                    that was reissued, so a lifecycle verdict on one would be a guess, and the field is
-                    empty at source rather than hidden here.
-                  </p>
-                </div>
-              </div>
-
-              <SegmentGap
+              <SegmentComposition
                 rows={stands.map((s) => ({
                   segment: s.segment,
                   label: s.label,
@@ -561,17 +580,37 @@ export default async function OverviewPage({
             </div>
           </Card>
 
-          {/* ── §5.7 the trust panel. Coverage lives here, not as its own
-                 report — a diagnostics page operators had to be told to open is
-                 what it was before. */}
-          <TrustPanel snap={snap} checks={checks} coverage={cov} />
+          {/* ── §5.7 the trust panel has gone from this page ──────────────────
+              "What this report is standing on" was a full-width panel of method
+              — the checks, the card capture month by month, the claim and its
+              price — sitting between the opportunity and the two findings below
+              it. It is the most rigorous thing in the build and it was in the
+              wrong place: an operator opening Overview is answering *what is
+              happening to my customers*, and a page that interrupts that with a
+              diagnostics report teaches them to scroll past the middle of it,
+              which is where the two most useful sections now sit.
 
-          {/* ── §5.8 behind progressive disclosure ───────────────────────────
-              The decomposition, the product mix and the method notes. **Caveats
-              never collapse** — everything above this point stays open, and
-              there is no simple/advanced toggle anywhere. */}
+              **The rigour is not gone, and none of it was load-bearing here.**
+              The check badge is in the page header on every screen and links to
+              the evidence. Every refusal on this page still states itself in
+              place. The coverage chip still carries the window. What has gone is
+              the second, longer telling of all three in the middle of the page.
+
+              The disclosures below take its place, and they are **open by
+              default** now rather than folded: they carry findings — where the
+              revenue moved, and what the two groups actually buy — and a finding
+              behind a click is a finding nobody reads. `Disclosure` still keeps
+              its result line visible when closed, so the contract is unchanged;
+              what has changed is which way it starts. */}
+
+          {/* ── §5.8 the two findings, open ──────────────────────────────────
+              **Caveats never collapse** — everything above this point stays
+              open, and there is no simple/advanced toggle anywhere. What folds
+              here is the working: the decomposition table and the basket index,
+              not the conclusions they support. */}
           {growth && (
             <Disclosure
+              defaultOpen
               summary="Where the change came from"
               result={
                 <>
@@ -620,6 +659,7 @@ export default async function OverviewPage({
 
           {mix && story && (
             <Disclosure
+              defaultOpen
               summary="What members and everyone else actually buy"
               result={
                 <>

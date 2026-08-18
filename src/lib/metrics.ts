@@ -725,26 +725,82 @@ export const SEGMENT_ORDER = ["regular", "established", "slipping", "lapsed", "n
 /**
  * One colour per segment, declared once.
  *
- * §5.4 puts three charts side by side — a scatter and two treemaps — and asks
- * for the same colour per segment across them. **The pairing of the treemaps is
- * the whole point**: a segment that is big in traffic and small in revenue is
- * visible across two panels and invisible in either alone, and that comparison
- * only works if the eye can carry a colour from one panel to the next.
+ * §5.4's composition bars put the same six segments in three stacked bars and
+ * ask the reader to carry a colour from one bar to the next — that is the whole
+ * mechanism by which "28% of people, 73% of visits" becomes visible. It only
+ * works if the ramp holds together as a set, so it is declared once here and
+ * every surface reads it.
  *
- * The ramp is ordered by health rather than by hue family: the engaged end is
- * blue, the at-risk end warm, and Seen once is deliberately neutral because it
- * is not a failure state — it is the largest group in most hospitality
- * businesses and colouring it red would editorialise the single most common
- * fact about the estate.
+ * ── The ramp is on brand, and that is a deliberate exception ───────────────
+ *
+ * Chart colours elsewhere in this build are a validated data-visualisation
+ * palette rather than brand colours, because brand colours are chosen to look
+ * like a company and chart colours have to be told apart by someone who cannot
+ * see red. This ramp is the exception: it is the one set an operator meets on
+ * every screen, it is nominal rather than sequential, and six categories is
+ * inside the budget where brand hues can be separated safely.
+ *
+ * **Regulars and Established are two steps of Oolio deep purple**, because they
+ * are the same kind of customer at two depths — a hue change between them would
+ * read as a change of category rather than a change of degree. **New is brand
+ * green**: it is the only segment that is unambiguously good news, and green is
+ * the one colour an operator reads that way without being told. The at-risk
+ * pair stay warm, and **Seen once stays neutral** because it is not a failure
+ * state — it is the largest group in most hospitality businesses and colouring
+ * it red would editorialise the single most common fact about the estate.
  */
 export const SEGMENT_COLOUR: Record<string, string> = {
-  regular: "var(--gain-returning)",
-  established: "var(--tier-member)",
-  slipping: "var(--warning)",
-  lapsed: "var(--loss)",
-  new: "var(--gain-reactivated)",
-  "one-visit": "var(--tier-unattributed)",
+  regular: "var(--segment-regular)",
+  established: "var(--segment-established)",
+  slipping: "var(--segment-slipping)",
+  lapsed: "var(--segment-lapsed)",
+  new: "var(--segment-new)",
+  "one-visit": "var(--segment-once)",
 };
+
+/**
+ * Text that stays legible on each segment's fill.
+ *
+ * The composition bars put a percentage label *inside* the band, which is the
+ * only way to label six segments across three bars without a legend the eye has
+ * to keep travelling to. Two of the six fills are light enough that white text
+ * on them is unreadable, so the pairing is declared rather than guessed at.
+ */
+export const SEGMENT_INK: Record<string, string> = {
+  regular: "#ffffff",
+  established: "var(--ink)",
+  slipping: "#ffffff",
+  lapsed: "#ffffff",
+  new: "#ffffff",
+  "one-visit": "var(--ink)",
+};
+
+/**
+ * The lifecycle ladder, as data.
+ *
+ * §4.5 renders these on the page because a GM will argue with the first verdict
+ * that says one of their regulars has gone, and "it is in the code" is not an
+ * answer. It lives here rather than inline in the page because the boundaries
+ * popover and the segment grid both state it, and two copies of a definition is
+ * how they come to disagree.
+ *
+ * **The order is load-bearing.** These are not six independent definitions —
+ * they are a first-match ladder, and two of them genuinely overlap. Somebody
+ * seen exactly once, a long time ago, satisfies both "Seen once" and "Lapsed";
+ * the ladder puts them in Lapsed. Published as six unordered rules that is a
+ * contradiction a reader can find and we cannot answer. Published as a numbered
+ * ladder it is a definition.
+ */
+export function segmentLadder(lapsedDays: number): { key: string; rule: string }[] {
+  return [
+    { key: "lapsed", rule: `no visit for ${lapsedDays} days, whatever else is true of them` },
+    { key: "one-visit", rule: "exactly one visit, and it was recent enough not to be Lapsed" },
+    { key: "new", rule: "two visits — one gap is not yet a habit" },
+    { key: "slipping", rule: "three or more visits, and more than twice their own usual gap since the last one" },
+    { key: "regular", rule: "ten or more visits, still inside their own usual gap" },
+    { key: "established", rule: "everybody else with three or more visits" },
+  ];
+}
 
 /**
  * The two visit thresholds that are actually drawable on a spend-against-visits
@@ -762,23 +818,54 @@ export const VISIT_BOUNDARIES = [
   { visits: 10, label: "10 visits — Regulars" },
 ] as const;
 
+type SegmentTotals = {
+  guests: number;
+  visits: number;
+  spend: number;
+  multiVenue: number;
+  /**
+   * Null where the snapshot predates the columns, never zero.
+   *
+   * A zero here would divide into a spend-per-order of infinity or, worse,
+   * render as a real basket of nothing. The surfaces that consume these check
+   * for null and decline to draw the panel, which is the same contract every
+   * other optional measure in this build follows.
+   */
+  orders: number | null;
+  items: number | null;
+};
+
+const EMPTY: SegmentTotals = {
+  guests: 0, visits: 0, spend: 0, multiVenue: 0, orders: null, items: null,
+};
+
+/** The accumulator starts at zero; null is reached only by meeting a row without them. */
+const ZERO: SegmentTotals = {
+  guests: 0, visits: 0, spend: 0, multiVenue: 0, orders: 0, items: 0,
+};
+
 export function rollUpSegments(segments: Segments, tier?: "member" | "card") {
   const rows = tier ? segments.rows.filter((r) => r.tier === tier) : segments.rows;
-  const by = new Map<string, { guests: number; visits: number; spend: number; multiVenue: number }>();
+  const by = new Map<string, SegmentTotals>();
   for (const r of rows) {
     const key = r.segment ?? "unclassified";
-    const cur = by.get(key) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 };
+    const cur = by.get(key) ?? ZERO;
     by.set(key, {
       guests: cur.guests + r.guests,
       visits: cur.visits + r.visits,
       spend: cur.spend + r.spend,
       multiVenue: cur.multiVenue + r.multiVenue,
+      // One missing constituent row poisons the whole segment rather than
+      // being treated as a zero, because a partial sum here is a plausible
+      // wrong number and an absent one is a visible refusal.
+      orders: r.orders == null || cur.orders === null ? null : cur.orders + r.orders,
+      items: r.items == null || cur.items === null ? null : cur.items + r.items,
     });
   }
   return SEGMENT_ORDER.map((s) => ({
     segment: s,
     label: SEGMENT_LABEL[s],
-    ...(by.get(s) ?? { guests: 0, visits: 0, spend: 0, multiVenue: 0 }),
+    ...(by.get(s) ?? EMPTY),
   })).filter((s) => s.guests > 0);
 }
 

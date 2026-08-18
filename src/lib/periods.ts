@@ -123,3 +123,54 @@ export function monthsApart(a: Period, b: Period): number {
 export function isYearOnYear(a: Period, b: Period): boolean {
   return Math.abs(monthsApart(a, b)) === 12;
 }
+
+/**
+ * The previous readable period, and how far away it actually is.
+ *
+ * ── This is the whole reason "vs previous period" is not a free column ─────
+ *
+ * `periods` is one entry per unbroken run of trustworthy card months, newest
+ * first. **Consecutive entries are not consecutive quarters.** At Coffee Guru
+ * the current window opens May 2026 and the previous readable run ends April
+ * 2025 — thirteen months earlier, because every month between them failed card
+ * capture and is not in the snapshot at all.
+ *
+ * A change column computed across that and labelled "previous period" is a lie
+ * of exactly the kind this build exists to refuse: it reads as one quarter of
+ * movement and it is a year of it, most of which happened where nothing was
+ * measured. So the gap comes back with the period and every surface that draws
+ * a comparison is obliged to state it.
+ *
+ * Returns null where there is no earlier run, which is the Meat Flour Wine case
+ * — one period, and therefore no comparison offered rather than an empty one.
+ */
+export function previousReadable(
+  all: Periods,
+  id: string,
+): { period: Period; gapMonths: number; label: string; adjacent: boolean } | null {
+  const i = all.periods.findIndex((p) => p.id === id);
+  if (i < 0) return null;
+  const current = all.periods[i];
+  // Newest first, so the next entry along is the previous run.
+  const prev = all.periods[i + 1];
+  if (!prev) return null;
+
+  const d = (s: string) => new Date(`${s}T00:00:00Z`);
+  const gapMonths =
+    (d(current.start).getUTCFullYear() - d(prev.end).getUTCFullYear()) * 12 +
+    (d(current.start).getUTCMonth() - d(prev.end).getUTCMonth());
+
+  return {
+    period: prev,
+    gapMonths,
+    label: `${monthName(prev.start)} – ${monthName(prev.end)}`,
+    // A run that ends the month before this one opens is a true previous period.
+    adjacent: gapMonths <= 1,
+  };
+}
+
+function monthName(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-AU", {
+    month: "short", year: "numeric", timeZone: "UTC",
+  });
+}
