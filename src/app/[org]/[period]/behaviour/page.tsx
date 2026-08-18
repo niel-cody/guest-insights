@@ -603,10 +603,20 @@ export default async function BehaviourPage({
             )}
           </Card>
 
-          {/* ── §6.5 the member cohort lens, walled off ──────────────────── */}
+          {/* ── §6.5 the member cohort lens, walled off ────────────────────
+              `data-member-tier` marks the wall so `member.tierScopeDeclared`
+              can find it in the built HTML. A member-tier figure that loses its
+              scope launders a 19%-coverage, self-selected sample into a general
+              one — and this build's own analysis puts 97% of the member gap
+              down to selection rather than effect.
+
+              R-217 specified that check and it was never written; a doc comment
+              asserted it was live, which is the same prose-instead-of-control
+              failure the extract refuses to commit with a lifecycle verdict. */}
           <section
             className="rounded-xl border-2 border-dashed"
             style={{ borderColor: "var(--tier-member)" }}
+            data-member-tier
           >
             <header
               className="border-b border-line px-5 py-3.5"

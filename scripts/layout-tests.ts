@@ -226,6 +226,51 @@ async function main() {
         `${(html.match(/data-info-button/g) ?? []).length} info buttons on a page with four tiles`);
     }
 
+    // ── R-217 · member.tierScopeDeclared ───────────────────────────────────
+    //
+    // Every figure below the member-tier wall names its scope in its own
+    // heading. Coverage there is roughly 19% of orders and the population is
+    // heavily self-selected — this build's own analysis puts about 97% of the
+    // member value gap down to selection rather than effect. A chart that loses
+    // "members only" from its title launders that sample into a general one, on
+    // the product built to prevent exactly that.
+    //
+    // This was specified in the build pack, asserted live in a doc comment, and
+    // never actually written. Asserted on the built HTML rather than on the
+    // source, because the heading is what a reader meets — and a screenshot of
+    // a chart travels without the wall it sat behind.
+    {
+      const wall = html.indexOf("data-member-tier");
+      if (wall >= 0) {
+        // Figures are not nested here, so each one runs to the next </figure>.
+        const section = html.slice(wall);
+        const end = section.indexOf("</section>");
+        const scoped = end > 0 ? section.slice(0, end) : section;
+
+        let from = 0;
+        let figures = 0;
+        for (;;) {
+          const open = scoped.indexOf("<figure", from);
+          if (open < 0) break;
+          const close = scoped.indexOf("</figure>", open);
+          const fig = between(scoped, open, close > 0 ? close : scoped.length);
+          figures++;
+          const heading = /<h[34][^>]*>([\s\S]*?)<\/h[34]>/.exec(fig);
+          const text = (heading?.[1] ?? "").replace(/<[^>]+>/g, " ");
+          check(
+            "a member-tier figure declares its tier in its own heading",
+            /members only/i.test(text),
+            `"${text.trim().slice(0, 60)}" is below the member wall and does not say so`,
+          );
+          from = close > 0 ? close + 9 : open + 7;
+        }
+        // A wall with no figures behind it would pass the loop vacuously, which
+        // is the way this check would quietly stop testing anything.
+        check("the member-tier wall still has figures behind it", figures > 0,
+          "no <figure> found below data-member-tier");
+      }
+    }
+
     // ── §8 rule 2: no dual vertical axes, ever ─────────────────────────────
     check("no chart declares a second vertical axis", !html.includes("data-second-axis"));
 

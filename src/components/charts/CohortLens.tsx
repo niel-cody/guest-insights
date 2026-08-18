@@ -44,8 +44,14 @@ import type { Cohorts } from "@/lib/types";
  * Unchanged and load-bearing. Coverage is roughly 19% of orders and this is a
  * heavily self-selected group — this build's own analysis puts about 97% of the
  * member value gap down to selection rather than effect. Labelled loosely, this
- * chart launders a selected sample into a general one. `member.tierScopeDeclared`
- * fails the build if a member figure renders without its scope.
+ * chart launders a selected sample into a general one.
+ *
+ * `member.tierScopeDeclared` — R-217 — now enforces that, in `layout-tests.ts`
+ * against the built HTML rather than here in a comment. It was specified in the
+ * build pack, asserted live in this docblock, and never written: a member figure
+ * could have lost its scope and no build step would have noticed. Proven capable
+ * of failing by stripping "members only" from the heading below, which fails it
+ * on all four prerendered behaviour pages.
  */
 
 const BAND_MIN_MEMBERS = 0;
