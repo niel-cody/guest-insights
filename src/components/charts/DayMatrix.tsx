@@ -1,4 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import type { ReactNode } from "react";
+// Imported, never re-exported: re-exporting it from a "use client"
+// module would hand a server component a client reference again, which is the
+// bug this move exists to fix.
+import { WEEKDAYS } from "@/lib/weekdays";
 
 /**
  * A 7-row grid of shaded cells. **Built once, used twice.**
@@ -37,6 +44,23 @@ import type { ReactNode } from "react";
  * **Population and window render on the chart itself** (§8 rule 5), not in a
  * legend and not in the card header, because a screenshot of a chart travels
  * without its card.
+ *
+ * **Cells are squares on a fixed grid, not table cells that stretch.** A column
+ * that stretches to fill the container makes a busy Thursday lunch a wide
+ * rectangle and a quiet pre-dawn a narrow one, so the eye reads *area* — which
+ * encodes nothing here, because the only quantity on this chart is the shade.
+ * Equal squares make the shading the whole signal, which is what it is.
+ *
+ * **The tooltip is positioned fixed, deliberately.** The grid sits in an
+ * `overflow-x-auto` scroller, and that establishes a clipping context in both
+ * axes — an absolutely positioned tooltip inside it gets cut off at the edge
+ * exactly where the columns are most crowded. Capturing the cell rect on hover
+ * and positioning against the viewport escapes the clip entirely.
+ *
+ * **Every cell is a button.** Hover alone would put the column identity behind a
+ * gesture that does not exist on touch, and with the header row gone the
+ * identity is the tooltip's job. So it opens on hover, on focus and on tap, and
+ * the full sentence stays on `aria-label` for anyone who reaches none of those.
  */
 
 export type MatrixCell = {
@@ -59,16 +83,6 @@ export type MatrixColumn = {
   narrow?: boolean;
 };
 
-/** Monday-first, with the `DAYOFWEEK` index the warehouse actually emits. */
-export const WEEKDAYS = [
-  { dow: 1, label: "Mon", long: "Monday" },
-  { dow: 2, label: "Tue", long: "Tuesday" },
-  { dow: 3, label: "Wed", long: "Wednesday" },
-  { dow: 4, label: "Thu", long: "Thursday" },
-  { dow: 5, label: "Fri", long: "Friday" },
-  { dow: 6, label: "Sat", long: "Saturday" },
-  { dow: 0, label: "Sun", long: "Sunday" },
-] as const;
 
 /**
  * A single-hue sequential ramp.
@@ -103,7 +117,8 @@ function shadeDiverging(t: number): string {
 
 export function DayMatrix({
   columns, cells, max, hue = "var(--accent)", population, window: win,
-  rowLabelWidth = 44, cellHeight = 34, footer, compact = false, diverging = false,
+  rowLabelWidth = 44, cellSize = 34, footer, compact = false, diverging = false,
+  showHeader = true,
 }: {
   columns: MatrixColumn[];
   /** Use the diverging ramp. Only for quantities with a real midpoint at zero. */
@@ -117,10 +132,23 @@ export function DayMatrix({
   population: string;
   window: string;
   rowLabelWidth?: number;
-  cellHeight?: number;
+  /** Cells are square, so one number governs both axes. */
+  cellSize?: number;
   footer?: ReactNode;
   compact?: boolean;
+  /**
+   * Column titles. Off where the tooltip carries the identity instead and the
+   * grid is small enough that eight labels cost more than they return.
+   */
+  showHeader?: boolean;
 }) {
+  /** The cell whose tooltip is open, and where on screen to draw it. */
+  const [active, setActive] = useState<{ key: string; text: string; x: number; y: number } | null>(null);
+
+  const open = (key: string, text: string, el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    setActive({ key, text, x: r.left + r.width / 2, y: r.top });
+  };
   return (
     <figure className="m-0">
       <div className="overflow-x-auto">
@@ -131,36 +159,40 @@ export function DayMatrix({
           <caption className="sr-only">
             {population}. {win}.
           </caption>
-          <thead>
-            <tr>
-              <th style={{ width: rowLabelWidth }} />
-              {columns.map((c) => (
-                <th
-                  key={c.key}
-                  scope="col"
-                  className={`pb-1 text-[11px] leading-tight font-medium ${
-                    c.narrow ? "text-ink-muted" : "text-ink-secondary"
-                  }`}
-                  style={c.narrow ? { width: 26 } : undefined}
-                >
-                  {/* A dead period keeps its column and loses its width. The
-                      label rotates so it still says which period it is. */}
-                  {c.narrow ? (
-                    <span className="block text-[9px] whitespace-nowrap">{c.label.slice(0, 4)}</span>
-                  ) : (
-                    <>
-                      {c.label}
-                      {c.sublabel && (
-                        <span className="tnum block text-[10px] font-normal text-ink-muted">
-                          {c.sublabel}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
+          {/* Columns keep their width whether or not they are titled — the
+              squares are the grid, and a narrowed column would make one
+              cell smaller than its neighbours for a reason the reader cannot
+              see. `narrow` now only affects the label. */}
+          {showHeader && (
+            <thead>
+              <tr>
+                <th style={{ width: rowLabelWidth }} />
+                {columns.map((c) => (
+                  <th
+                    key={c.key}
+                    scope="col"
+                    className={`pb-1 text-[11px] leading-tight font-medium ${
+                      c.narrow ? "text-ink-muted" : "text-ink-secondary"
+                    }`}
+                    style={{ width: cellSize }}
+                  >
+                    {c.narrow ? (
+                      <span className="block text-[9px] whitespace-nowrap">{c.label.slice(0, 4)}</span>
+                    ) : (
+                      <>
+                        {c.label}
+                        {c.sublabel && (
+                          <span className="tnum block text-[10px] font-normal text-ink-muted">
+                            {c.sublabel}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
           <tbody>
             {WEEKDAYS.map((d) => (
               <tr key={d.dow}>
@@ -174,17 +206,34 @@ export function DayMatrix({
                 {columns.map((c) => {
                   const cell = cells.get(`${d.dow}|${c.key}`);
                   const empty = !cell || cell.value === null;
+                  const key = `${d.dow}|${c.key}`;
+                  // The tooltip leads with the column, because with the header
+                  // gone that is the fact the reader cannot otherwise recover.
+                  const text = empty
+                    ? `${c.label} · ${d.long} · no trade`
+                    : `${c.label} · ${d.long} · ${cell!.label}`;
                   return (
-                    <td key={c.key} className="p-0" style={c.narrow ? { width: 26 } : undefined}>
-                      <div
+                    <td key={c.key} className="p-0" style={{ width: cellSize }}>
+                      <button
+                        type="button"
                         // The whole sentence, on the element, so a screen reader
                         // gets the same figure a sighted reader gets from the
                         // shade rather than a colour it cannot see.
-                        aria-label={empty ? `${d.long}, ${c.label}: no trade` : `${d.long}, ${c.label}: ${cell!.label}`}
-                        title={empty ? `${d.long} · ${c.label} · no trade` : `${d.long} · ${c.label} · ${cell!.label}`}
-                        className="rounded-[3px] border"
+                        aria-label={text}
+                        onMouseEnter={(e) => open(key, text, e.currentTarget)}
+                        onMouseLeave={() => setActive((a) => (a?.key === key ? null : a))}
+                        onFocus={(e) => open(key, text, e.currentTarget)}
+                        onBlur={() => setActive((a) => (a?.key === key ? null : a))}
+                        // No onClick, deliberately. A click focuses the button
+                        // first, so `onFocus` had already opened the tooltip by
+                        // the time a toggling click handler ran — which saw it
+                        // open and closed it again, and the tooltip never
+                        // appeared on tap at all. Focus covers both tap and
+                        // keyboard on its own; blur and mouse-leave close it.
+                        className="block rounded-[3px] border transition-opacity hover:opacity-80"
                         style={{
-                          height: cellHeight,
+                          width: cellSize,
+                          height: cellSize,
                           // Blank and zero are different facts and are drawn
                           // differently: a dashed outline is "nothing happened",
                           // the palest fill is "something small happened".
@@ -195,6 +244,8 @@ export function DayMatrix({
                               : shade(max ? cell!.value! / max : 0, hue),
                           borderColor: empty ? "var(--line)" : "transparent",
                           borderStyle: empty ? "dashed" : "solid",
+                          outline: active?.key === key ? "2px solid var(--accent)" : undefined,
+                          outlineOffset: active?.key === key ? 1 : undefined,
                         }}
                       />
                     </td>
@@ -205,6 +256,19 @@ export function DayMatrix({
           </tbody>
         </table>
       </div>
+
+      {/* Positioned against the viewport, not the scroller — see the docblock.
+          `pointer-events-none` so it can never sit between the pointer and the
+          cell that opened it, which is how a hover tooltip starts flickering. */}
+      {active && (
+        <div
+          role="tooltip"
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg border border-line-strong bg-surface-raised px-2.5 py-1.5 text-[12px] whitespace-nowrap text-ink shadow-lg"
+          style={{ left: active.x, top: active.y - 6 }}
+        >
+          {active.text}
+        </div>
+      )}
 
       <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <p className="text-[12px] leading-relaxed text-ink-secondary">

@@ -1,5 +1,5 @@
 import { EmptyState } from "@/components/ui/Primitives";
-import { WEEKDAYS } from "@/components/charts/DayMatrix";
+import { WEEKDAYS } from "@/lib/weekdays";
 import { SEGMENT_COLOUR, SEGMENT_LABEL, count, money, pct } from "@/lib/metrics";
 import type { Daypart, SegmentBehaviourRow } from "@/lib/types";
 

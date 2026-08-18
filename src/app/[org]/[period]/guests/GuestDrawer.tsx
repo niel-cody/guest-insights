@@ -4,7 +4,8 @@ import { useState } from "react";
 import { IconX } from "@/components/shell/Icons";
 import { EmptyState, Pill } from "@/components/ui/Primitives";
 import { GuestBasket } from "@/components/ui/GuestBasket";
-import { DayMatrix, WEEKDAYS, type MatrixCell } from "@/components/charts/DayMatrix";
+import { DayMatrix, type MatrixCell } from "@/components/charts/DayMatrix";
+import { WEEKDAYS } from "@/lib/weekdays";
 import { BAND_LABEL, CARD_NOTE, mask } from "./GuestGrid";
 import {
   SEGMENT_LABEL, count, dayLabel, money, overdueRatio, pct, placeVisit, plural, recency,
@@ -442,6 +443,16 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
   const byDaypart = history.some((h) => h.length > 4 && h[4]! >= 0);
 
   const cells = new Map<string, MatrixCell>();
+  /**
+   * Visits, orders and spend per cell, accumulated properly.
+   *
+   * The order count used to be recovered by parsing it back off the front of
+   * the label string — `Number(prev.label.split(" ")[0])` — which worked only
+   * for as long as nothing was ever prefixed to that label. The tooltip needed
+   * a visit count too, and a second value parsed out of prose is a second thing
+   * that silently returns NaN the day the wording changes.
+   */
+  const tally = new Map<string, { visits: number; orders: number; spend: number }>();
   let max = 0;
 
   for (const h of history) {
@@ -458,23 +469,25 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
     if (!column) continue;
 
     const key = `${at.dow}|${column}`;
-    const prev = cells.get(key);
-    const total = (prev?.value ?? 0) + spend;
-    const prevOrders = prev ? Number(prev.label.split(" ")[0]) || 0 : 0;
-    max = Math.max(max, total);
+    const t = tally.get(key) ?? { visits: 0, orders: 0, spend: 0 };
+    t.visits += 1;
+    t.orders += orders;
+    t.spend += spend;
+    tally.set(key, t);
+    max = Math.max(max, t.spend);
     cells.set(key, {
-      value: total,
-      // On a daypart grid the cell pools every Thursday breakfast in the window,
-      // so there is no single date to name — and the column already carries the
-      // daypart, which `DayMatrix` prefixes to this string. Repeating it here
-      // reads back as "Monday, Pre-Dawn: 12 orders · $151.20 · Pre-Dawn".
+      value: t.spend,
+      // The column already carries the daypart and `DayMatrix` prefixes it to
+      // this string, so repeating it here reads back as
+      // "Pre-Dawn · Monday · 12 orders · $151.20 · Pre-Dawn".
       label:
-        `${prevOrders + orders} order${prevOrders + orders === 1 ? "" : "s"} · ${money(total)}` +
+        `${plural(t.visits, org.labels.visits.replace(/s$/, ""))} · ` +
+        `${t.orders} order${t.orders === 1 ? "" : "s"} · ${money(t.spend)}` +
         (byDaypart ? "" : ` · ${dayLabel(at.iso)}`),
     });
   }
 
-  const drawn = [...cells.values()].reduce((a, c) => a + (Number(c.label.split(" ")[0]) || 0), 0);
+  const drawn = [...tally.values()].reduce((a, t) => a + t.orders, 0);
 
   const rhythm = rhythmShift(history);
   const venuesUsed = [...new Set(history.map((h) => h[3]).filter((i) => i >= 0))];
@@ -568,8 +581,12 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
               ? `${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · venue-local · shaded by spend`
               : `${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`
           }
-          cellHeight={26}
+          cellSize={26}
           rowLabelWidth={36}
+          // The column titles come off here and the tooltip carries the daypart
+          // instead. Eight titles across a 520px drawer is most of the width
+          // spent on labels the reader needs once.
+          showHeader={false}
           compact
         />
       </div>
