@@ -4,7 +4,7 @@ import { useState } from "react";
 import { IconX } from "@/components/shell/Icons";
 import { EmptyState, Pill } from "@/components/ui/Primitives";
 import { GuestBasket } from "@/components/ui/GuestBasket";
-import { DayMatrix, type MatrixCell } from "@/components/charts/DayMatrix";
+import { DayMatrix, WEEKDAYS, type MatrixCell } from "@/components/charts/DayMatrix";
 import { BAND_LABEL, CARD_NOTE, mask } from "./GuestGrid";
 import {
   SEGMENT_LABEL, count, dayLabel, money, overdueRatio, pct, placeVisit, plural, recency,
@@ -421,24 +421,60 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
   }
 
   const weeks = visitWeeks(org.window);
+
+  /**
+   * ── Weekday against daypart, not weekday against calendar week ────────────
+   *
+   * The calendar version answered "has this person's pattern changed" — the run
+   * of blanks. It is a real question and it is **already answered in words**
+   * directly above the grid, by the rhythm sentence, which computes first half
+   * against second half and says steady, widening or tightening. A reader does
+   * not have to count gaps in a 7×14 grid to get it.
+   *
+   * What no sentence gives them is *when* — Thursday mornings, or Saturday
+   * dinner. That is the shape of the person, it is stable enough over 92 days to
+   * be worth drawing, and it is the same pair of axes the estate heatmap uses,
+   * so the drawer and the report finally read the same way.
+   *
+   * The column count also stops depending on the window: fourteen weeks became
+   * a horizontal scrollbar inside a 520px drawer, and eight dayparts do not.
+   */
+  const byDaypart = history.some((h) => h.length > 4 && h[4]! >= 0);
+
   const cells = new Map<string, MatrixCell>();
-  const venueByDay = new Map<string, number>();
   let max = 0;
 
-  for (const [offset, orders, spend, venueIdx] of history) {
+  for (const h of history) {
+    const [offset, orders, spend] = h;
     const at = placeVisit(offset, org.window, weeks);
     if (!at) continue;
-    const key = `${at.dow}|${at.weekKey}`;
+    const dp = h.length > 4 ? h[4]! : -1;
+    // A visit whose daypart did not resolve is dropped from a daypart grid
+    // rather than pooled into a column it may not belong to. Filling it from
+    // `homeDaypart` would put every visit of every guest in one column and call
+    // the result a finding.
+    if (byDaypart && dp < 0) continue;
+    const column = byDaypart ? org.dayparts[dp]?.key : at.weekKey;
+    if (!column) continue;
+
+    const key = `${at.dow}|${column}`;
     const prev = cells.get(key);
     const total = (prev?.value ?? 0) + spend;
     const prevOrders = prev ? Number(prev.label.split(" ")[0]) || 0 : 0;
     max = Math.max(max, total);
     cells.set(key, {
       value: total,
-      label: `${prevOrders + orders} order${prevOrders + orders === 1 ? "" : "s"} · ${money(total)} · ${dayLabel(at.iso)}`,
+      // On a daypart grid the cell pools every Thursday breakfast in the window,
+      // so there is no single date to name — and the column already carries the
+      // daypart, which `DayMatrix` prefixes to this string. Repeating it here
+      // reads back as "Monday, Pre-Dawn: 12 orders · $151.20 · Pre-Dawn".
+      label:
+        `${prevOrders + orders} order${prevOrders + orders === 1 ? "" : "s"} · ${money(total)}` +
+        (byDaypart ? "" : ` · ${dayLabel(at.iso)}`),
     });
-    if (venueIdx >= 0) venueByDay.set(key, venueIdx);
   }
+
+  const drawn = [...cells.values()].reduce((a, c) => a + (Number(c.label.split(" ")[0]) || 0), 0);
 
   const rhythm = rhythmShift(history);
   const venuesUsed = [...new Set(history.map((h) => h[3]).filter((i) => i >= 0))];
@@ -489,17 +525,49 @@ function HowTheyBehave({ g, org }: { g: Guest; org: Org }) {
           When they visit
         </h3>
         <p className="mt-0.5 mb-2 text-[12px] leading-relaxed text-ink-muted">
-          Weekday down the side, calendar week across, one cell per day, shaded by what they spent. Which
-          days they own, whether they vanish at weekends, and the run of blanks that is the only individual
-          slip signal a {org.window.days}-day window can honestly give.
+          {byDaypart ? (
+            <>
+              Weekday down the side, daypart across, shaded by what they spent — the same two axes the
+              trading grid on Behaviour uses, so this person can be read against the business. Each cell
+              pools every visit they made in that slot across the {org.window.days} days.
+            </>
+          ) : (
+            <>
+              Weekday down the side, calendar week across, one cell per day, shaded by what they spent.{" "}
+              <strong className="text-ink-secondary">This snapshot predates the per-visit daypart</strong>,
+              so the grid runs on the calendar until the next extract; the daypart is queried and was
+              discarded at pack time.
+            </>
+          )}
         </p>
         <DayMatrix
-          columns={weeks.map((wk) => ({ key: wk.key, label: wk.label }))}
+          columns={
+            byDaypart
+              ? org.dayparts.map((d) => ({
+                  key: d.key,
+                  label: d.label,
+                  sublabel: `${String(d.from).padStart(2, "0")}–${String(d.to % 24).padStart(2, "0")}`,
+                  // A period this person never uses keeps its column and loses
+                  // its width, exactly as the estate grid treats a period the
+                  // business does not trade in. Dropping it would make one
+                  // guest's axis differ from another's and from the report's.
+                  narrow: !WEEKDAYS.some((wd) => cells.has(`${wd.dow}|${d.key}`)),
+                }))
+              : weeks.map((wk) => ({ key: wk.key, label: wk.label }))
+          }
           cells={cells}
           max={max}
           hue={g.tier === "member" ? "var(--tier-member)" : "var(--tier-card)"}
-          population={`all ${count(g.visits)} ${org.labels.visits}, none omitted`}
-          window={`${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`}
+          population={
+            drawn === g.orders
+              ? `all ${count(g.visits)} ${org.labels.visits}, none omitted`
+              : `${count(drawn)} of ${count(g.orders)} orders — the rest carry no daypart`
+          }
+          window={
+            byDaypart
+              ? `${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · venue-local · shaded by spend`
+              : `${dayLabel(org.window.start)} – ${dayLabel(org.window.end)} · shaded by that day's spend`
+          }
           cellHeight={26}
           rowLabelWidth={36}
           compact

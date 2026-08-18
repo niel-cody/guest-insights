@@ -257,11 +257,18 @@ export type Guest = {
   /** Share of their visits carrying their single most-bought product. */
   topShare: number | null;
   /**
-   * Most recent visits as [dayOffsetFromWindowStart, orders, spend, venueIndex],
-   * capped. `visits` above is the uncapped total, so a truncated timeline can
-   * never be mistaken for the whole relationship.
+   * Every visit as [dayOffsetFromWindowStart, orders, spend, venueIndex,
+   * daypartIndex]. `visits` above is the uncapped total, and the two agree by
+   * construction — see `visitHistoryQuery`.
+   *
+   * **The fifth element is optional because snapshots predate it.** The extract
+   * has always selected the daypart and used to discard it at pack time; a
+   * snapshot taken before that was fixed carries four-wide tuples. The drawer
+   * reads the width rather than assuming it, so an old snapshot keeps rendering
+   * the calendar-week grid instead of a daypart grid with every visit in one
+   * column, which is what filling the gap from `homeDaypart` would produce.
    */
-  history: [number, number, number, number][];
+  history: ([number, number, number, number] | [number, number, number, number, number])[];
 };
 
 /**

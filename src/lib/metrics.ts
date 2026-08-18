@@ -598,7 +598,8 @@ export function placeVisit(
  * comparison between two numbers wearing the clothes of a trend.
  */
 export function rhythmShift(
-  history: [number, number, number, number][],
+  /** Reads the day offset only, so tuple width is irrelevant to it. */
+  history: readonly (readonly number[])[],
 ): { verdict: "steady" | "widening" | "tightening"; firstHalf: number; secondHalf: number } | null {
   if (history.length < 4) return null;
   // History arrives most-recent first; gaps are easier to read oldest first.

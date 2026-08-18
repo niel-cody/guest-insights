@@ -1294,12 +1294,27 @@ async function extractPeriod(
   }
 
   const venueOrder = new Map(venueList.map((v, i) => [v.id, i]));
-  const historyByPerson = new Map<string, [number, number, number, number][]>();
+  /**
+   * The daypart was being thrown away here.
+   *
+   * `visitHistoryQuery` has always selected it — `MAX_BY(DAYPART, SPEND)`, the
+   * daypart the visit's money was in — and this mapper built a four-wide tuple
+   * and dropped it on the floor. So the drawer could only ever plot visits
+   * against the calendar, and "when does this person come" was answerable for
+   * the estate and not for a person.
+   *
+   * Indexed against `org.dayparts` rather than carried as a key, for the same
+   * reason the venue is: one number against a repeated string, across every
+   * visit of every guest in the working set.
+   */
+  const daypartOrder = new Map<string, number>(DAYPARTS.map((d, i) => [d.key, i]));
+  const historyByPerson = new Map<string, [number, number, number, number, number][]>();
   for (const r of visitHistory) {
     historyByPerson.set(
       pseudonymise(String(r.PERSON_ID)),
-      parseArr(r.VISITS).map((o): [number, number, number, number] => [
+      parseArr(r.VISITS).map((o): [number, number, number, number, number] => [
         num(o.d), num(o.o), r2(num(o.s)), venueOrder.get(String(o.v)) ?? -1,
+        daypartOrder.get(String(o.p)) ?? -1,
       ]),
     );
   }
