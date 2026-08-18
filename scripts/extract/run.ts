@@ -1416,7 +1416,7 @@ async function extractTeam(
       elapsedAgrees: true, segments: 0,
     },
     links: [], people: [],
-    margin: { daypart: [], service: [], serviceDow: [], dow: [], dowDaypart: [], week: [], month: [], day: [] },
+    margin: { daypart: [], service: [], serviceDow: [], dow: [], dowDaypart: [], week: [], month: [], day: [], dayService: [] },
     sections: [],
     totals: { net: 0, labour: 0, leave: 0, plannedLabour: 0, hours: 0, penaltyHours: 0, penaltyCost: 0, wagePct: 0, margin: 0, netPerHour: 0 },
   };
@@ -1547,16 +1547,16 @@ async function extractTeam(
   });
 
   /** One fact table at the finest grain both sides share: store × date × daypart. */
-  const cells = new Map<string, Bucket & { storeId: string; date: string; daypart: string; service: string }>();
-  const cell = (storeId: string, date: string, daypart: string, service: string) => {
-    const k = `${storeId}|${date}|${daypart}|${service}`;
+  const cells = new Map<string, Bucket & { storeId: string; date: string; daypart: string }>();
+  const cell = (storeId: string, date: string, daypart: string) => {
+    const k = `${storeId}|${date}|${daypart}`;
     let c = cells.get(k);
-    if (!c) { c = { ...zero(), storeId, date, daypart, service }; cells.set(k, c); }
+    if (!c) { c = { ...zero(), storeId, date, daypart }; cells.set(k, c); }
     return c;
   };
 
   for (const r of salesRows) {
-    const c = cell(String(r.STORE_ID), day(r.D)!, String(r.DAYPART), String(r.SERVICE));
+    const c = cell(String(r.STORE_ID), day(r.D)!, String(r.DAYPART));
     c.net += num(r.NET); c.orders += num(r.ORDERS); c.covers += num(r.COVERS);
     c.days.add(day(r.D)!);
   }
@@ -1577,11 +1577,6 @@ async function extractTeam(
     const cost = num(r.COST);
     const ordinary = r.ORDINARY_HOURS === true;
     const storeId = String(r.STORE_ID);
-    // The service the venue itself assigned this shift to, falling back to when
-    // the shift actually started. Decided once per segment, so every minute of
-    // it lands in the same block — a shift is not split across two services
-    // just because it crosses four o'clock.
-    const service = T.serviceOfShift(deptName.get(String(r.DEPARTMENT_ID ?? "")) ?? null, start.getUTCHours());
     segments++;
 
     // The assumption pro-rata apportionment rests on, asserted on the real rows.
@@ -1595,7 +1590,7 @@ async function extractTeam(
     const hoursHere = kind === "award" ? hours : 0;
 
     for (const s of T.apportion(start, finish, hoursHere, costHere)) {
-      const c = cell(storeId, s.date, s.daypart, service);
+      const c = cell(storeId, s.date, s.daypart);
       if (kind === "leave") continue;
       c.labour += s.cost;
       c.hours += s.hours;
@@ -1603,7 +1598,7 @@ async function extractTeam(
       if (kind === "award" && !ordinary) { c.penaltyHours += s.hours; c.penaltyCost += s.cost; }
     }
     if (kind === "leave") {
-      const c = cell(storeId, start.toISOString().slice(0, 10), T.daypartOfHour(start.getUTCHours()), service);
+      const c = cell(storeId, start.toISOString().slice(0, 10), T.daypartOfHour(start.getUTCHours()));
       c.leave += cost;
     }
 
@@ -1709,10 +1704,13 @@ async function extractTeam(
 
   const margin: TeamMargin = {
     daypart: roll((c) => c.daypart, (k) => DP_LABEL.get(k) ?? k, true, undefined, CLOCK_REFUSAL)
+      // The nesting travels with the cell, so the surface groups day parts under
+      // their service from the data rather than from a second copy of the map.
+      .map((c) => ({ ...c, group: T.DAYPART_GROUP[c.key] }))
       .sort((a, b) => DAYPARTS.findIndex((d) => d.key === a.key) - DAYPARTS.findIndex((d) => d.key === b.key)),
-    service: roll((c) => c.service, (k) => SV_LABEL.get(k) ?? k, true)
+    service: roll((c) => T.groupOfDaypart(c.daypart), (k) => SV_LABEL.get(k) ?? k, true)
       .sort((a, b) => T.SERVICE_BLOCKS.findIndex((x) => x.key === a.key) - T.SERVICE_BLOCKS.findIndex((x) => x.key === b.key)),
-    serviceDow: roll((c) => `${dowOf(c.date)}|${c.service}`, (k) => {
+    serviceDow: roll((c) => `${dowOf(c.date)}|${T.groupOfDaypart(c.daypart)}`, (k) => {
       const [d, v] = k.split("|");
       return `${DOW_LABEL[Number(d)]} ${(SV_LABEL.get(v) ?? v).toLowerCase()}`;
     }, true).map((c) => ({ ...c, dow: Number(c.key.split("|")[0]), service: c.key.split("|")[1] })),
@@ -1724,6 +1722,18 @@ async function extractTeam(
     week: roll((c) => T.weekStart(c.date), (k) => k, true, (d) => T.weekStart(d)).sort((a, b) => a.key.localeCompare(b.key)),
     month: roll((c) => c.date.slice(0, 7), (k) => k, true, (d) => d.slice(0, 7)).sort((a, b) => a.key.localeCompare(b.key)),
     day: roll((c) => c.date, (k) => k, true, (d) => d).sort((a, b) => a.key.localeCompare(b.key)),
+    // Date × group. Every instance behind every weekday norm, so "is this Monday
+    // normal for a Monday" is answered against the venue's own history rather
+    // than against one flat target.
+    dayService: roll((c) => `${c.date}|${T.groupOfDaypart(c.daypart)}`, (k) => {
+      const [d, v] = k.split("|");
+      return `${d} ${(SV_LABEL.get(v) ?? v).toLowerCase()}`;
+    }, true)
+      .map((c) => {
+        const [date, service] = c.key.split("|");
+        return { ...c, date, service, dow: dowOf(date) };
+      })
+      .sort((a, b) => a.key.localeCompare(b.key)),
   };
 
   // ── people ────────────────────────────────────────────────────────────────

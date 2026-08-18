@@ -824,15 +824,29 @@ export type TeamMarginCell = {
   netPerHour: number | null;
   /** Why the ratios are absent, where they are. Null when they are present. */
   refusal: string | null;
+  /**
+   * The day part group this cell nests inside, on grains where it has one.
+   *
+   * Carried in the data rather than derived in the UI, so the nesting is stated
+   * once by the thing that computed it and cannot drift from a second copy of
+   * the mapping living in a component.
+   */
+  group?: string;
 };
 
 export type TeamMargin = {
   /** The clock. Trade shape and labour shape; ratios refused. */
   daypart: TeamMarginCell[];
-  /** Lunch and dinner service. The finest grain a wage percentage survives. */
+  /** Day part groups. The finest grain a wage percentage survives. */
   service: TeamMarginCell[];
-  /** Service × day of week — which shift on which day, the rostering question. */
+  /** Group × day of week — which service on which day, the rostering question. */
   serviceDow: (TeamMarginCell & { dow: number; service: string })[];
+  /**
+   * Every trading date × group. The instances a weekday norm is built from, and
+   * the rows an exception is found in — "this Monday against a normal Monday"
+   * needs both the pooled pattern and the individual days underneath it.
+   */
+  dayService: (TeamMarginCell & { dow: number; service: string; date: string })[];
   dow: TeamMarginCell[];
   /** Day of week × daypart. `dow` is the warehouse's Sunday-zero index. */
   dowDaypart: (TeamMarginCell & { dow: number; daypart: string })[];

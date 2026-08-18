@@ -1,12 +1,13 @@
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives";
-import { InfoButton } from "@/components/ui/InfoButton";
+import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { teamChecks } from "@/lib/checks";
 import { count, money, pct, windowShort } from "@/lib/metrics";
 import { VERDICT_LABEL, VERDICT_MEANING, VERDICT_TONE } from "@/lib/team";
 import type { TeamVerdict } from "@/lib/types";
 import { Unavailable } from "../Unavailable";
+import { Standfirst } from "../Standfirst";
 
 export const dynamic = "force-static";
 export const metadata = { title: "People" };
@@ -110,26 +111,22 @@ export default async function TeamPeoplePage({
       {header}
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
-          {/* ── the finding, stated before anything is ranked ─────────────── */}
-          <Card title="The two systems do not know they describe the same people">
-            <p className="max-w-[95ch] text-[14px] leading-relaxed text-ink-secondary">
-              The till records who rang an order. {i.vendor === "TANDA" ? "Tanda" : i.vendor ?? "The rostering system"}{" "}
-              records who worked, for how long, at what rate.{" "}
-              <strong className="text-ink">
-                {count(i.idMatches)} of {count(i.posIdentities)} POS identities appear in the
-                employee roll by id
-              </strong>{" "}
-              — not few, none — and {count(i.exactNameMatches)} match on an exact name. The roster
-              carries a first name and a section code, because that is what a roster needs to read at
-              a glance; the till carries whatever was typed when the login was created.
-            </p>
-            <p className="mt-3 max-w-[95ch] text-[14px] leading-relaxed text-ink-secondary">
-              Everything else in this section divides one system by the other, so this page decides
-              what the rest of it is allowed to say. It is a review queue: the matcher proposes,
-              writes down its evidence, and{" "}
-              <strong className="text-ink">refuses to cost anything it cannot stand behind</strong>.
-            </p>
-          </Card>
+          <Standfirst
+            question="Do the till and the rostering system agree who a person is?"
+            body={
+              <>
+                They do not.{" "}
+                <strong className="text-ink">
+                  {count(i.idMatches)} of {count(i.posIdentities)} till logins appear in the{" "}
+                  {i.vendor === "TANDA" ? "Tanda" : (i.vendor ?? "workforce")} employee roll by id
+                </strong>{" "}
+                — not few, none — and {count(i.exactNameMatches)} match on an exact name. Everything
+                else in this section divides one system by the other, so this page decides what the
+                rest of it is allowed to say. Work the queue from the top: it is ordered
+                worst-evidence-first.
+              </>
+            }
+          />
 
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
@@ -292,14 +289,25 @@ export default async function TeamPeoplePage({
             title="What the feed itself is missing"
             subtitle="Not defects in this report. Defects in the data underneath it, named so they can be fixed at source."
             explain={
-              <InfoButton label="About these figures" align="end">
-                <p>
-                  Every row here was measured over the same window as the rest of the report. None of
-                  it is estimated, and none of it is worked around silently — a figure this report
-                  cannot stand behind is refused elsewhere in the section, and this is the list of
-                  reasons why.
-                </p>
-              </InfoButton>
+              <ExplainDrawer
+                label="How the feed quality figures are measured"
+                title="What the feed itself is missing"
+                showing={
+                  <p>
+                    Each row is a property of the data underneath this report, not of the report. The
+                    two below the table are the ones that change what the section is allowed to
+                    publish, which is why they are stated in full rather than left as counts.
+                  </p>
+                }
+                made={
+                  <p>
+                    Every figure was measured over the same window as the rest of the report. None is
+                    estimated and none is worked around silently — where one of these blocks a
+                    calculation, the calculation is refused elsewhere in the section and this is the
+                    reason why.
+                  </p>
+                }
+              />
             }
           >
             <Facts
@@ -365,19 +373,36 @@ export default async function TeamPeoplePage({
           </Card>
 
           {/* ── the names ─────────────────────────────────────────────────── */}
-          <Card title="About the names on this screen">
+          <Card
+            title="About the names on this screen"
+            explain={
+              <ExplainDrawer
+                label="How the names are generated"
+                title="About the names on this screen"
+                showing={
+                  <p>
+                    What you see is a synthetic pair that <strong>preserves the evidence</strong>.
+                    Where a real surname initial agreed, the synthetic one agrees. Where the second
+                    token told you nothing, it still tells you nothing. Section codes pass through
+                    untouched, because they are half of why this join is hard.
+                  </p>
+                }
+                made={
+                  <p>
+                    Every verdict, count and figure on this page was computed against the real names.
+                    Names are then substituted through a salted hash whose salt is not committed, so
+                    a name cannot be replayed against the warehouse. In production the same code
+                    reads the real names directly and this substitution does not happen.
+                  </p>
+                }
+              />
+            }
+          >
             <p className="max-w-[95ch] text-[13px] leading-relaxed text-ink-secondary">
               Employees are people and this snapshot lives in a repository, so{" "}
               <strong className="text-ink">no real name leaves the warehouse</strong> — the same rule
-              the guest reports follow. The matcher runs on the real strings; what you see is a
-              synthetic pair that <strong className="text-ink">preserves the evidence</strong>. Where
-              a real surname initial agreed, the synthetic one agrees. Where the second token told
-              you nothing, it still tells you nothing. Section codes are not personal data and pass
-              through untouched, because they are half of why this join is hard.
-            </p>
-            <p className="mt-2.5 max-w-[95ch] text-[13px] leading-relaxed text-ink-secondary">
-              Every verdict, count and figure on this page was computed against the real names. In
-              production the same code reads them directly and this substitution does not happen.
+              the guest reports follow. The matching ran on the real strings; the names drawn above
+              are synthetic stand-ins that keep the same evidence.
             </p>
           </Card>
         </div>

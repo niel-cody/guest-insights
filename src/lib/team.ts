@@ -8,6 +8,7 @@
  * screen, and the two drift.
  */
 import type { Team, TeamMarginCell, TeamPerson, TeamVerdict } from "./types";
+import { WEEKDAYS } from "./weekdays";
 
 export const VERDICT_LABEL: Record<TeamVerdict, string> = {
   confirmed: "Confirmed",
@@ -166,3 +167,125 @@ export const wageBand = (pct: number | null) =>
 export const SHARED_LOGIN = /^(|\(no name\)|trainee\b.*|qr tags?|unknown\b.*|oolio admin|meat wine|test\b.*|training\b.*|staff|counter|kiosk|online|pos \d*)$/i;
 
 export const looksShared = (label: string) => SHARED_LOGIN.test(label.trim());
+
+// ── what is normal for a Monday ─────────────────────────────────────────────
+
+export type DayServiceCell = TeamMarginCell & { dow: number; service: string; date: string };
+
+export type WeekdayNorm = {
+  dow: number;
+  group: string;
+  label: string;
+  /** How many instances of this weekday and service the window actually holds. */
+  n: number;
+  median: number;
+  /** The range the middle half of instances fall in. The "normal" band. */
+  lo: number;
+  hi: number;
+  instances: DayServiceCell[];
+};
+
+const quantile = (sorted: number[], q: number) => {
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * q;
+  const lo = Math.floor(i);
+  const hi = Math.ceil(i);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+};
+
+/**
+ * Fewer than this many instances and there is no "normally" to speak of.
+ *
+ * A window holding three Mondays can tell you what happened on three Mondays. It
+ * cannot tell you what a Monday *is*, and a band drawn from three points is a
+ * band that moves every time one of them does.
+ */
+export const MIN_INSTANCES_FOR_NORM = 6;
+
+/**
+ * What each weekday and service normally costs, from the venue's own history.
+ *
+ * ── Why a band and not a target ────────────────────────────────────────────
+ *
+ * A single venue-wide wage target flags Monday amber every week. That is not a
+ * finding, it is arithmetic about a Monday: preparation happens whether or not
+ * anybody comes in, so a slow day carries a fixed cost against a small
+ * denominator and runs hot **by construction**. A manager who is told this every
+ * week learns to ignore the colour, and then misses the Monday that is genuinely
+ * wrong.
+ *
+ * So the comparison is a weekday against itself. The band is the middle half of
+ * that weekday's own instances — the range it usually lands in — and a day is
+ * only remarkable when it falls outside the range its own weekday keeps.
+ */
+export function weekdayNorms(cells: DayServiceCell[]): WeekdayNorm[] {
+  const groups = new Map<string, DayServiceCell[]>();
+  for (const c of cells) {
+    if (c.wagePct == null || c.net <= 0) continue;
+    const k = `${c.dow}|${c.service}`;
+    groups.set(k, [...(groups.get(k) ?? []), c]);
+  }
+  return [...groups.entries()]
+    .map(([k, instances]) => {
+      const [dow, group] = k.split("|");
+      const sorted = instances.map((c) => c.wagePct!).sort((a, b) => a - b);
+      const weekday = WEEKDAYS.find((d) => d.dow === Number(dow));
+      return {
+        dow: Number(dow),
+        group,
+        label: `${weekday?.long ?? dow} ${group}`,
+        n: instances.length,
+        median: quantile(sorted, 0.5),
+        lo: quantile(sorted, 0.25),
+        hi: quantile(sorted, 0.75),
+        instances: [...instances].sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    })
+    .sort((a, b) => ((a.dow + 6) % 7) - ((b.dow + 6) % 7) || a.group.localeCompare(b.group));
+}
+
+export type Exception = {
+  cell: DayServiceCell;
+  norm: WeekdayNorm;
+  direction: "over" | "under";
+  /** How far outside the normal band, in percentage points of wage. */
+  gap: number;
+};
+
+/**
+ * How far outside its own band a day has to fall before it is worth a sentence.
+ *
+ * One band-width beyond the band, **and** at least three percentage points. Both
+ * conditions, because either alone misfires: a weekday whose instances happen to
+ * cluster tightly would flag every ordinary wobble on the first test, and a
+ * weekday that swings widely would swallow a real problem on the second.
+ */
+const FENCE = 1;
+const MIN_GAP = 0.03;
+
+/**
+ * Days that fall outside what their own weekday normally does.
+ *
+ * Deliberately returns few rows. A page that flags forty periods has told the
+ * reader to stop reading it — the whole value of comparing a weekday to itself
+ * is that most days stop being remarkable, and the handful that remain are worth
+ * the manager's attention.
+ */
+export function exceptions(norms: WeekdayNorm[]): Exception[] {
+  const out: Exception[] = [];
+  for (const norm of norms) {
+    if (norm.n < MIN_INSTANCES_FOR_NORM) continue;
+    const width = Math.max(norm.hi - norm.lo, 0);
+    for (const cell of norm.instances) {
+      const v = cell.wagePct!;
+      const over = v - (norm.hi + width * FENCE);
+      const under = norm.lo - width * FENCE - v;
+      if (over > 0 && v - norm.hi >= MIN_GAP) {
+        out.push({ cell, norm, direction: "over", gap: v - norm.hi });
+      } else if (under > 0 && norm.lo - v >= MIN_GAP) {
+        out.push({ cell, norm, direction: "under", gap: norm.lo - v });
+      }
+    }
+  }
+  return out.sort((a, b) => b.gap - a.gap);
+}

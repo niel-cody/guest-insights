@@ -639,7 +639,43 @@ export function teamChecks(snap: Snapshot): Check[] {
     `${count(teamOrders)} against ${count(reportOrders)} on the customer half`,
   ));
 
-  // 6. A shared login is trade, not a person, and must never reach a ranking.
+  // 6. Day parts must nest exactly inside the service they are drawn under.
+  //
+  //    This shipped broken once. The group was taken from the rostering
+  //    department's own name — `CHEF Lunch` filed the whole shift under Daytime
+  //    — while the day parts were cut by the clock, so a lunch shift running to
+  //    six put an hour of its cost in the Dinner day part and the two
+  //    classifications partitioned the same 23,108 hours differently. Nothing on
+  //    screen looked wrong: both tables balanced to the window total, and only
+  //    adding the columns up by hand showed the 1,499-hour gap. The surface
+  //    draws day parts indented beneath a service subtotal, which is a promise
+  //    that they add up, so the promise is asserted.
+  const groupTotals = new Map<string, { net: number; labour: number; hours: number }>();
+  for (const c of all(team.margin.daypart)) {
+    const g = c.group ?? "";
+    const cur = groupTotals.get(g) ?? { net: 0, labour: 0, hours: 0 };
+    groupTotals.set(g, { net: cur.net + c.net, labour: cur.labour + c.labour, hours: cur.hours + c.hours });
+  }
+  const misnested = all(team.margin.service).filter((g) => {
+    const parts = groupTotals.get(g.key);
+    if (!parts) return true;
+    return (
+      Math.abs(parts.net - g.net) > 1 ||
+      Math.abs(parts.labour - g.labour) > 1 ||
+      Math.abs(parts.hours - g.hours) > 1
+    );
+  });
+  out.push(ok(
+    "team.dayPartsNestInGroups",
+    "Every service total equals the sum of the day parts drawn underneath it, on sales, labour and hours.",
+    "Grouping labour by the rostering department's own name while cutting day parts by the clock. Both tables still balanced to the window total; the day parts simply stopped adding up to the service they were indented beneath, by 1,499 hours.",
+    misnested.length === 0,
+    misnested.length
+      ? `${misnested.map((g) => g.key).join(", ")} do not equal their day parts`
+      : `${all(team.margin.service).length} services equal their day parts to the dollar`,
+  ));
+
+  // 7. A shared login is trade, not a person, and must never reach a ranking.
   //
   //    The assertion is on the **label**, not on the verdict. Asking whether any
   //    row marked not-a-person is rated would be an identity — the rating filter

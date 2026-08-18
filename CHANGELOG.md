@@ -2,12 +2,125 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.8.0`** — the version and commit render in the app header on every
+**Current: `v0.8.1`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.8.1 — the Team pages, refined
+
+A review pass over `v0.8.0`, against the shipped Labour dashboard and the
+patterns the Customer pages already use. Nothing was redesigned; the changes are
+about clarity, consistency and telling a story down the page.
+
+### Day parts are the primitive, and services are unions of them
+
+`v0.8.0` introduced a "service block" and called the two blocks Lunch and
+Dinner. That was a competing concept, and it was **wrong in a way that mattered
+rather than a way that was untidy**.
+
+The blocks were derived from the venue's own rostering department names — `CHEF
+Lunch` files a shift under lunch — while the day parts were cut by the clock. A
+lunch shift running to six put an hour of its cost in the Dinner day part while
+its whole cost sat under Lunch, so the two classifications **partitioned the same
+23,108 hours differently, by 1,499 hours**. Both tables balanced to the window
+total. Only adding a column up by hand showed it.
+
+Now there is one rule. The eight standard day parts are the primitive; the two
+groups are unions of them:
+
+| Group | Day parts | Clock |
+|---|---|---|
+| **Daytime** | Pre-Dawn, Breakfast, Mid-Morning, Lunch, Afternoon | 04:00–17:00 |
+| **Evening** | Dinner, Late Evening, Late Night | 17:00–04:00 |
+
+The boundary moved from 16:00 to 17:00 to land on a day part boundary. The
+earlier 16:00 came from the empirical trough in orders per hour, which was a
+good reason for a cut that did not have to nest inside anything, and it split
+Afternoon down the middle. 17:00 costs 94 of 9,410 orders and buys exact
+nesting. `team.dayPartsNestInGroups` asserts it and is proven to fail against
+the regression that shipped.
+
+The grain control now reads **Day part · Weekday · Week · Month · Day**, and the
+day part grain draws the day parts indented beneath their service subtotal —
+which carries the ratio, because they cannot.
+
+**The figures moved slightly** and the finding did not: Daytime now runs 51.1%
+against Evening at 20.9%, where the department-derived cut said 58.9% and 18.3%.
+
+### Is this Monday normal for a Monday?
+
+The new **Days outside their own normal range** panel replaces "everything above
+target". A venue-wide target flags Monday amber every week — preparation happens
+whether or not anybody comes in, so a slow day carries fixed cost against a small
+denominator and runs hot by construction. A manager told the same thing every
+week stops reading the colour, and then misses the Monday that is genuinely
+wrong.
+
+Each trading period is now compared against **the range its own weekday usually
+keeps** — the middle half of that weekday's own instances. Ten of 184 periods at
+Meat Flour Wine fall outside it. Saturday daytime normally runs 51–82%; on 18
+July it ran 222%.
+
+A weekday needs six instances before it has a normal range at all, and the panel
+says how many combinations were held back for want of them.
+
+### About this, reused
+
+Six panels across the three pages now carry the **`About this` drawer** from the
+Customer pages rather than an inline paragraph or a bare info button. Method,
+provenance, grain and the working behind a figure moved into it.
+
+The drawer's own stay-or-move rule was respected rather than bent: **refusals,
+population constraints, confidence intervals and data-quality warnings stayed on
+the page.** A roomy container invites a tired author to sweep a caveat into it,
+and that is the one thing it is not for.
+
+### KPI cards lost their paragraphs
+
+The card the review named:
+
+> Sales per labour hour — *available for 23 of 30 rated people*
+
+was a two-line footnote that made the least important sentence the largest thing
+on the card. The population is part of the figure and stays on the face, but as
+line 4 in eight words — *"Median of 23 of 30 rated people"* — with the reasoning
+behind the button. Every Margin tile lost its footnote the same way.
+
+**The warnings that affect trust did not move.** The People page still states in
+full that 24 of 35 links are proposals rather than proofs, and that $400,709 of
+trade was rung by a login no employee can be attached to.
+
+### Every page opens with its question
+
+- **People** — *Do the till and the rostering system agree who a person is?*
+- **Performance** — *How effectively is the team turning labour into sales?*
+- **Margin** — *Where is the team working efficiently, and when?*
+
+Set as a plain heading and a sentence, deliberately **not** inside a panel: a
+framed box reads as content to consider, which is wrong for copy meant to be
+absorbed on the way past.
+
+Each page then runs question → headline → comparison → attention → detail →
+method. On Margin that moved the clock-hour explanation to the foot: it explains
+the page rather than being read from it.
+
+### Also
+
+- The `vs plan` column is dropped on grains the roster cannot reach, rather than
+  drawn as eight rows of em dash.
+- Exception copy states **points, not percent** — a gap between two percentages
+  written as "140% more" claims something several times larger than the
+  measurement.
+- `docs/team-recommendations.md` records the five decisions this pass
+  deliberately did **not** take alone, with reasons: renaming Margin to
+  Efficiency, making day part groups configurable per venue, decoupling the
+  weekday norm from the reporting period, adding real targets, and the two
+  things only new data can unlock.
 
 ---
 

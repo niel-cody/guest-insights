@@ -104,25 +104,22 @@ GROUP BY 1, 2, 3`;
 /**
  * Venue trade at the finest grain both sides of the ratio share.
  *
- * Two time keys, deliberately. `DAYPART` is the clock, and is what the trade
- * *shape* is read from. `SERVICE` is the block the trade belongs to, and is the
- * only one of the two a wage percentage may be struck against — see
- * `serviceOfShift` for why the clock cannot carry it.
+ * One time key. The day part is the primitive; the group a wage percentage is
+ * struck against is a union of day parts and is derived from it, so there is no
+ * second classification here to fall out of step with the first.
  */
 export function salesGrainQuery(orgId: string, w: Window) {
   return `SELECT
   STORE_ID,
   CREATED_AT_TZ::DATE AS D,
   ${daypartCase("CREATED_AT_TZ")} AS DAYPART,
-  IFF(HOUR(CREATED_AT_TZ) >= ${SERVICE_CUTOVER_HOUR} OR HOUR(CREATED_AT_TZ) < ${SERVICE_DAWN_HOUR},
-      'dinner-service', 'lunch-service') AS SERVICE,
   COUNT(*) AS ORDERS,
   SUM(TOTAL_PRICE - COALESCE(TOTAL_TAX, 0)) AS NET,
   SUM(ITEMS_COUNT) AS ITEMS,
   SUM(COALESCE(NULLIF(TABLE_GUEST_COUNT, 0), 0)) AS COVERS
 FROM ${ORDERS}
 WHERE ${orderBase(orgId, w)}
-GROUP BY 1, 2, 3, 4`;
+GROUP BY 1, 2, 3`;
 }
 
 /**
@@ -549,68 +546,91 @@ export function pseudonymise(real: string, alias: Alias, realSurname: string | n
 
 export { NOT_A_PERSON, ROLE_TOKENS };
 
-// ── service blocks ──────────────────────────────────────────────────────────
+// ── day part groups ────────────────────────────────────────────────────────
 
 /**
  * The grain at which a wage percentage is actually meaningful.
  *
- * ── The problem with a clock daypart ───────────────────────────────────────
+ * ── This is not a new concept. It is the day parts, grouped ────────────────
  *
- * Labour is not consumed in the hour it is paid in. A kitchen starts prepping at
- * ten for a lunch that sells at twelve, and a floor team is still clearing at
- * eleven for a dinner that sold at seven. Apportioning wage cost across the
- * clock and dividing by the revenue recorded in the same hour therefore produces
- * arithmetic that is correct and nonsense: at Meat Flour Wine it reports Late
- * Evening at 348% wage and Breakfast at 6,207%, because the trade those hours
- * exist to serve was rung earlier in the evening and earlier in the day.
+ * The eight standard day parts are the shared time vocabulary across Oolio
+ * reporting, and labour has no business inventing a rival one. But a wage
+ * percentage cannot be struck against a single day part, for a reason that is
+ * about kitchens rather than about data: **labour is not consumed in the hour it
+ * is paid in.** A kitchen preps at ten for a lunch that sells at twelve; a floor
+ * team clears at eleven for a dinner that sold at seven. Divide the cost
+ * apportioned to a clock hour by the revenue banked in the same clock hour and
+ * the arithmetic reports Late Evening at 348% and Breakfast at 6,207%.
  *
- * **A number like that is not a caveat, it is a wrong answer**, and an operator
- * who acts on it cuts the pack-down shift and finds the restaurant filthy on
- * Saturday morning.
+ * That is not a hypothetical. The shipped Labour dashboard prints a banner
+ * reading *"Labour % capped at 100% for following: 7,720% at 11:30, 6,989% at
+ * 11:45, 703% at 12:00"* — the same failure, met by clamping the axis rather
+ * than by fixing the denominator.
  *
- * ── What is used instead ───────────────────────────────────────────────────
+ * So the day parts stay exactly as they are, and the **ratio** is struck one
+ * level up, against a group of them:
  *
- * The service block: the whole span of committed labour, and the whole span of
- * trade, that belong to one service. Two things make it defensible here rather
- * than being a modelling convenience.
+ *   **Daytime** — Pre-Dawn, Breakfast, Mid-Morning, Lunch, Afternoon (04:00–17:00)
+ *   **Evening** — Dinner, Late Evening, Late Night (17:00–04:00)
  *
- * **The venue already declares it.** Meat Flour Wine's rostering departments are
- * named `CHEF Lunch` and `CHEF Dinner`, `Lunch FOH` and `Dinner FOH`, `Bar
- * Lunch` and `Bar Dinner`. The operator has already told the workforce system
- * which service each shift belongs to, so the classification is read, not
- * invented, wherever the name carries it.
+ * ── Why the boundary is 17:00 ──────────────────────────────────────────────
  *
- * **The trade agrees.** Orders per hour across the window run 595 at one o'clock,
- * fall to 73 at three and 94 at four, then rise to 1,392 at five. The boundary is
- * an empirical trough, not a round number chosen for tidiness.
+ * Because it is a day part boundary. An earlier cut used 16:00, chosen from the
+ * empirical trough in orders per hour, and it was wrong in a way worth naming:
+ * it split the Afternoon day part down the middle, so the groups were not unions
+ * of day parts and the two vocabularies could not be reconciled on screen. A
+ * grouping that does not nest inside the concept it claims to group **is** the
+ * competing concept it was meant to avoid.
  *
- * Where a department does not name its service — `Kitchen Hand`, `Pizza Chef`,
- * `Management` — the segment falls back to its own start time against the same
- * boundary, which is a per-shift decision rather than a per-department average
- * and so gets the shifts either side of the boundary right.
+ * 17:00 costs almost nothing in fidelity — 94 of 9,410 orders at Meat Flour Wine
+ * fall in the 16:00 hour — and it buys exact nesting. The venue agrees with it
+ * too: its rostering departments are named `CHEF Lunch` and `CHEF Dinner`, `Bar
+ * Lunch` and `Bar Dinner`, and where a department names its service that naming
+ * is used in preference to the clock.
  */
-export const SERVICE_CUTOVER_HOUR = 16;
+export const SERVICE_CUTOVER_HOUR = 17;
 
-/** Below this hour an order belongs to the previous night's dinner, not to lunch. */
-export const SERVICE_DAWN_HOUR = 5;
+/** Below this hour an order belongs to the previous night's evening service. */
+export const SERVICE_DAWN_HOUR = 4;
 
 export const SERVICE_BLOCKS = [
-  { key: "lunch-service", label: "Lunch service" },
-  { key: "dinner-service", label: "Dinner service" },
+  { key: "daytime", label: "Daytime", hours: "04:00–17:00" },
+  { key: "evening", label: "Evening", hours: "17:00–04:00" },
 ] as const;
 
-/** A costed segment's service: what the venue called it, else when it started. */
-export function serviceOfShift(department: string | null, startHour: number): string {
-  if (department) {
-    if (/lunch|breakfast|day/i.test(department)) return "lunch-service";
-    if (/dinner|evening|night/i.test(department)) return "dinner-service";
-  }
-  return startHour >= SERVICE_CUTOVER_HOUR || startHour < SERVICE_DAWN_HOUR
-    ? "dinner-service"
-    : "lunch-service";
-}
+/** Which group each standard day part belongs to. The nesting, stated once. */
+export const DAYPART_GROUP: Record<string, string> = {
+  "pre-dawn": "daytime",
+  breakfast: "daytime",
+  "mid-morning": "daytime",
+  lunch: "daytime",
+  afternoon: "daytime",
+  dinner: "evening",
+  "late-evening": "evening",
+  "late-night": "evening",
+};
 
-/** An order's service. One boundary, applied to both sides of the ratio. */
-export function serviceOfOrderHour(hour: number): string {
-  return hour >= SERVICE_CUTOVER_HOUR || hour < SERVICE_DAWN_HOUR ? "dinner-service" : "lunch-service";
-}
+/**
+ * The group a day part belongs to. **The only grouping rule there is.**
+ *
+ * ── Why the venue's own department names are not used for this ─────────────
+ *
+ * They were, briefly, and it was wrong. Meat Flour Wine names its rostering
+ * departments `CHEF Lunch` and `CHEF Dinner`, so taking the group from the
+ * department looked like reading the operator's own intent rather than imposing
+ * a clock on them.
+ *
+ * It does not survive contact with the day parts. A shift the venue calls lunch
+ * that runs to six in the evening puts an hour of its cost in the Dinner day
+ * part while the department files the whole shift under Daytime — so the day
+ * part totals and the group totals **partition the same labour differently**,
+ * and the day parts stop nesting inside the groups they are drawn inside. At
+ * this venue that gap is 1,499 hours. A grouping that does not nest inside the
+ * concept it groups is the competing concept it was supposed to avoid.
+ *
+ * So both sides of the ratio are cut by the same clock, the rule is one
+ * sentence — everything from 04:00 to 17:00 is Daytime — and every figure on a
+ * group row is the sum of the day part rows drawn underneath it. The cost is
+ * small and it is named: a lunch chef's last hour counts as Evening.
+ */
+export const groupOfDaypart = (daypart: string): string => DAYPART_GROUP[daypart] ?? "daytime";

@@ -1,6 +1,6 @@
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
-import { InfoButton } from "@/components/ui/InfoButton";
+import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { TeamDrivers } from "@/components/charts/TeamDrivers";
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { teamChecks } from "@/lib/checks";
@@ -12,6 +12,7 @@ import {
 } from "@/lib/team";
 import type { TeamPerson } from "@/lib/types";
 import { Unavailable } from "../Unavailable";
+import { Standfirst } from "../Standfirst";
 
 export const dynamic = "force-static";
 export const metadata = { title: "Performance" };
@@ -113,12 +114,23 @@ export default async function TeamPerformancePage({
       {header}
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
+          <Standfirst
+            question="How effectively is the team turning labour into sales?"
+            body={
+              <>
+                {win}. Every column here is a rate, never a total — a total ranks people by the hours they
+                were given. Below the figures, the decomposition says <em>which</em> of the two
+                things a seller does differently, which is the part a manager can coach.
+              </>
+            }
+          />
+
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label="Rated"
               value={count(rated.length)}
-              detail={`${count(unrated.length)} below the floor, shown unrated`}
-              meta={`${MIN_ORDERS_FOR_RATING}+ orders across ${MIN_DAYS_FOR_RATING}+ days, ${win}`}
+              detail={`${count(unrated.length)} below the floor, listed unrated`}
+              meta={`${MIN_ORDERS_FOR_RATING}+ orders across ${MIN_DAYS_FOR_RATING}+ days`}
               info={
                 <p>
                   Both thresholds, because either alone is gamed by the shape of a roster: fifty
@@ -134,37 +146,39 @@ export default async function TeamPerformancePage({
               detail={perCover ? `${money(perCover.lo)} to ${money(perCover.hi)} across the team` : undefined}
               meta="Median of the rated team — what one guest spends with them"
             />
+            {/* The KPI carries the figure; the coverage carries the population.
+                It used to carry a two-line footnote naming both, which made the
+                least important sentence on the card the largest thing on it. The
+                population stays on the face — it is part of the figure, not an
+                explanation of it — but as line 4 in eight words rather than as a
+                paragraph, and the reasoning moves behind the button. */}
             <Tile
               label="Sales per labour hour"
               value={perHour ? money(perHour.median) : "Not published"}
               accent="var(--accent)"
               refused={!perHour}
-              detail={
-                perHour
-                  ? `${money(perHour.lo)} to ${money(perHour.hi)} · ${count(costed.length)} people`
-                  : undefined
-              }
+              detail={perHour ? `${money(perHour.lo)} to ${money(perHour.hi)} across the team` : undefined}
               meta={
                 perHour
-                  ? `Own net sales over own worked hours, ${win}`
-                  : "No link the spine can stand behind"
+                  ? `Median of ${count(costed.length)} of ${count(rated.length)} rated people`
+                  : "No identity link the spine can stand behind"
               }
               info={
-                <p>
-                  <strong>This is not the venue figure and must not be compared to it.</strong> The
-                  Margin report divides all net sales by <em>all</em> worked hours, kitchen included
-                  — {money(team.totals.netPerHour)} across the window. This divides one person&rsquo;s
-                  sales by their own hours, and a kitchen hand rings nothing, so the per-person
-                  figure is necessarily the larger of the two. They answer different questions: the
-                  venue figure is what an hour of labour returns, this is what an hour of{" "}
-                  <em>this person&rsquo;s</em> labour returns while they are on the floor.
-                </p>
-              }
-              footnote={
                 <>
-                  Available for {count(costed.length)} of {count(rated.length)} rated people — the
-                  rest have no identity link good enough to divide one system by the other. See{" "}
-                  <strong className="text-ink">People</strong>.
+                  <p>
+                    One person&rsquo;s own net sales over their own worked hours. Available only
+                    where the identity link is good enough to divide one system by the other —{" "}
+                    {count(rated.length - costed.length)} rated people have no such link, and the{" "}
+                    <strong>People</strong> report says which and why.
+                  </p>
+                  <p>
+                    <strong>This is not the venue figure and does not compare to it.</strong> Margin
+                    divides all net sales by <em>all</em> worked hours, kitchen included —{" "}
+                    {money(team.totals.netPerHour)} across this window. A kitchen hand rings nothing,
+                    so a per-person figure is necessarily the larger of the two. The venue figure is
+                    what an hour of labour returns; this is what an hour of a given person&rsquo;s
+                    labour returns while they are on the floor.
+                  </p>
                 </>
               }
             />
@@ -173,13 +187,14 @@ export default async function TeamPerformancePage({
               value="—"
               refused
               accent="var(--warning)"
-              meta="Cost of goods is on a fraction of orders"
-              footnote={
-                <>
-                  Recorded on {pct(team.integrity.costCoverage)} of orders. A margin per head struck
-                  against a field that is {pct(1 - team.integrity.costCoverage)} empty would be
-                  confident and wrong, so it is refused rather than approximated.
-                </>
+              meta={`Cost of goods recorded on ${pct(team.integrity.costCoverage)} of orders`}
+              info={
+                <p>
+                  A margin per head struck against a field that is{" "}
+                  {pct(1 - team.integrity.costCoverage)} empty would be confident and wrong, so it is
+                  refused rather than approximated. This is a menu-costing problem, not a reporting
+                  one.
+                </p>
               }
             />
           </div>
@@ -189,17 +204,36 @@ export default async function TeamPerformancePage({
             title="Why one outperforms another"
             subtitle="Revenue per cover is items per cover multiplied by average item value. Only one of those two varies here."
             explain={
-              <InfoButton label="About the decomposition" align="end">
-                <p>
-                  Both terms are computed on the same covers: orders that recorded a party size,
-                  which is {pct(
-                    team.people.reduce((a, p) => a + p.ordersWithCovers, 0) /
-                      Math.max(1, team.people.reduce((a, p) => a + p.orders, 0)),
-                  )}{" "}
-                  of trade at this organisation. Neither term is modelled and neither is adjusted —
-                  they multiply back to net per cover exactly.
-                </p>
-              </InfoButton>
+              <ExplainDrawer
+                label="How the decomposition is built"
+                title="Why one outperforms another"
+                showing={
+                  <>
+                    <p>
+                      Two axes, one point per rated person. Left to right is{" "}
+                      <strong>attachment</strong> — how many things reach the table per guest. Bottom
+                      to top is <strong>trading up</strong> — what each of those things is worth.
+                      Multiply them and you have revenue per cover.
+                    </p>
+                    <p>
+                      Both axes are scaled to the same proportional span around their own median, so
+                      the two spreads can be compared by eye. A wide, flat cloud means the team
+                      differs on attachment and not on price point.
+                    </p>
+                  </>
+                }
+                made={
+                  <p>
+                    Both terms are computed on the same covers: orders that recorded a party size,{" "}
+                    {pct(
+                      team.people.reduce((a, p) => a + p.ordersWithCovers, 0) /
+                        Math.max(1, team.people.reduce((a, p) => a + p.orders, 0)),
+                    )}{" "}
+                    of trade here. Neither term is modelled and neither is adjusted — they multiply
+                    back to net per cover exactly.
+                  </p>
+                }
+              />
             }
           >
             {driver && attach && tradeUp && (

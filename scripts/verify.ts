@@ -255,6 +255,18 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
     const day = f.snap.team?.margin.day.filter((c) => c.storeId === "all");
     if (day?.length) day[0].orders += 37;
   },
+  // The regression that shipped: a service whose total no longer equals the day
+  // parts drawn beneath it, while both still balance to the window.
+  "team.dayPartsNestInGroups": (f) => {
+    // The biggest day part on each side, so the shift is unambiguously material
+    // rather than lost inside the reconciliation tolerance.
+    const byHours = (f.snap.team?.margin.daypart ?? [])
+      .filter((c) => c.storeId === "all")
+      .sort((a, b) => b.hours - a.hours);
+    const dp = byHours[0];
+    const other = byHours.find((c) => c.group !== dp?.group);
+    if (dp && other) { const moved = dp.hours / 2; dp.hours -= moved; other.hours += moved; }
+  },
   // The classifier failing to recognise a shared login: the training till keeps
   // its name and acquires an ordinary verdict, which is what lets it walk into
   // the league table.
