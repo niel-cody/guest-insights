@@ -360,9 +360,15 @@ function verifyHistoryComplete(guests: GuestRows): string[] {
  */
 function verifyScatterAgrees(snap: Snapshot): string[] {
   if (!snap.scatter) return [];
+  // Both sides count every tier that carries a verdict. This used to filter the
+  // table to members while the plot counted everyone the classifier had labelled
+  // — fine while only members were labelled, and the moment cards were it
+  // reported a 2,775-against-1,398 disagreement that was purely the two sides
+  // asking different questions. The check exists to catch a chart disagreeing
+  // with its own table, so the two sides have to be the same population.
   const fromTable = new Map<string, number>();
   for (const r of snap.segments.rows) {
-    if (r.tier !== "member" || !r.segment) continue;
+    if (!r.segment) continue;
     fromTable.set(r.segment, (fromTable.get(r.segment) ?? 0) + r.guests);
   }
   const fromPlot = new Map<string, number>();
