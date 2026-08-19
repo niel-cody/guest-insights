@@ -2,12 +2,90 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.9.1`** — the version and commit render in the app header on every
+**Current: `v0.9.2`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.9.2 — Overview says what it is for, and says it once
+
+The page opened on four KPI tiles with nothing above them saying what it was
+for, and carried the sentence that *is* the argument four scrolls lower behind
+an "About this" button. A reader met the figures cold and had to infer the point.
+
+### The question, at the top
+
+> **How much of your trade can you put a name to — and are members worth more?**
+
+Then two sentences: what you took, what this report can put a name to against
+what a loyalty CRM would have shown, and the verdict on members. The verdict is
+read from the data rather than written — Coffee Guru gets *yes, 4.9×, of which
+97% was there before anybody enrolled*; Meat Flour Wine gets *not proven here*.
+
+**The commentary panel that carried that sentence is gone.** It was not cut —
+the council refused to cut it on 17 August and that has not changed. It moved to
+the top, where it answers the question instead of restating it.
+
+### The third KPI is the same card at both merchants
+
+It was two different cards. Where the within-person estimate can be made the tile
+had a label, a figure and a button; where it cannot, it had a *different* label,
+no button, and a five-line footnote where the other three tiles have one.
+Switching organisation changed the design of the row and not only its figures,
+and the merchant whose answer is "not proven" got a wall of text explaining
+itself beside three tiles that did not.
+
+Same label, same button, same one-line footnote. What differs is the only thing
+that should: the figure is withheld and the reason is a click away.
+
+### Three paragraphs under the table became one
+
+The segment grid stacked three notes beneath it — the previous period not being
+last quarter, reissued cards faking a lapse, single-visit cards being excluded —
+and all three were correct. Together they were a wall, and a wall under a table
+is read by nobody, which made three real caveats functionally invisible.
+
+One paragraph now carries all three facts, because each changes what a row
+*means*. The reasoning moved into **Explain segments**, which is where a reader
+looking at those rows already is. The composition bars lost their second
+paragraph the same way: the finding stayed, the drawing rules went into the
+drawer.
+
+### The basket block comes off this page
+
+"Members buy Breakfast Sweet at 1.37× the rate everybody else does" is a real
+finding and it was moved *onto* Overview on that basis. The argument holds at one
+merchant and not the other: the index needs 200 product lines a side before it
+publishes, and **Coffee Guru clears it on 29 of 62 reporting groups where Meat
+Flour Wine clears it on 6 of 46.** The same panel is a finding at one and forty
+rows of withheld index at the other, and a reader meeting the second version
+concludes the report is broken rather than that their menu is long.
+
+Removed rather than conditioned on which merchant is loaded — a page whose
+sections appear and disappear per organisation cannot be reviewed or
+screenshotted consistently. It is a basket question and belongs on a surface
+about what people buy.
+
+### One standing note about refusals
+
+At the foot, once: figures are withheld when the window is too short to observe
+what they claim, when the sample would not survive a different fortnight, or when
+a comparison cannot be separated from the reason those people are in it. Every
+individual refusal still states itself where the number would have been — that
+rule has not moved — but a reader who has met two or three of them deserves to
+know it is a policy rather than a run of accidents.
+
+### The layout test caught the tile change
+
+Unifying the two tiles broke an assertion that keyed on the *label* to decide
+which merchant it was looking at. It keys on the caveat instead — a published gap
+says it is association, a withheld one says it could not be separated from
+selection, and silence satisfies neither. Stronger than the test it replaced,
+because it now covers the merchant that previously fell outside it.
 
 ---
 
