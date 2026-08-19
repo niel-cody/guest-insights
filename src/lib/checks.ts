@@ -14,6 +14,10 @@
 import type { GuestRows, Snapshot, TeamMarginCell } from "./types";
 import { count, money, pairArithmetic, pct, recency, tileCount } from "./metrics";
 import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
+import {
+  STABLE_ABS_TOL as MAX_STABLE_ABS, STABLE_REL_TOL as MAX_STABLE_REL,
+  monthlyFlow, retentionTrend, stableCoverageRun,
+} from "./retention";
 import { looksShared, ratedPeople } from "./team";
 
 export type Severity = "blocking" | "warning";
@@ -526,6 +530,7 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   ));
 
   checks.push(...teamChecks(snap));
+  checks.push(...retentionChecks(snap));
 
   return checks;
 }
@@ -704,3 +709,92 @@ export function teamChecks(snap: Snapshot): Check[] {
 export const blocking = (checks: Check[]) => checks.filter((c) => c.severity === "blocking");
 export const failed = (checks: Check[]) => checks.filter((c) => !c.ok);
 export const allBlockingPass = (checks: Check[]) => blocking(checks).every((c) => c.ok);
+
+/**
+ * The Retention and Churn page.
+ *
+ * ── Two checks, and it started as four ─────────────────────────────────────
+ *
+ * Two of the original four were tautologies and were cut rather than shipped
+ * green, which is the same rule that killed v1's five "invariants".
+ *
+ * The flow reconciliation asserted that members held plus members lost equals
+ * the previous month's active base. `held` is `min(before, now)` and `lost` is
+ * `max(0, before - now)`, and those sum to `before` **for every pair of numbers
+ * there is**. It could not have failed on any data, corrupt or otherwise.
+ *
+ * The censored-points check asserted that no intake reports a horizon it has not
+ * been watched for — a real defect, but one where the check re-read the same
+ * `observableMonths` the trend had already filtered on, so corrupting the field
+ * moved both sides together and the assertion held. A check that reads its
+ * subject's own filter is testing that assignment works.
+ *
+ * What survives asserts properties of the **data** rather than of the
+ * derivation, which is why both can be broken by corrupting a fixture.
+ */
+export function retentionChecks(snap: Snapshot): Check[] {
+  const c = snap.cohorts;
+  if (!c || !c.grading.renders) return [];
+  const out: Check[] = [];
+
+  // 1. No cohort may report more members still coming than ever joined it.
+  //
+  //    The triangle is joined to the cohort roll on a composite key, and a slip
+  //    of one month produces rates above 100% on a few rows and
+  //    plausible-but-wrong rates on all the others. The first kind is visible on
+  //    screen; the second is not, which is why this asserts every cell rather
+  //    than the chart's maximum.
+  const size = new Map(c.cohorts.map((x) => [x.cohort, x.members]));
+  const impossible = c.triangle.filter((t) => t.active > (size.get(t.cohort) ?? 0));
+  out.push(ok(
+    "retention.retainedWithinIntake",
+    "No month of any intake reports more members still coming than ever joined it.",
+    "A one-month slip in the cohort-to-triangle join. It shows as a retention rate above 100% on a few rows and as confident, wrong rates on every other row.",
+    impossible.length === 0,
+    impossible.length
+      ? `${impossible.length} of ${c.triangle.length} cells exceed their intake`
+      : `all ${c.triangle.length} cells within their intake`,
+  ));
+
+  // 2. The intakes the trend compares must have been recruited under comparable
+  //    coverage.
+  //
+  //    This is the whole licence for drawing a line the build refused for two
+  //    releases. It is asserted against each plotted intake's *own* joining-month
+  //    coverage, read from the raw series — not against the run the trend was
+  //    derived from, which would be checking the filter against itself. If the
+  //    matching were wrong, or coverage drifted inside the plateau, later intakes
+  //    would be recruited from a broader population and the line would be
+  //    measuring reach, which is the original defect wearing a chart.
+  const trends = [retentionTrend(c, 3), retentionTrend(c, 6)].filter(
+    (t): t is NonNullable<typeof t> => t != null && !t.refusal,
+  );
+  if (trends.length) {
+    const covOf = new Map(c.coverage.map((m) => [m.month, m.coverage]));
+    const cohortsPlotted = [...new Set(trends.flatMap((t) => t.points.map((p) => p.cohort)))];
+    // Two conditions, and the first is the one that can actually break. The
+    // plateau is found over the *coverage* series and intakes are then selected
+    // by date range, so an intake sitting inside the run's dates with no
+    // coverage row of its own is plotted unmatched — the comparison silently
+    // includes a month nobody checked. Reading it back per intake is the only
+    // way to catch that; asserting the run's own spread just re-checks the
+    // filter against itself, which is how the first version of this check came
+    // to be green on every input.
+    const readings = cohortsPlotted.map((m) => ({ month: m, coverage: covOf.get(m) }));
+    const unmatched = readings.filter((r) => r.coverage == null || r.coverage <= 0);
+    const vs = readings.map((r) => r.coverage).filter((v): v is number => v != null && v > 0);
+    const lo = vs.length ? Math.min(...vs) : 0;
+    const hi = vs.length ? Math.max(...vs) : 0;
+    out.push(ok(
+      "retention.coverageMatched",
+      `Every intake in the trend has a scan-coverage reading for the month it joined, within ${MAX_STABLE_ABS * 100} points and ${MAX_STABLE_REL}× of every other.`,
+      "Drawing a retention trend across the years scan coverage climbed from 3% to 19% of orders — and, more quietly, plotting an intake from a month with no coverage reading at all, which is an unmatched point inside a comparison whose whole claim is that it is matched.",
+      unmatched.length === 0 && vs.length === cohortsPlotted.length && hi - lo <= MAX_STABLE_ABS && hi / lo <= MAX_STABLE_REL,
+      unmatched.length
+        ? `${unmatched.length} of ${cohortsPlotted.length} intakes have no coverage reading: ${unmatched.slice(0, 3).map((r) => r.month).join(", ")}`
+        : `${vs.length} intakes, coverage ${(lo * 100).toFixed(1)}%–${(hi * 100).toFixed(1)}% (${((hi - lo) * 100).toFixed(1)} points, ${(hi / lo).toFixed(2)}×)`,
+    ));
+  }
+
+  return out;
+}

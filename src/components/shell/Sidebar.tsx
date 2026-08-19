@@ -54,6 +54,11 @@ const RAIL = [
 const CUSTOMERS = [
   { label: "Overview", href: "overview", placeholder: false },
   { label: "Behaviour", href: "behaviour", placeholder: false },
+  /* Between Behaviour and Guests on purpose. Behaviour ends on *how* people
+     trade; Guests opens the individual. Whether they came back at all is the
+     question that sits between the two, and it used to be a walled-off section
+     at the foot of Behaviour where it arrived last and quietest. */
+  { label: "Retention and Churn", href: "retention", placeholder: false },
   { label: "Guests", href: "guests", placeholder: false },
   { label: "Loyalty Spend", href: "loyalty-spend", placeholder: true },
   { label: "Loyalty Redemption", href: "loyalty-redemption", placeholder: true },

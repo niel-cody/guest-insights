@@ -2,12 +2,113 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.8.1`** — the version and commit render in the app header on every
+**Current: `v0.9.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.9.0 — Retention and Churn, and a refusal that finally lifted
+
+Retention moved out of Behaviour into its own report between Behaviour and
+Guests. It had been the last panel on a long page, fenced behind a dashed
+border — which was right while it was a caveat hanging off somebody else's
+argument, and wrong once it was the argument.
+
+### The claim this build refused for two releases
+
+**Whether retention is improving.** The old refusal was correct and is worth
+restating, because the new answer is built to get around it rather than to drop
+it: six-month survival falls across the run, and so does the meaning of the word
+"member" — scan coverage climbed from 3% to 19% of orders over the same period,
+so later intakes contained marginal members the early ones never captured. Two
+things moved together and a falling line could not be attributed to either.
+
+A programme ramps and then it plateaus. **Coffee Guru's coverage has sat between
+17.1% and 19.4% since September 2025** — twelve months of flat reach. Intakes
+recruited inside that plateau were drawn from the same population and are
+comparable to each other. So the trend is drawn across the plateau only, at a
+fixed age, and the ramp years are excluded rather than adjusted.
+
+The answer is not a happy one:
+
+| | |
+|---|---|
+| Six-month retention, pooled over 6 comparable intakes | **20%** |
+| Aug 2025 intake → Jan 2026 intake | 28% → 15% |
+| Direction | **10 points worse** |
+
+Because coverage was flat throughout, that is retention moving and not reach.
+
+**Meat Flour Wine refuses it**: only three intakes joined under flat coverage and
+reached the horizon, against a floor of four. Three points make a line any reader
+will extend, and this one would be extended through a few hundred people.
+
+### The card tier's answer is a date
+
+The card is the spine of this build and it is the tier that **cannot** carry
+retention, because retention is lapse-dependent — the lapse threshold of silence
+to say somebody stopped, and the same again beforehand to say they did not, which
+is 180 days against the card window's 92.
+
+The reason is not the card. The payment reference **stopped being written for
+nine to fourteen consecutive months**, and a guest seen either side of that gap
+cannot be told from two guests, so retention across it is not difficult to
+compute — it is undefined. Capture resumed on 1 May 2026 above 93%, so the page
+prints the day the clock catches up: **28 October 2026**, no work required.
+
+Beside it, what the card tier *can* say inside 92 days — repeat rate, visit
+frequency, typical gap — labelled as return behaviour rather than retention,
+because none of those needs to observe somebody stopping.
+
+### Three charts, each answering a different question
+
+- **Is retention improving?** — one point per comparable intake, at a fixed age.
+- **What the base gains and loses each month** — joiners above the line, leavers
+  below it. A base that grows while losing more people every month is the most
+  common way a programme looks healthy on the way to stalling.
+- **Where today's active members came from** — the burn-down, moved from
+  Behaviour unchanged.
+
+Monthly churn is published as **a floor, not a point estimate**, and says so on
+the card: the snapshot holds a cohort triangle rather than a per-person ledger,
+so somebody returning after a month away nets off against somebody leaving.
+
+### Two checks, and it started as four
+
+Two of the four new checks were tautologies and were cut rather than shipped
+green — the same rule that killed v1's five "invariants".
+
+The flow reconciliation asserted that members held plus members lost equals last
+month's active base. `held` is `min(before, now)` and `lost` is `max(0, before −
+now)`, and **those sum to `before` for every pair of numbers there is.** The
+censored-points check re-read the same `observableMonths` field the trend had
+already filtered on, so corrupting it moved both sides together.
+
+What survives asserts properties of the data rather than of the derivation:
+
+- `retention.retainedWithinIntake` — no month of any intake reports more members
+  still coming than ever joined it, catching a one-month slip in the
+  cohort-to-triangle join.
+- `retention.coverageMatched` — every plotted intake has a coverage reading for
+  the month it joined, within tolerance of every other. The second condition is
+  the licence for the whole page; the first is the one that can actually break,
+  because the plateau is found over the coverage series while intakes are
+  selected by date, so an intake inside the dates with no reading of its own is
+  an unmatched point inside a matched comparison.
+
+### Also
+
+- The layout tests caught the burn-down's correction going missing when the
+  chart moved. **"The stack rising is enrolment outrunning churn, not retention
+  improving"** is back on the face of the panel, where the stay-or-move rule puts
+  it — the chart is liked precisely for the thing it does not prove.
+- Axis labels no longer clip or collide at the right-hand end. "July 2026"
+  rendered as "July 202" reads as a typo rather than a drawing bug, so nobody
+  reports it.
 
 ---
 

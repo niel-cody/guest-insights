@@ -269,18 +269,31 @@ async function main() {
     }
 
     if (name.endsWith("/behaviour")) {
-      // BH-7. The chart is liked precisely for the thing it does not prove, so
-      // the correction cannot follow the method into the drawer.
-      check("the retention refusal is still on the face",
-        html.includes("What we cannot yet tell you"),
-        "the refusal has moved behind a click");
+      // Retention moved to its own report, and the hand-off has to keep saying
+      // why the two pages cannot be added together.
+      check("behaviour still declares the clock change on the way out",
+        html.includes("runs on a different clock"),
+        "the hand-off no longer says the population changed");
+    }
+
+    if (name.endsWith("/retention")) {
+      // BH-7, moved with the chart. The burn-down is liked precisely for the
+      // thing it does not prove, so the correction cannot follow the method
+      // into the drawer.
       check("the burn-down still corrects the growth reading",
         html.replace(/<[^>]+>/g, "").includes("enrolment outrunning churn"),
         "the stack now reads as retention improving");
-      // The clock-change banner is the reason the wall exists.
-      check("the member-tier wall still declares the clock change",
-        html.includes("runs on a different clock"),
-        "the wall no longer says the population changed");
+      check("the retention refusal is still on the face",
+        html.includes("What this chart still cannot tell you"),
+        "the refusal has moved behind a click");
+      // The page's whole licence for drawing a trend the build used to refuse.
+      check("the trend states it is coverage-matched",
+        html.replace(/<[^>]+>/g, " ").includes("coverage") ,
+        "the comparison no longer says what makes it fair");
+      // The card tier's answer is a date, not an empty state.
+      check("the card tier says why it cannot answer",
+        html.includes("cannot answer this yet"),
+        "the card refusal has gone quiet");
     }
 
     // ── No organisation's page names another organisation ─────────────────
@@ -563,6 +576,7 @@ async function main() {
         "overview", "behaviour", "guests", "loyalty-spend", "loyalty-redemption",
         "team/people", "team/performance", "team/margin",
         "team/staff-scorecard", "team/attendance",
+        "retention",
       ];
       const strays = unique.filter((h) => !known.includes(h));
       check("every nav item points at a route this build renders", strays.length === 0,

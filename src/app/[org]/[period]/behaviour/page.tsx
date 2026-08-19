@@ -6,7 +6,6 @@ import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
 import { TIER_LABEL } from "@/lib/lexicon";
 import { IconArrow } from "@/components/shell/Icons";
-import { CohortLens } from "@/components/charts/CohortLens";
 import { SegmentBasket, SegmentTiming } from "@/components/charts/SegmentBehaviour";
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
@@ -866,131 +865,35 @@ export default async function BehaviourPage({
             )}
           </Card>
 
-          {/* ── §6.5 the member cohort lens, walled off ────────────────────
-              `data-member-tier` marks the wall so `member.tierScopeDeclared`
-              can find it in the built HTML. A member-tier figure that loses its
-              scope launders a 19%-coverage, self-selected sample into a general
-              one — and this build's own analysis puts 97% of the member gap
-              down to selection rather than effect.
+          {/* ── §6.5 the member cohort lens moved out ──────────────────────
+              Retention lived here, walled off behind a dashed border, after
+              eleven other panels. The wall was right: the figures above identify
+              people by payment card and the ones below identified them by
+              loyalty scan, and no figure from one may be combined with a figure
+              from the other.
 
-              R-217 specified that check and it was never written; a doc comment
-              asserted it was live, which is the same prose-instead-of-control
-              failure the extract refuses to commit with a lifecycle verdict. */}
-          <section
-            className="rounded-xl border-2 border-dashed"
-            style={{ borderColor: "var(--tier-member)" }}
-            data-member-tier
-          >
-            <header
-              className="border-b border-line px-5 py-3.5"
-              style={{ background: "color-mix(in srgb, var(--tier-member) 7%, transparent)" }}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-[15px] font-semibold text-ink">
-                    Member retention over {cw ? cw.cohortCount : 21} months
-                  </h2>
-                  <Pill tone="member">Loyalty identity · a different population</Pill>
-                </div>
-                {/* ── BH-7: the mountain of text moves, the corrections do not ──
-                    Five paragraphs of preamble before the chart and three
-                    sections after it. What moves in here is the reconciliation
-                    between the two member counts and the render rule — both are
-                    *how this is built*.
-
-                    What deliberately stays on the face: the clock-change banner
-                    directly below, because it changes how every figure in this
-                    section must be read, and "What we cannot yet tell you"
-                    inside the lens, because the chart is liked precisely for the
-                    thing it does not prove. The stack goes up because enrolment
-                    outran churn, not because retention improved, and that
-                    correction sits with the chart rather than behind a click —
-                    otherwise this reads as a success story it does not
-                    support. */}
-                {cohorts && cw && (
-                  <ExplainDrawer
-                    label="How the retention section is built"
-                    title="Member retention"
-                    showing={
-                      <>
-                        <p>
-                          Each band is the members who first scanned in one month. Its thickness at any
-                          point is how many of them were still visiting that month, so{" "}
-                          <strong>a band that narrows is an intake burning down</strong> and one that holds
-                          its width is an intake that stuck.
-                        </p>
-                        <p>
-                          Read the bottom band left to right to follow the oldest group you have. New
-                          intakes stack on top as they join.
-                        </p>
-                      </>
-                    }
-                    made={
-                      <>
-                        <p>
-                          <strong>Why there are more members here than on Overview.</strong> Overview counts{" "}
-                          {count(snap.members.crossSection.member.people)} enrolled people{" "}
-                          <em>seen in the {snap.org.window.days}-day payment-card window</em>. The cohorts
-                          here count{" "}
-                          {count(cohorts.cohorts.reduce((a, c) => a + c.members, 0))} people who have{" "}
-                          <em>ever scanned</em> across {count(cw.observationDays)} days, including everybody
-                          who stopped coming before that window opened. Neither is wrong and neither is a
-                          subset you can subtract from the other.
-                        </p>
-                        <p>
-                          <strong>Two window figures, and they measure different things.</strong> The
-                          intakes span {count(cw.intakeSpanDays)} days from the first cohort&apos;s month to
-                          the last cohort&apos;s month — {cw.cohortCount} monthly intakes. The{" "}
-                          <em>observation</em> window runs to the close of that last month, which is{" "}
-                          {count(cw.observationDays)} days. The second is the one the render rule is tested
-                          against.
-                        </p>
-                        <p>
-                          <strong>Why retention renders here and refuses above.</strong> A lapse-dependent
-                          figure needs a window at least twice the lapse threshold, so that both states are
-                          observable: {cohorts.grading.thresholdDays} days of silence to say somebody
-                          lapsed, and another {cohorts.grading.thresholdDays} watching them beforehand to
-                          say they did not. That is {cohorts.grading.requiredDays} days.{" "}
-                          <strong>
-                            This section has {count(cw.observationDays)} and clears it; the payment-card
-                            window has {snap.org.window.days} and does not.
-                          </strong>
-                        </p>
-                        <p>
-                          The window is the earliest month whose loyalty scanning passes grading, not the
-                          month the business started, and it grows by a month every month — so this chart
-                          gets longer and the claims it can carry get stronger with time.
-                        </p>
-                      </>
-                    }
-                  />
-                )}
-              </div>
-
-              {/* The clock-change banner stays. It is the reason the wall exists
-                  and it changes how every figure below it must be read. */}
-              <p className="mt-1.5 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
-                <strong className="text-ink">Everything below this line runs on a different clock.</strong>{" "}
-                The figures above identify people by payment card over {snap.org.window.days} days and cover{" "}
-                {pct(cov.identifiedRevenueShare, 1)} of revenue. These identify people by loyalty scan over{" "}
-                {cw ? count(cw.observationDays) : "—"} days and cover roughly{" "}
-                {cohorts ? pct(cohorts.coverage.at(-1)?.coverage ?? 0, 0) : "—"} of orders. They are not the
-                same guests, and <strong className="text-ink">no figure here may be combined with a figure
-                above it</strong>.
-              </p>
-            </header>
-            <div className="p-5">
-              {cohorts ? (
-                <CohortLens cohorts={cohorts} />
-              ) : (
-                <EmptyState
-                  tone="warning"
-                  title="No cohort data in this snapshot"
-                  body="The member cohort set is extracted per organisation rather than per card period, and this organisation predates it."
-                />
-              )}
-            </div>
-          </section>
+              But a section that has to be fenced off from the page it sits on is
+              a section that wants its own page, and retention was the most-asked
+              question in the build arriving last and quietest. It is now
+              **Retention and Churn**, between this page and Guests, where the
+              clock change is the premise rather than an interruption. */}
+          <Card title="Retention and churn moved to their own report">
+            <p className="max-w-[95ch] text-[14px] leading-relaxed text-ink-secondary">
+              Whether members keep coming back — and whether that is improving — is answered on{" "}
+              <Link
+                href={`/${org.slug}/${period}/retention`}
+                className="font-medium text-accent underline underline-offset-2"
+              >
+                Retention and Churn
+              </Link>
+              .{" "}
+              <strong className="text-ink">It runs on a different clock to this page.</strong> Everything
+              here identifies people by payment card over {snap.org.window.days} days and covers{" "}
+              {pct(cov.identifiedRevenueShare, 1)} of revenue; retention is measured on the loyalty scan
+              over {cw ? count(cw.observationDays) : "—"} days, because that is the only window in this
+              build long enough to watch somebody stop coming.
+            </p>
+          </Card>
         </div>
       </Page>
     </>

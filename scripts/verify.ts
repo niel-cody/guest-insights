@@ -255,6 +255,20 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
     const day = f.snap.team?.margin.day.filter((c) => c.storeId === "all");
     if (day?.length) day[0].orders += 37;
   },
+  // Coverage drifting across the intakes the comparison plots. The original
+  // confound restored, now behind a chart that looks authoritative.
+  "retention.coverageMatched": (f) => {
+    // A hole in the coverage series inside the plateau. The run still spans the
+    // dates, the intakes are still selected, and one of them now has no reading
+    // behind it — an unmatched point inside a matched comparison.
+    const c = f.snap.cohorts;
+    if (c) c.coverage = c.coverage.filter((_, i) => i % 3 !== 0);
+  },
+  // The one-month slip in the cohort-to-triangle join.
+  "retention.retainedWithinIntake": (f) => {
+    const t = f.snap.cohorts?.triangle;
+    if (t?.length) t[Math.floor(t.length / 2)].active += 10_000;
+  },
   // The regression that shipped: a service whose total no longer equals the day
   // parts drawn beneath it, while both still balance to the window.
   "team.dayPartsNestInGroups": (f) => {
