@@ -129,6 +129,15 @@ export function RetentionTrendChart({ trend }: { trend: RetentionTrend }) {
  * is filling faster than it leaks**. A base that grows every month while losing
  * more people every month is the single most common way a loyalty programme
  * looks healthy on the way to stalling.
+ *
+ * ── Green and red here, not the tier colours ───────────────────────────────
+ *
+ * This chart used `--tier-member` for the joiners, which was wrong the moment a
+ * panel on the same page started drawing members against cards. **A hue has to
+ * mean one thing per page.** Blue is the member tier and orange is the card
+ * tier, everywhere in this build including the badges on Guests; direction of
+ * travel is green and red. Reusing the member blue for "joined" would have had
+ * two panels on one page using the same colour for two unrelated ideas.
  */
 export function ChurnFlowChart({ flow }: { flow: FlowMonth[] }) {
   const rows = flow.slice(1);
@@ -180,7 +189,7 @@ export function ChurnFlowChart({ flow }: { flow: FlowMonth[] }) {
             <g key={m.month}>
               <rect
                 x={x(i) - bw / 2} y={mid - h(m.joined)} width={bw} height={Math.max(1, h(m.joined))}
-                rx={2} fill="var(--tier-member)"
+                rx={2} fill="var(--good)"
               >
                 <title>{m.label} — {count(m.joined)} joined</title>
               </rect>
@@ -210,7 +219,7 @@ export function ChurnFlowChart({ flow }: { flow: FlowMonth[] }) {
       </div>
       <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-muted">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-4 rounded-[2px]" style={{ background: "var(--tier-member)" }} />
+          <span className="inline-block h-3 w-4 rounded-[2px]" style={{ background: "var(--good)" }} />
           joined, above the line
         </span>
         <span className="flex items-center gap-1.5">

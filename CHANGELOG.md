@@ -2,12 +2,68 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.9.0`** — the version and commit render in the app header on every
+**Current: `v0.9.1`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.9.1 — members or cards, and which one is actually leaking
+
+The review asked the obvious next question: is retention different between
+members and cards, and which of the two are we churning? Two lines on the trend
+chart, one per tier.
+
+**The two lines cannot be drawn, and the reason is already on the page.**
+Retention is lapse-dependent, the card window is 92 days against the 180 that
+needs, and the payment reference stopped being written for the better part of a
+year. A card line would be invented rather than measured.
+
+One horizon down it is real, and it is measured rather than modelled. Both tiers
+resolve through the same payment card, over the same window, with the same
+denominators — because in this build the card is the spine and membership is an
+attribute of a person rather than a rival identity. So *did they come back at
+all* is a fair comparison, and it turns out to be the interesting one.
+
+### The answer, at Coffee Guru
+
+| Over 92 days | Members | Cards |
+|---|---:|---:|
+| People | 4,966 | 64,563 |
+| **Came back at all** | **68.3%** | **30.9%** |
+| Visits per person | 11.09 | 2.09 |
+| Median visits | 4 | 1 |
+| Returning share, July 2026 | 83% | 86% |
+
+Members come back **2.2× more often**. But month to month the two are almost
+identical — 83% against 86% returning — and the cards are marginally ahead. **The
+member advantage is in how often somebody comes back, not in whether this
+month's crowd had been seen before.** Which of the two is leaking, at monthly
+grain, is neither.
+
+The member figure is **detection-corrected**: a member who pays without scanning
+looks like an absence, so the raw 72.5% flatters them against a tier with no such
+blind spot. Correcting for a scan rate of 81% per visit gives 68.3%.
+
+### Colour means one thing per page now
+
+The flow chart was drawing its joiners in `--tier-member`, which was fine until a
+panel on the same page started drawing members against cards. Blue is the member
+tier and orange is the card tier — the same two colours the badges use on
+Guests — and direction of travel is green and red. Two panels on one page were
+about to use the same blue for two unrelated ideas.
+
+### No chart beside the table, on purpose
+
+The split is only measurable over the 92-day card window: three months, one of
+which is the month the window opened, where everybody is new by construction.
+**Two informative months is a table.** A line through two points takes the shape
+of whatever the second one does, and the page says so where the chart would have
+been. When the card tier reaches the same horizon, this becomes the second line
+on the retention chart rather than a table beside it.
 
 ---
 

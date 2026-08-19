@@ -53,7 +53,7 @@ export default async function RetentionPage({
 }) {
   const { org: slug, period } = await params;
   const [snap, periods] = await Promise.all([getSnapshot(slug, period), getPeriods(slug)]);
-  const { org, cohorts, coverage, members } = snap;
+  const { org, cohorts, coverage, members, lifecycle } = snap;
   const current = periods.periods.find((p) => p.id === period)!;
   const checks = retentionChecks(snap);
 
@@ -214,6 +214,9 @@ export default async function RetentionPage({
               }
             />
           </div>
+
+          {/* ── which tier ───────────────────────────────────────────────── */}
+          <TierSplit members={members} lifecycle={lifecycle} org={org} intakes={cohorts.cohorts.length} />
 
           {/* ── the answer ────────────────────────────────────────────────── */}
           {trend && (
@@ -546,6 +549,207 @@ function CardTier({
         </div>
       </div>
     </Card>
+  );
+}
+
+
+/**
+ * Members against cards. **Which of the two is actually leaking?**
+ *
+ * ── The honest version of "put two lines on the retention chart" ───────────
+ *
+ * The retention trend above cannot be split by tier and never will be on this
+ * data: retention is lapse-dependent, the card window is 92 days against the 180
+ * that needs, and the payment reference stopped being written for the better
+ * part of a year. Drawing a card line would mean inventing one.
+ *
+ * One horizon down, the split is real and is measured rather than modelled. Both
+ * tiers are resolved through the same payment card, over the same window, with
+ * the same denominators — because in this build the card is the spine and
+ * membership is an attribute of a person rather than a rival identity. So
+ * "did they come back at all" is a fair comparison, and it turns out to be the
+ * interesting one.
+ */
+function TierSplit({
+  members, lifecycle, org, intakes,
+}: {
+  members: Awaited<ReturnType<typeof getSnapshot>>["members"];
+  lifecycle: Awaited<ReturnType<typeof getSnapshot>>["lifecycle"];
+  org: Awaited<ReturnType<typeof getSnapshot>>["org"];
+  /** Monthly intakes behind the long series, so the contrast is stated in full. */
+  intakes: number;
+}) {
+  const m = members.crossSection.member;
+  const c = members.crossSection.nonMember;
+  const d = members.detection;
+
+  // The corrected figure is the one that goes in the sentence. A member who buys
+  // without scanning looks absent, so the observed rate flatters them, and the
+  // whole comparison is against a tier that has no such blind spot.
+  const memberRepeat = d.correctedRepeatRate;
+  const cardRepeat = c.repeatRate;
+  const ratio = cardRepeat > 0 ? memberRepeat / cardRepeat : null;
+
+  const months = [...new Set(lifecycle.map((r) => r.month))].sort();
+  const latest = months.at(-1);
+  const share = (tier: "member" | "card") => {
+    const r = lifecycle.find((x) => x.month === latest && x.tier === tier);
+    if (!r || r.active <= 0) return null;
+    return (r.returning + r.reactivated) / r.active;
+  };
+  const memberBack = share("member");
+  const cardBack = share("card");
+
+  return (
+    <Card
+      title="Members or cards — which one is leaking?"
+      subtitle={`Both tiers over the ${org.window.days}-day payment-card window, the one horizon each can be measured on.`}
+      explain={
+        <ExplainDrawer
+          label="How the tier comparison is built"
+          title="Members or cards — which one is leaking?"
+          showing={
+            <>
+              <p>
+                <strong>Came back at all</strong> is the share of each tier seen on more than one day in
+                the window. It is not the retention figure at the top of this page: that one watches people
+                stop, needs {LAPSE_DOUBLED_DAYS} days, and exists for members only.
+              </p>
+              <p>
+                The chart splits each month&rsquo;s active people into those seen for the first time and
+                those seen before. Blue is members and orange is cards throughout this build — the same
+                two colours the tier badges use on Guests. The paler block of each pair is the first-seen
+                half.
+              </p>
+            </>
+          }
+          made={
+            <>
+              <p>
+                Both tiers are resolved through the payment card over the same window, so they share a
+                denominator and a definition of a person. Membership is an attribute of that person rather
+                than a rival identity, which is what makes the two columns comparable at all.
+              </p>
+              <p>
+                <strong>The member rate is detection-corrected.</strong> A member who pays without scanning
+                looks like an absence, so the raw {pct(d.observedRepeatRate, 1)} overstates them; correcting
+                for a scan rate of {pct(d.scanPerVisit, 0)} per visit gives{" "}
+                {pct(d.correctedRepeatRate, 1)}. The card tier needs no such correction, and comparing an
+                uncorrected member figure against it would be the flattering error rather than the neutral
+                one.
+              </p>
+              <p>
+                The opening month of the window is drawn at half strength and never compared. Everybody is
+                new when a window opens, and reading that as an acquisition spike is the most common way a
+                three-month chart lies.
+              </p>
+            </>
+          }
+        />
+      }
+    >
+      <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
+        <div>
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-line text-[12px] tracking-wide text-ink-secondary uppercase">
+                <th className="py-2 pr-3 text-left font-medium">Over {org.window.days} days</th>
+                <th className="px-2 py-2 text-right font-medium" style={{ color: "var(--tier-member)" }}>
+                  Members
+                </th>
+                <th className="py-2 pl-2 text-right font-medium" style={{ color: "var(--tier-card)" }}>
+                  Cards
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <Row label="People" a={count(m.people)} b={count(c.people)} />
+              <Row label="Came back at all" a={pct(memberRepeat, 1)} b={pct(cardRepeat, 1)} strong />
+              <Row label="Visits per person" a={m.avgVisits.toFixed(2)} b={c.avgVisits.toFixed(2)} />
+              <Row label="Median visits" a={count(m.medianVisits)} b={count(c.medianVisits)} />
+              <Row
+                label={`Returning share, ${latest ? monthLabel(latest) : "latest month"}`}
+                a={memberBack == null ? "—" : pct(memberBack, 0)}
+                b={cardBack == null ? "—" : pct(cardBack, 0)}
+              />
+            </tbody>
+          </table>
+          <p className="mt-3 max-w-[60ch] text-[13px] leading-relaxed text-ink-secondary">
+            {ratio && ratio > 1.1 ? (
+              <>
+                Members come back{" "}
+                <strong className="text-ink">{ratio.toFixed(1)}× more often</strong> than cards over the
+                same window.{" "}
+                {memberBack != null && cardBack != null && Math.abs(memberBack - cardBack) < 0.05 ? (
+                  <>
+                    But month to month the two are almost identical —{" "}
+                    {pct(memberBack, 0)} against {pct(cardBack, 0)} returning. The member advantage is in
+                    how often somebody comes back, not in whether this month&rsquo;s crowd had been seen
+                    before.
+                  </>
+                ) : (
+                  <>The gap is in frequency rather than in basket size.</>
+                )}
+              </>
+            ) : (
+              <>
+                The two tiers return at similar rates over this window. Whatever separates members here, it
+                is not how likely they are to come back at all.
+              </>
+            )}
+          </p>
+        </div>
+        {/* No chart here on purpose. The tier split is measurable over the card
+            window, the card window is three months, and one of those is the
+            month it opened — where everybody is new by construction. Two
+            informative months is a table. A line through two points takes the
+            shape of whatever the second one does. */}
+        <div className="rounded-xl border border-line bg-surface-sunken p-4">
+          <h3 className="text-[13px] font-semibold text-ink">Why there is no chart beside this</h3>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
+            The comparison is only measurable over the {org.window.days}-day card window — three months,
+            and everybody is new in the month a window opens. That leaves{" "}
+            <strong className="text-ink">two informative months</strong>, which is a table.
+          </p>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">
+            The long series above runs {count(intakes)} monthly intakes and is members only, for the
+            reason at the foot of the page.{" "}
+            <strong className="text-ink">
+              When the card tier reaches the same horizon this becomes the second line on that chart
+            </strong>{" "}
+            rather than a table beside it.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-dashed border-line-strong bg-surface-sunken px-4 py-3.5">
+        <p className="max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+          <strong className="text-ink">This is not churn, and the split above it cannot be drawn.</strong>{" "}
+          Coming back inside 92 days and having stopped coming are different measurements: the second needs
+          {" "}{LAPSE_DOUBLED_DAYS} days to observe, so the retention and churn figures at the top of this
+          page are <strong className="text-ink">members only</strong>. The card tier gets the same treatment
+          on {org.cardTier.months.length ? "the date at the foot of this page" : "a longer window"}, and
+          nothing here estimates it in the meantime.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+function Row({
+  label, a, b, strong = false,
+}: {
+  label: string;
+  a: string;
+  b: string;
+  strong?: boolean;
+}) {
+  return (
+    <tr className="border-b border-line last:border-b-0">
+      <th scope="row" className="py-2 pr-3 text-left font-normal text-ink">{label}</th>
+      <td className={`tnum px-2 py-2 text-right ${strong ? "font-semibold text-ink" : "text-ink"}`}>{a}</td>
+      <td className={`tnum py-2 pl-2 text-right ${strong ? "font-semibold text-ink" : "text-ink"}`}>{b}</td>
+    </tr>
   );
 }
 
