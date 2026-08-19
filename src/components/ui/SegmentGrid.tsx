@@ -235,6 +235,11 @@ export function SegmentGrid({
     return `/${orgSlug}/${period}/guests?${q.toString()}`;
   }
 
+  /** Which of the three reading notes apply. Decided once, read once. */
+  const hasPrevNote = !!previous && effectiveGroup === "lifecycle";
+  const hasCardNote = tier !== "member" && effectiveGroup === "lifecycle";
+  const hasExcludedNote = tier !== "member" && excludedCards.people > 0;
+
   return (
     <div className="flex flex-col gap-4">
       {/* ── what the rows can be, and which population they are drawn on ─────
@@ -415,57 +420,44 @@ export function SegmentGrid({
         </table>
       </div>
 
-      {previous && effectiveGroup === "lifecycle" && (
+      {/* ── one note, not three ──────────────────────────────────────────────
+          This was three stacked paragraphs under the table — the previous period
+          not being last quarter, reissued cards faking a lapse, and single-visit
+          cards being excluded — and all three were correct. Read together they
+          were a wall, and a wall under a table is read by nobody, which made
+          three real caveats functionally invisible.
+
+          **The facts stay and the working moves.** Each clause below changes
+          what a row in this table means, which is the test for staying on the
+          face. Why, in each case, is in "Explain segments" — which is where a
+          reader looking at these rows already is. */}
+      {(hasPrevNote || hasCardNote || hasExcludedNote) && (
         <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
-          <strong className="text-ink-secondary">
-            The previous period is not last quarter, and the comparison says so.
-          </strong>{" "}
-          It is {previous.label} — the most recent earlier run of months whose card capture this build will
-          read. <strong className="text-ink-secondary">{previous.gapMonths} months are missing between the
-          two</strong>, and they are not absent from the chart; they are absent from the snapshot, because
-          card capture failed in them and a figure drawn across that gap would be measuring the outage. A
-          segment somebody moved into during those months arrives here looking like a change that happened
-          over one period.
+          <strong className="text-ink-secondary">Reading these rows.</strong>{" "}
+          {hasPrevNote && (
+            <>
+              The comparison column is {previous!.label}, not last quarter, and {previous!.gapMonths}{" "}
+              months are missing between the two.{" "}
+            </>
+          )}
+          {hasCardNote && (
+            <>
+              Lapsed and Slipping carry real false positives here — a reissued card looks identical to
+              somebody who stopped coming — while Regulars and Established can only be understated, so
+              those two are a floor.{" "}
+            </>
+          )}
+          {hasExcludedNote && (
+            <>
+              {count(excludedCards.people)} cards seen exactly once sit outside this view,{" "}
+              {money(excludedCards.spend)} between them, because one sighting is a transaction rather
+              than a customer.{" "}
+            </>
+          )}
+          <span className="opacity-80">The reasoning behind each is in Explain segments.</span>
         </p>
       )}
 
-      {/* ── The one thing a card verdict may not be read as ─────────────────
-          The classifier is sound on cards for the verdicts that rest on counting
-          — a reissue splits a person, so it can only ever understate Regulars
-          and Established. It is not sound for the two that rest on absence: a
-          card going quiet is exactly what a reissue looks like. That is not a
-          reason to withhold the row, and it is every reason to name what the row
-          means, which is a fact about the card rather than a conclusion about
-          the person. */}
-      {tier !== "member" && effectiveGroup === "lifecycle" && (
-        <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
-          <strong className="text-ink-secondary">
-            Without a loyalty record, Lapsed and Slipping mean the payment card stopped appearing.
-          </strong>{" "}
-          A member keeps one identity across a reissued card because the membership carries it; an anonymous
-          card does not, so a reissue looks identical to somebody who stopped coming and these two rows carry
-          real false positives. <strong className="text-ink-secondary">Regulars and Established do not</strong>{" "}
-          — a reissue splits one person into two smaller ones, so it can only understate them, and those rows
-          are a floor rather than an estimate. Ten visits inside a cadence are ten visits that happened.
-        </p>
-      )}
-
-      {/* ── What a card view leaves out, stated rather than dropped ─────────
-          Recognised guests are non-members with two or more visits, so a whole
-          population sits outside it — and it is not small. Dropping it silently
-          would make the tier totals unreconcilable against the coverage figures
-          on the same page, which is the defect this build exists to not ship. */}
-      {tier !== "member" && excludedCards.people > 0 && (
-        <p className="max-w-[95ch] text-[12px] leading-relaxed text-ink-muted">
-          <strong className="text-ink-secondary">
-            {count(excludedCards.people)} payment cards seen exactly once are not in this view
-          </strong>{" "}
-          — {money(excludedCards.spend)} between them. A payment card is only counted as a person on its second
-          visit: one sighting is a transaction you can see, not a customer you can count, and there is no
-          cadence to place it against. Members are counted from the moment they enrol, which is why the
-          one-visit row is present for members and absent here.
-        </p>
-      )}
 
       {/* ── §4.5 the boundary rules have moved to the panel header ─────────
           They are now "Explain segments" in this card's header, rendered by

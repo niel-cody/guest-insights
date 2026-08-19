@@ -15,8 +15,7 @@ import type { GuestRows, Snapshot, TeamMarginCell } from "./types";
 import { count, money, pairArithmetic, pct, recency, tileCount } from "./metrics";
 import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
 import {
-  STABLE_ABS_TOL as MAX_STABLE_ABS, STABLE_REL_TOL as MAX_STABLE_REL,
-  monthlyFlow, retentionTrend, stableCoverageRun,
+  STABLE_ABS_TOL as MAX_STABLE_ABS, STABLE_REL_TOL as MAX_STABLE_REL, retentionTrend,
 } from "./retention";
 import { looksShared, ratedPeople } from "./team";
 

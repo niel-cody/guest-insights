@@ -103,6 +103,16 @@ export function SegmentsExplainer({
             Regulars and Established do not: a reissue splits one person into two smaller ones, so it can
             only ever understate them.
           </p>
+          {/* Moved off the face of the composition bars. Both sentences are
+              drawing rules — how wide a band is, and what it is a share of —
+              which is method by any reading, and they were a second paragraph
+              under a chart that only needed the first. */}
+          <p>
+            <strong>The composition bars.</strong> Shares are of the same population as the grid and
+            change with the same control. Bands are drawn to exact width with no minimum, so a segment
+            worth a fraction of a percent renders as a hairline rather than being inflated to a readable
+            one. Percentages label the bands wide enough to hold them; the rest are in the grid.
+          </p>
         </>
       }
     />

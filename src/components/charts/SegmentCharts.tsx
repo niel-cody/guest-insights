@@ -208,13 +208,6 @@ export function SegmentComposition({
           average member is not a useful object.
         </p>
       )}
-      <p className="mt-1.5 max-w-[85ch] text-[11px] leading-relaxed text-ink-muted">
-        Shares are of {people} — the same denominator as the grid above, and it changes with the same
-        control. Bands are drawn to
-        exact width with no minimum, so a segment worth a fraction of a percent renders as a hairline rather
-        than being inflated to a readable one. Percentages label the bands that can hold them; the rest are
-        in the grid.
-      </p>
     </figure>
   );
 }

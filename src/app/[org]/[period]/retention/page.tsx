@@ -7,7 +7,7 @@ import { count, coverageState, dayLabel, monthLabel, pct } from "@/lib/metrics";
 import {
   LAPSE_DOUBLED_DAYS, MIN_MATCHED_COHORTS, cardVerdict, monthlyFlow, retentionTrend,
 } from "@/lib/retention";
-import { Standfirst } from "../team/Standfirst";
+import { Standfirst } from "@/components/shell/Standfirst";
 import { BurnDown, ChurnFlowChart, RetentionTrendChart } from "./RetentionCharts";
 
 export const dynamic = "force-static";

@@ -12,7 +12,7 @@ import {
 } from "@/lib/team";
 import type { TeamPerson } from "@/lib/types";
 import { Unavailable } from "../Unavailable";
-import { Standfirst } from "../Standfirst";
+import { Standfirst } from "@/components/shell/Standfirst";
 
 export const dynamic = "force-static";
 export const metadata = { title: "Performance" };

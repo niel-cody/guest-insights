@@ -7,15 +7,15 @@ import { SegmentGrid, type PreviousPeriod } from "@/components/ui/SegmentGrid";
 import { SelectionCorrection, ValuePanels } from "@/components/charts/ValuePanels";
 import { Disclosure } from "@/components/ui/Disclosure";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
+import { Standfirst } from "@/components/shell/Standfirst";
 import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
 import { GrowthView } from "@/components/charts/GrowthView";
-import { BasketMix } from "@/components/ui/BasketMix";
 import { IDENTITY_LABEL, TIER_LABEL } from "@/lib/lexicon";
 import { getPeriods, getGuestRows, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
 import {
-  attributionPct, basketMix, basketStory, causalReading, count, coverageState,
+  attributionPct, causalReading, count, coverageState,
   decompose, delta, excludedSingleVisitCards, money, monthLabel, opportunityPerVenueWeek, pct, ratio,
   rollUpSegments, tileCount, valueClaims, visitBands, windowShort,
 } from "@/lib/metrics";
@@ -126,8 +126,6 @@ export default async function OverviewPage({
   const first = decomposition[0];
   const last = decomposition.at(-1);
   const growth = first && last && first !== last ? decompose(first, last) : null;
-  const mix = snap.items ? basketMix(snap.items) : null;
-  const story = mix ? basketStory(mix) : null;
 
   return (
     <>
@@ -141,6 +139,47 @@ export default async function OverviewPage({
       />
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
+          {/* ── the question, and the answer in two sentences ────────────────
+              This replaces a panel that carried the same sentence four scrolls
+              lower, under an "About this" button, with nothing above it saying
+              what the page was for. A reader met four KPI tiles cold and had to
+              infer the argument from them.
+
+              **The pitch is not decoration and it is not a summary.** It is the
+              one comparison the whole build exists to make — what this report
+              can put a name to, against what a loyalty CRM would have shown —
+              and it is the sentence a merchant repeats back to you. It has been
+              through two council sittings and was refused for cutting on 17
+              August; it has not been cut, it has been moved to the top where it
+              answers the question rather than restating it. */}
+          <Standfirst
+            question="How much of your trade can you put a name to — and are members worth more?"
+            body={
+              <>
+                Over {win} you served {money(coverage.totals.revenue)} across{" "}
+                {count(coverage.totals.orders)} orders, and this report can put{" "}
+                <strong className="text-ink">{attributionPct(cov.identifiedRevenueShare)}</strong> of that
+                revenue against {count(tileCount(identifiedPeople))} people you could recognise again —
+                where a loyalty CRM, which only sees a scan, would show{" "}
+                <strong className="text-ink">{attributionPct(cov.scannedRevenueShare)}</strong>.{" "}
+                {causal.causal ? (
+                  <>
+                    On the second question the answer is <strong className="text-ink">yes</strong>: an
+                    enrolled person is associated with {ratio(memberLift)} the spend, of which{" "}
+                    {pct(causal.selectionShare ?? 0, 0)} was already there before they enrolled.
+                  </>
+                ) : (
+                  <>
+                    On the second question the answer is{" "}
+                    <strong className="text-ink">not proven here</strong> — the gap this window shows
+                    cannot be separated from the fact that the people who enrol were already your best
+                    guests.
+                  </>
+                )}
+              </>
+            }
+          />
+
           {/* ── §5.2 four tiles ──────────────────────────────────────────────
               Four lines and a button, in the same order on every tile: what it
               is, the figure, the one supporting figure, then tier and window.
@@ -282,19 +321,50 @@ export default async function OverviewPage({
                 }
               />
             ) : (
+              /* ── The refused variant, and it is the same card ──────────────
+                 It used to be a different shape entirely: a different label, no
+                 button, and a five-line footnote where the other three tiles
+                 have one. Switching organisation therefore changed the *design*
+                 of the row and not only its figures, and the merchant whose
+                 answer is "not proven" got a wall of text explaining itself
+                 beside three tiles that did not.
+
+                 Same label, same button, same one-line footnote. What differs
+                 is the only thing that should: the figure is withheld, and the
+                 reason is a click away rather than a paragraph. */
               <Tile
-                label="A member is worth"
+                label="A member is associated with"
                 value={memberLift >= 1 ? ratio(memberLift) : delta(memberLift)}
                 accent="var(--warning)"
                 refused
+                detail={
+                  <>
+                    {money(cs.member.spendPerPerson)} against {money(cs.nonMember.spendPerPerson)}
+                  </>
+                }
+                meta={<>Person grain · {win}</>}
+                info={
+                  <>
+                    <p>
+                      Spend per enrolled person over the window, against spend per card-only person over
+                      the same window. Both columns are the same grain — people identified by card.
+                    </p>
+                    <p className="mt-1.5">
+                      <strong className="text-ink">The gap is shown quietly rather than as an answer.</strong>{" "}
+                      Nothing in this window separates it from selection: the within-person estimate needs
+                      more people who enrolled mid-window than this merchant has, so there is no way to tell
+                      how much of the difference enrolling <em>caused</em> and how much was already there.
+                    </p>
+                    <p className="mt-1.5">
+                      A gap that cannot be separated from selection is not a measure of what a member is
+                      worth, and publishing it as one is how a loyalty programme gets justified by the
+                      behaviour of the people who were always going to join it.
+                    </p>
+                  </>
+                }
                 footnote={
                   <span className="text-ink-muted">
-                    The observed gap is shown quietly rather than as an answer, because nothing in this
-                    window separates it from selection — the within-person estimate needs more people who
-                    enrolled mid-window than this merchant has. A gap that cannot be separated from
-                    selection is not a measure of what a member is worth, and publishing it as one is how
-                    a loyalty programme gets justified by the behaviour of the people who were always
-                    going to join it.
+                    Not separable from selection here — see below.
                   </span>
                 }
               />
@@ -353,128 +423,6 @@ export default async function OverviewPage({
               }
             />
           </div>
-
-          {/* ── §5.3 the sentence stays, the nesting moves (OV-2) ────────────
-              Note A's arrow landed between two things and the answer differs
-              for each, so neither was guessed at. **Both stay, and the method
-              half moves into the drawer** — which is the Task 0 rule applied
-              rather than a compromise between two cuts.
-
-              The sentence is the only place on the page carrying the order
-              count, which is the denominator of the recognition tile and the
-              base of the whole Behaviour page, and the only place making the
-              loyalty-CRM comparison — the sentence a prospect repeats back to
-              you. The council refused to cut it on 17 August and the reason has
-              not changed.
-
-              The nesting block is the opposite: four counts and how they sit
-              inside each other is *how the figures are built*, read once and
-              never again by the same person. It is the clearest case on the
-              page of something that fails the stay-or-move rule in the
-              move direction. */}
-          <Card
-            explain={
-              <ExplainDrawer
-                label="How the counts on this page fit together"
-                title="How the counts fit together"
-                showing={
-                  <>
-                    <p>
-                      One sentence, and it is the whole report in miniature: what you took, how much of it
-                      this build can put against a person, and what a loyalty CRM would have been able to
-                      tell you instead.
-                    </p>
-                    <p>
-                      The gap between those last two figures —{" "}
-                      <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> against{" "}
-                      <strong>{attributionPct(cov.scannedRevenueShare)}</strong> — is the argument for
-                      building on the payment card rather than on the scan.
-                    </p>
-                  </>
-                }
-                made={
-                  <>
-                    <p>
-                      <strong>How the four people-counts nest.</strong> Four population figures appear on
-                      this screen and nothing on the face says how they sit inside each other. Read as four
-                      unrelated counts none of them can be checked.
-                    </p>
-                    <ul className="flex flex-col gap-1.5">
-                      <li>
-                        <strong className="tnum">{count(tileCount(identifiedPeople))}</strong> people
-                        identified at all — everyone seen on a payment card, however briefly.
-                      </li>
-                      <li className="pl-4">
-                        ↳ <strong className="tnum">{count(segments.population)}</strong> of them are
-                        classifiable: enrolled, or seen on a card more than once. A card seen once is a
-                        transaction, not yet a customer.
-                      </li>
-                      <li className="pl-8">
-                        ↳ <strong className="tnum">{count(cs.member.people)}</strong> of those have
-                        enrolled, and are the only people who carry a lifecycle verdict from a scan.
-                      </li>
-                      <li className="pl-8">
-                        ↳ <strong className="tnum">{count(opp.candidates.people)}</strong> of those have
-                        not, and are the enrolment opportunity below.
-                      </li>
-                    </ul>
-                    <p>
-                      Tiles round to the nearest ten; tables and the grid never round. The exact identified
-                      population is {count(identifiedPeople)}.
-                    </p>
-
-                    {/* ── C-1, the three member-order figures ──────────────────
-                        Three quantities that all sound like "member orders"
-                        appear across Overview and Behaviour: 52,844, 62,107 and
-                        55,070. They are 17% apart, none of them is wrong, and
-                        nothing on either page reconciled them — so a reader who
-                        noticed had no way to resolve it except to conclude one
-                        of the numbers was broken.
-
-                        The one that looks most like an error is the smallest
-                        sitting under a tile: a *subset* of orders, next to a
-                        visit count larger than it. Orders cannot be fewer than
-                        visits — unless the orders are a subset, which these are,
-                        and nothing said so. */}
-                    <p>
-                      <strong>Three member-order figures, and why they differ.</strong> They measure
-                      different things and are 17% apart, so they are nested here the same way the people
-                      counts are.
-                    </p>
-                    <ul className="flex flex-col gap-1.5">
-                      <li>
-                        <strong className="tnum">{count(coverage.totals.memberOrders)}</strong> member
-                        orders in the window — every order placed by an enrolled person, however they were
-                        identified. This is the figure the Behaviour daypart table adds up to.
-                      </li>
-                      <li className="pl-4">
-                        ↳ <strong className="tnum">
-                          {count(opp.unscanned.orders + members.linkage.scannedOrders)}
-                        </strong>{" "}
-                        of those the card bridge resolved, and the denominator of the recognition tile
-                        above. The rest are member orders identified by the scan alone, where no payment
-                        card could be linked.
-                      </li>
-                      <li>
-                        <strong className="tnum">{count(cs.member.visits)}</strong> member{" "}
-                        <em>visits</em>, which is a different unit entirely — a visit is a person-day at a
-                        venue and can carry more than one order. It is smaller than total orders and larger
-                        than the bridged subset, and neither comparison means anything.
-                      </li>
-                    </ul>
-                  </>
-                }
-              />
-            }
-          >
-            <p className="max-w-[100ch] text-[15px] leading-relaxed text-ink">
-              Over {win} you served {money(coverage.totals.revenue)} across {count(coverage.totals.orders)}{" "}
-              orders, and can put <strong>{attributionPct(cov.identifiedRevenueShare)}</strong> of that
-              revenue against {count(tileCount(identifiedPeople))} people you could recognise again — where
-              a loyalty CRM, which only sees a scan, would show{" "}
-              <strong>{attributionPct(cov.scannedRevenueShare)}</strong>.
-            </p>
-          </Card>
 
           {/* ── §5.4 where your members stand ────────────────────────────────
               A grid and one chart, stacked, doing two different jobs. The grid
@@ -809,73 +757,25 @@ export default async function OverviewPage({
               open, and there is no simple/advanced toggle anywhere. What folds
               here is the working: the decomposition table and the basket index,
               not the conclusions they support. */}
-          {/* ── OV-9: the basket block moved up ──────────────────────────────
-              It was last on the longest page in the build, collapsed, under a
-              decomposition table. It is arguably the most immediately
-              actionable thing on Overview — "members buy Breakfast Sweet at
-              1.37× the rate everybody else does" is a merchandising decision an
-              owner could take on Monday — so it now sits above the working it
-              used to sit below.
+          {/* ── OV-9 reversed: the basket block comes off this page ─────────
+              It was moved *up* here on the argument that "members buy Breakfast
+              Sweet at 1.37× the rate everybody else does" is the most
+              immediately actionable line on Overview. That argument holds at one
+              organisation and not at the other, which is the problem.
 
-              It is open by default, and was already: a finding behind a click
-              is a finding nobody reads. What has moved into the drawer is the
-              five-sentence method paragraph that used to sit above the table. */}
-          {mix && story && (
-            <Card
-              title="What members and everyone else actually buy"
-              explain={
-                <ExplainDrawer
-                  label="How the basket index is built"
-                  title="What members and everyone else actually buy"
-                  showing={
-                    <>
-                      <p>
-                        One row per reporting group, sorted by how differently the two sides buy it. The
-                        number on the right is an <strong>index</strong>: 1.37× means members buy that group
-                        at 1.37 times the rate everybody else does, as a share of each side&apos;s own
-                        basket.
-                      </p>
-                      <p>
-                        The two ends are the finding. The middle is the reassurance that most of the menu is
-                        bought in much the same proportion by both, which is the expected result.
-                      </p>
-                    </>
-                  }
-                  made={
-                    <>
-                      {cs.lifts.spendPerVisit < 0 && (
-                        <p>
-                          This is the missing half of the {delta(cs.lifts.spendPerVisit)} per-visit gap
-                          above. Standardising for daypart moved that gap by{" "}
-                          {delta(members.standardisedBasket.lift - members.standardisedBasket.crude.lift, 1)},
-                          so <em>when</em> members come is not the reason their basket is smaller.{" "}
-                          <strong>What they put in it is.</strong>
-                        </p>
-                      )}
-                      <p>
-                        Shares are of each side&apos;s <strong>own</strong> product lines, so a group does
-                        not index high merely because members buy more overall.
-                      </p>
-                      <p>
-                        A group carrying fewer than {count(snap.items!.totals.minLinesForIndex)} lines on
-                        one side keeps its counts and loses its index. A confident 1.2× computed on eleven
-                        lines against nine is the sort of figure that moves to 0.8× on a different
-                        fortnight, and this product does not publish those.
-                      </p>
-                    </>
-                  }
-                />
-              }
-            >
-              <p className="mb-4 max-w-[100ch] text-[15px] leading-relaxed text-ink">
-                Members buy <strong>{story.over.label}</strong> at{" "}
-                <strong>{story.over.index!.toFixed(2)}×</strong> the rate everybody else does, and{" "}
-                <strong>{story.under.label}</strong> at{" "}
-                <strong>{story.under.index!.toFixed(2)}×</strong>.
-              </p>
-              <BasketMix rows={mix} minLines={snap.items!.totals.minLinesForIndex} />
-            </Card>
-          )}
+              The index needs {minLinesForIndex} product lines on each side
+              before it will publish. At Coffee Guru 29 of 62 reporting groups
+              clear it; at Meat Flour Wine 6 of 46 do. So the same panel is a
+              finding at one merchant and forty rows of withheld index at the
+              other — and a reader meeting the second version reasonably
+              concludes the report is broken rather than that their menu is
+              long and their sample is short.
+
+              It is a basket question rather than an overview question, and it
+              belongs on a surface about what people buy. Removed here rather
+              than conditioned on which merchant is loaded, because a page whose
+              sections appear and disappear per organisation cannot be reviewed
+              or screenshotted consistently. */}
 
           {/* ── §5.8 where the change came from ──────────────────────────────
               **Caveats never collapse** — everything above this point stays
@@ -936,6 +836,22 @@ export default async function OverviewPage({
               <GrowthView d={growth} rows={decomposition} />
             </Disclosure>
           )}
+
+          {/* ── the standing note ────────────────────────────────────────────
+              One place, once, at the foot. Individual refusals still state
+              themselves where the figure would have been — that rule has not
+              moved — but a reader who has met two or three of them deserves to
+              know it is a policy rather than a series of accidents, and that
+              the same page will fill in as the evidence arrives. */}
+          <p className="max-w-[100ch] border-t border-line pt-4 text-[12px] leading-relaxed text-ink-muted">
+            <strong className="text-ink-secondary">Where the evidence is thin, this report says so
+            instead of publishing.</strong>{" "}
+            A figure is withheld when the window is too short to observe what it claims, when the sample
+            behind it is too small to survive a different fortnight, or when a comparison cannot be
+            separated from the reason those people are in it. Every refusal names itself where the number
+            would have been, and says what would lift it — most of them lift on their own as the window
+            grows.
+          </p>
         </div>
       </Page>
     </>

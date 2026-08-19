@@ -241,14 +241,21 @@ async function main() {
       // share may move into a tooltip, the fact of it may not. A screenshot of
       // a KPI card travels without its caption.
       //
-      // Scoped to the tile that makes the claim. Where the within-person
-      // estimate cannot be made — Meat Flour Wine — the tile refuses instead
-      // and carries a longer statement in place of the figure, which is a
-      // different and stronger caveat rather than a missing one.
+      // This used to be scoped by *label*, because the two organisations drew
+      // two differently-titled tiles. They now draw the same tile — same label,
+      // same button, same one-line footnote — so the label no longer says which
+      // case you are in and the assertion cannot key on it.
+      //
+      // It keys on the caveat instead, which is the thing that actually has to
+      // survive: a published gap says it is association, a withheld one says it
+      // could not be separated from selection. **Either sentence satisfies this
+      // and silence does not**, which is a stronger test than the old one
+      // because it now covers the merchant that previously fell outside it.
       if (html.includes("A member is associated with")) {
         check("the selection caveat is on the face of the KPI row",
-          html.includes("Association, not effect"),
-          "the tile has stopped saying the gap is association");
+          html.includes("Association, not effect") ||
+            html.includes("Not separable from selection"),
+          "the tile has stopped saying the gap is association or unseparated");
       }
       // OV-6 reduced this block by moving the uplift band and its take-up
       // working into a drawer. What could not move with it is the label that

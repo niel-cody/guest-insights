@@ -12,7 +12,7 @@ import {
 import type { Team, TeamMarginCell } from "@/lib/types";
 import { MarginGrains, type Grain } from "./MarginGrains";
 import { Unavailable } from "../Unavailable";
-import { Standfirst } from "../Standfirst";
+import { Standfirst } from "@/components/shell/Standfirst";
 
 export const dynamic = "force-static";
 export const metadata = { title: "Margin" };
