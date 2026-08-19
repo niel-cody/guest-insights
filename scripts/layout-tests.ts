@@ -436,7 +436,13 @@ async function main() {
     // The reversal is conditional on the buttons existing where the prose was
     // removed from. A page whose tiles lost their explanation and gained no
     // button has quietly deleted the explanation.
-    if (isOverview || name.endsWith("/guests")) {
+    //
+    // Guests was in this list until its tiles were removed altogether. That is
+    // not the failure this guards against — the figures did not lose their
+    // explanation, they moved wholesale to Overview and Behaviour, which
+    // compute on the whole population and are asserted here in their own
+    // right. Guests is now the grid alone and carries no tiles to explain.
+    if (isOverview) {
       check("the tiles carry their explanation behind a button",
         (html.match(/data-info-button/g) ?? []).length >= 4,
         `${(html.match(/data-info-button/g) ?? []).length} info buttons on a page with four tiles`);

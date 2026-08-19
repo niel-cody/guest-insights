@@ -263,10 +263,17 @@ export function GuestGrid({
 
             <SaveToList view={view} rows={filtered} org={org} period={period} />
 
+            {/* The prose footer that used to carry this went with the page's
+                slimming down, but the caveat itself has not gone away: masking
+                is applied in the browser, so the unmasked names are already in
+                the page payload whether or not anyone presses this. The
+                role-gated, audit-logged reveal in the spec is not built, and
+                building it is a blocker on showing this screen outside Oolio. */}
             <button
               type="button"
               onClick={() => setUnmasked((v) => !v)}
               aria-pressed={unmasked}
+              title="Masking is applied in the browser — the underlying names are present in the page. The role-gated, audit-logged reveal is not built yet."
               className="rounded-lg border px-2.5 py-1.5 text-[13px] font-medium"
               style={
                 unmasked
@@ -354,54 +361,26 @@ export function GuestGrid({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
-          {/* §7.1: the grid states its true size and its true method, and
-              confirms that the figures above it are not computed on this set. */}
-          <p className="max-w-[80ch] text-[12px] leading-relaxed text-ink-muted">
-            The grid works on a {count(guests.sampled)}-row working set of the{" "}
-            {count(guests.population)} classifiable {org.labels.guests} — the top of the value distribution
-            in full, plus a deterministic hash-ordered sample of the rest, so it looks like the real
-            population rather than a leaderboard. The totals in this footer are over every row the current
-            filter selects, not this page.{" "}
-            <strong className="text-ink-secondary">
-              Every figure on Overview and Behaviour is computed on the whole population, never on this set.
-            </strong>{" "}
-            {/* ── The masking claim, corrected to what is actually true ───────
-                This asserted that the reveal "is role-gated and audit-logged".
-                It is not. Masking in this build happens **in the browser**, which
-                means the unmasked values are already in the page payload —
-                anyone with dev tools, a saved HAR or a proxy has the full
-                working set, including the entire top of the value distribution,
-                whether or not they ever press the button.
-
-                The sentence is now future-tense, because a control described in
-                the present tense that does not exist is worse than no control:
-                it is the sentence a reviewer relies on when deciding whether
-                this screen is safe to show somebody. Moving masking to the
-                server is a blocker on any external showing, not a nice-to-have. */}
-            Names are masked in this view. <strong className="text-ink-secondary">The masking is applied
-            in the browser, so treat the underlying values as present in the page</strong> — the
-            role-gated, audit-logged reveal described in the spec is not built yet and is required before
-            this screen is shown outside Oolio. The buttons here do not export, download, copy or send.
-          </p>
-          {pages > 1 && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button" disabled={safePage === 0} onClick={() => setView({ page: safePage })}
-                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
-              >
-                ←
-              </button>
-              <span className="tnum text-[12px] text-ink-secondary">{safePage + 1} of {pages}</span>
-              <button
-                type="button" disabled={safePage >= pages - 1} onClick={() => setView({ page: safePage + 2 })}
-                className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
-              >
-                →
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Pagination only. The page carries no prose: the working set and the
+            classifiable total are stated in the card subtitle, and every
+            population figure lives on Overview and Behaviour. */}
+        {pages > 1 && (
+          <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">
+            <button
+              type="button" disabled={safePage === 0} onClick={() => setView({ page: safePage })}
+              className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
+            >
+              ←
+            </button>
+            <span className="tnum text-[12px] text-ink-secondary">{safePage + 1} of {pages}</span>
+            <button
+              type="button" disabled={safePage >= pages - 1} onClick={() => setView({ page: safePage + 2 })}
+              className="rounded-lg border border-line px-2.5 py-1.5 text-[13px] font-medium hover:bg-surface-hover disabled:opacity-40"
+            >
+              →
+            </button>
+          </div>
+        )}
       </Card>
 
       {open && (
