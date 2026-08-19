@@ -3,6 +3,7 @@ import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { Card, EmptyState, Pill } from "@/components/ui/Primitives";
 import { InfoButton } from "@/components/ui/InfoButton";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
+import { Standfirst } from "@/components/shell/Standfirst";
 import { SegmentsExplainer } from "@/components/ui/SegmentsExplainer";
 import { TIER_LABEL } from "@/lib/lexicon";
 import { IconArrow } from "@/components/shell/Icons";
@@ -10,7 +11,7 @@ import { SegmentBasket, SegmentTiming } from "@/components/charts/SegmentBehavio
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { previousReadable } from "@/lib/periods";
 import {
-  cohortWindow, count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
+  count, coverageState, money, pct, rollUpSegments, tradingIdentity, windowShort,
   DAYPART_TRADE_FLOOR,
 } from "@/lib/metrics";
 
@@ -39,7 +40,7 @@ export default async function BehaviourPage({
   const snap = await getSnapshot(slug, period);
   const periods = await getPeriods(slug);
   const current = periods.periods.find((p) => p.id === period)!;
-  const { org, dayparts, venueCross, network, cohorts, segments, segmentBehaviour } = snap;
+  const { org, dayparts, venueCross, network, segments, segmentBehaviour } = snap;
   // Enrolled people only, same roll-up and therefore the same numbers as the
   // segment grid on Overview. Two screens computing this twice is how they come
   // to disagree, so they call one function.
@@ -103,7 +104,6 @@ export default async function BehaviourPage({
    * months; the observation window runs to the close of the last intake's
    * month and is a month longer. Both were being printed as the same number.
    */
-  const cw = cohorts ? cohortWindow(cohorts) : null;
 
   const cv = network.crossVenue;
   const bands = [1, 2, 3, 4].map((b) => {
@@ -126,88 +126,41 @@ export default async function BehaviourPage({
       />
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
-          {/* ── §6.1 trading identity ────────────────────────────────────── */}
-          <Card
-            title="What kind of business this trades as"
-            subtitle={`Derived from ${count(totalOrders)} orders, ${win}. Not declared — read off the density distribution.`}
-            explain={
-              <ExplainDrawer
-                label="How the trading shape is derived"
-                title="What kind of business this trades as"
-                showing={
-                  <>
-                    <p>
-                      One statement rather than a label. It names which parts of the day carry the trade and
-                      how much, and whether the week is flat or weekend-shaped.
-                    </p>
-                    <p>
-                      It is a fact about the density distribution, not a classification —{" "}
-                      <strong>nothing here is a type this business has been assigned.</strong>
-                    </p>
-                  </>
-                }
-                made={
-                  <>
-                    {/* BH-3: the two grey lines under the grid move in here.
-                        They are provenance — why there is no archetype label —
-                        which is the definition of something that explains how a
-                        statement was built rather than how to read it. */}
-                    <p>
-                      <strong>Stated as a fact rather than as an archetype.</strong> A single label for{" "}
-                      {org.venues.length} venues across the states this estate trades in would describe none
-                      of them well, and this report&apos;s own outlier detection says they are not alike. It
-                      is useless at four mixed venues, useless at {org.venues.length}, and tautological at
-                      one.
-                    </p>
-                    <p>
-                      A confidence score used to sit beside it and was removed: it was undefined and
-                      self-contradicting, and no denominator on the page yielded the number it printed.
-                    </p>
-                    <p>
-                      <strong>Weekend share is a null result and is reported as one.</strong>{" "}
-                      {pct(dayparts.weekendBaseline, 1)} against a {pct(2 / 7, 1)} calendar baseline is
-                      no difference. It is stated in the sentence rather than given a card of its own,
-                      because presenting no-difference at headline size teaches an owner to distrust the
-                      figures beside it.
-                    </p>
-                    <p>
-                      Density is share of orders, so a business that simply got busier everywhere does not
-                      change shape here.
-                    </p>
-                  </>
-                }
-              />
+          {/* ── the question, and the answer in two sentences ────────────────
+              This was a framed panel titled "What kind of business this trades
+              as", which is a heading rather than a question — and it left
+              Behaviour the only report of the three opening on a component
+              instead of on the thing it is for. Overview and Retention both
+              state their question in plain text above the figures; a reader
+              moving between the three met a different opening on each and had
+              to work out the shape of every page separately.
+
+              The fact it carried has not changed a word. It has stopped being
+              the body of a card and become the answer to a question, at the
+              same weight the other two pages use. Its working moved onto the
+              daypart table below, which is the object it is derived from and
+              where a reader asking "how do you know that" is already looking. */}
+          <Standfirst
+            question="When do your guests come, where, and how does that differ between them?"
+            body={
+              <>
+                <strong className="text-ink">
+                  {identity.primary.map((d) => d.label).join(" and ")} together carry{" "}
+                  {pct(
+                    identity.primary.reduce((a, d) => a + d.orders, 0) / Math.max(totalOrders, 1),
+                    0,
+                  )}{" "}
+                  of all orders
+                </strong>{" "}
+                — {count(totalOrders)} orders across the {identity.tradingPeriods} of{" "}
+                {dayparts.periods.length} periods in the day this business actually trades in, {win}.
+                Weekend trade is {pct(dayparts.weekendBaseline, 1)} against a {pct(2 / 7, 1)} calendar
+                baseline, so the week is flat — a weekday-shaped business, not a weekend-shaped one. Below
+                that, the same day cut by <em>who</em> the guest is, which is the part only this report can
+                answer.
+              </>
             }
-          >
-            {/* ── Three cards became one statement ────────────────────────────
-                **The archetype label has gone.** "High-Throughput Breakfast" was
-                an unprovenanced framework name cited as authority on the face of
-                a customer report, computed at organisation level across venues
-                in three states that this build's own outlier detection says are
-                not alike. The fact underneath it is true and worth stating, so
-                the fact stays and the label goes. The reasoning moved into the
-                drawer with BH-3; only the fact is on the face. */}
-            <p className="max-w-[95ch] text-[15px] leading-relaxed text-ink">
-              <strong>
-                {identity.primary.map((d) => d.label).join(" and ")} together carry{" "}
-                {pct(
-                  identity.primary.reduce((a, d) => a + d.orders, 0) / Math.max(totalOrders, 1),
-                  0,
-                )}{" "}
-                of all orders
-              </strong>{" "}
-              — {count(totalOrders)} orders across the{" "}
-              {/* C-6. This read "5 periods this business actually trades in" above
-                  a table that discloses 8, and a reader counting rows found a
-                  contradiction that was really a definition. Both figures are now
-                  in the sentence, so the claim and the table agree by
-                  construction. */}
-              {identity.tradingPeriods} of {dayparts.periods.length} periods in the day this business
-              actually trades in, {win}. Weekend trade is {pct(dayparts.weekendBaseline, 1)} against a{" "}
-              {pct(2 / 7, 1)} calendar baseline, so the week is flat: this is a weekday-shaped business,
-              not a weekend-shaped one.
-            </p>
-          </Card>
+          />
 
           {/* ── §6.2 "The trading week" has been removed ──────────────────────
               It was a 7×8 grid of all trade by day of week and daypart, with a
@@ -294,6 +247,25 @@ export default async function BehaviourPage({
                       placed by an enrolled person. That is a larger figure than the bridged subset the
                       recognition tile on Overview is measured against, and the two are reconciled in that
                       tile&apos;s own drawer.
+                    </p>
+                    {/* Moved here with the trading-identity statement, which now
+                        opens the page. This is the object that statement is read
+                        off, so "how do you know that" is answered where the
+                        reader is already looking rather than under a heading two
+                        panels up. */}
+                    <p>
+                      <strong>The opening statement is read off this table.</strong> It is a fact about
+                      the density distribution and not a classification — nothing on this page is a type
+                      this business has been assigned. An archetype label used to sit there and was
+                      removed: a single name for {org.venues.length} venues would describe none of them
+                      well, and this report&rsquo;s own outlier detection says they are not alike.
+                    </p>
+                    <p>
+                      <strong>Weekend share is a null result and is reported as one.</strong>{" "}
+                      {pct(dayparts.weekendBaseline, 1)} against a {pct(2 / 7, 1)} calendar baseline is no
+                      difference. It sits inside the sentence rather than getting a figure of its own,
+                      because presenting no-difference at headline size teaches an owner to distrust the
+                      numbers beside it.
                     </p>
                   </>
                 }
@@ -866,34 +838,19 @@ export default async function BehaviourPage({
           </Card>
 
           {/* ── §6.5 the member cohort lens moved out ──────────────────────
-              Retention lived here, walled off behind a dashed border, after
-              eleven other panels. The wall was right: the figures above identify
-              people by payment card and the ones below identified them by
-              loyalty scan, and no figure from one may be combined with a figure
-              from the other.
+              Retention lived here behind a dashed wall, and when it moved to its
+              own report this page kept a card pointing at it and restating the
+              clock change.
 
-              But a section that has to be fenced off from the page it sits on is
-              a section that wants its own page, and retention was the most-asked
-              question in the build arriving last and quietest. It is now
-              **Retention and Churn**, between this page and Guests, where the
-              clock change is the premise rather than an interruption. */}
-          <Card title="Retention and churn moved to their own report">
-            <p className="max-w-[95ch] text-[14px] leading-relaxed text-ink-secondary">
-              Whether members keep coming back — and whether that is improving — is answered on{" "}
-              <Link
-                href={`/${org.slug}/${period}/retention`}
-                className="font-medium text-accent underline underline-offset-2"
-              >
-                Retention and Churn
-              </Link>
-              .{" "}
-              <strong className="text-ink">It runs on a different clock to this page.</strong> Everything
-              here identifies people by payment card over {snap.org.window.days} days and covers{" "}
-              {pct(cov.identifiedRevenueShare, 1)} of revenue; retention is measured on the loyalty scan
-              over {cw ? count(cw.observationDays) : "—"} days, because that is the only window in this
-              build long enough to watch somebody stop coming.
-            </p>
-          </Card>
+              That card has gone too. The signpost was doing a job the sidebar
+              already does — Retention and Churn sits directly below this page in
+              the nav — and the clock warning it carried was a property of the
+              *old* layout, where member-tier figures sat under card-tier ones on
+              one page and could be added together by mistake. **There is no
+              second clock on this page any more.** Everything here identifies
+              people by payment card over the same window, and the page that runs
+              on the loyalty scan says so in its own opening sentence, where the
+              reader who needs it actually is. */}
         </div>
       </Page>
     </>

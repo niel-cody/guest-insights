@@ -276,11 +276,18 @@ async function main() {
     }
 
     if (name.endsWith("/behaviour")) {
-      // Retention moved to its own report, and the hand-off has to keep saying
-      // why the two pages cannot be added together.
-      check("behaviour still declares the clock change on the way out",
-        html.includes("runs on a different clock"),
-        "the hand-off no longer says the population changed");
+      // This asserted that Behaviour carried a clock-change warning. It no
+      // longer should: the warning existed because member-tier figures used to
+      // sit under card-tier ones on this page and could be added together by
+      // mistake, and the member content has left. Asserting it now would be
+      // pinning a caveat to a page with nothing to caveat.
+      //
+      // What replaced it is the assertion that the page really is single-tier —
+      // if member-window content ever comes back here, this fails and the
+      // warning has to come back with it.
+      check("behaviour draws one identity and does not need a clock warning",
+        !html.includes("loyalty scan over") && !html.includes("monthly intakes"),
+        "member-window content is back on this page without its clock warning");
     }
 
     if (name.endsWith("/retention")) {
@@ -297,6 +304,12 @@ async function main() {
       check("the trend states it is coverage-matched",
         html.replace(/<[^>]+>/g, " ").includes("coverage") ,
         "the comparison no longer says what makes it fair");
+      // The clock statement moved here with the content it describes. This page
+      // is the one that genuinely runs two identities against each other, so it
+      // is the one that has to name which it is measured on.
+      check("retention names the identity it is measured on",
+        html.includes("loyalty scan"),
+        "the page no longer says which identity the retention figures come from");
       // The card tier's answer is a date, not an empty state.
       check("the card tier says why it cannot answer",
         html.includes("cannot answer this yet"),

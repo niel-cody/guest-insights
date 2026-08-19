@@ -2,12 +2,58 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.9.2`** — the version and commit render in the app header on every
+**Current: `v0.9.3`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.9.3 — three reports, one opening
+
+Behaviour was the last of the three to open on a framed component. Overview and
+Retention state their question in plain text above the figures; Behaviour opened
+on a `Card` titled *"What kind of business this trades as"* — a heading rather
+than a question — so a reader moving between the three met a different shape on
+each and had to work out every page separately.
+
+All three now open the same way, with the same element at the same weight:
+
+| | Question |
+|---|---|
+| **Overview** | How much of your trade can you put a name to — and are members worth more? |
+| **Behaviour** | When do your guests come, where, and how does that differ between them? |
+| **Retention** | Are the people who came back still coming back — and is that getting better or worse? |
+
+**The trading-identity fact has not changed a word.** It has stopped being the
+body of a card and become the answer to a question. Its working — why there is no
+archetype label, why weekend share is reported as a null result — moved onto the
+daypart table, which is the object it is read off and where a reader asking "how
+do you know that" is already looking.
+
+### The retention hand-off card has gone
+
+When retention moved out, Behaviour kept a card pointing at it and restating the
+clock change. Both halves have outlived their reason. The signpost duplicates the
+sidebar, where Retention and Churn sits directly below Behaviour; and the clock
+warning was a property of the **old** layout, where member-tier figures sat under
+card-tier ones on one page and could be added together by mistake.
+
+**There is no second clock on Behaviour any more.** Everything on it identifies
+people by payment card over one window.
+
+### The assertion that guarded it moved rather than being deleted
+
+`behaviour still declares the clock change` would now be pinning a caveat to a
+page with nothing to caveat, so it was replaced by the property that actually
+matters: **Behaviour draws one identity.** If member-window content ever returns
+to that page the check fails, and the warning has to return with it.
+
+The statement itself is asserted on Retention, which is the page that genuinely
+runs two identities against each other and therefore the one that has to name
+which it is measured on.
 
 ---
 
