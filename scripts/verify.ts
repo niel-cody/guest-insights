@@ -17,7 +17,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runChecks } from "../src/lib/checks";
-import type { AnalysisWindow, GuestRows, Guests, Snapshot } from "../src/lib/types";
+import { decompose, priceMix } from "../src/lib/metrics";
+import type {
+  AnalysisWindow, DecompositionRow, GuestRows, Guests, ItemPrices, Snapshot,
+} from "../src/lib/types";
 import { unpackGuests } from "../src/lib/guest-columns";
 import { windowVerdict } from "../src/lib/window";
 import { claimLevel, gradeMonth, longestRun } from "./grade";
@@ -43,7 +46,8 @@ async function load(slug: string, period: string): Promise<Fixture> {
 
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, segmentBehaviour, team, cohorts,
+    dayGrid, venueCross, scatter, network, venueMonthly, guests, items, itemPrices,
+    segmentBehaviour, team, cohorts,
   ] = await Promise.all([
     read<Snapshot["org"]>("org"), read<Snapshot["coverage"]>("coverage"),
     read<Snapshot["lifecycle"]>("lifecycle"), read<Snapshot["decomposition"]>("decomposition"),
@@ -56,6 +60,10 @@ async function load(slug: string, period: string): Promise<Fixture> {
     read<Snapshot["venueMonthly"]>("venueMonthly"),
     read<Guests>("guests"),
     read<Snapshot["items"]>("items"),
+    // Null on a snapshot extracted before the per-product price query existed,
+    // which is every snapshot on disk until the next extract runs. `priceMix`
+    // is unit-proved below rather than fixture-proved for exactly that reason.
+    read<Snapshot["itemPrices"]>("itemPrices").catch(() => null),
     read<Snapshot["segmentBehaviour"]>("segmentBehaviour").catch(() => null),
     read<Snapshot["team"]>("team").catch(() => null),
     // Org grain, not period grain — the member tier is not a card period. §4.3.
@@ -64,7 +72,8 @@ async function load(slug: string, period: string): Promise<Fixture> {
   return {
     snap: {
       org, coverage, lifecycle, decomposition, segments, members, dayparts,
-      dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
+      dayGrid, venueCross, scatter, network, venueMonthly, items, itemPrices, segmentBehaviour,
+      cohorts, team,
     },
     guests: { sampled: guests.sampled, population: guests.population, rows: unpackGuests(guests) },
   };
@@ -462,8 +471,212 @@ function verifyScatterAgrees(snap: Snapshot): string[] {
   return errs;
 }
 
+/**
+ * The price/mix split, and every one of its refusals, exercised.
+ *
+ * ── Why this is a unit proof and not a corrupted fixture ───────────────────
+ *
+ * The other checks are proved by corrupting real data. This one cannot be: the
+ * file it reads does not exist on any snapshot yet — the query that produces it
+ * shipped with the arithmetic — so there is nothing to corrupt. Rather than
+ * ship the split unexercised, the arithmetic is driven here against constructed
+ * months where the right answer is known by hand.
+ *
+ * **A refusal that has never been observed refusing is not a refusal**, which is
+ * the rule the whole check register runs on, so each of the five is made to fire
+ * as well as the arithmetic being made to be right.
+ */
+function verifyPriceMix(): string[] {
+  const errs: string[] = [];
+  const M0 = "2026-05-01";
+  const M1 = "2026-07-01";
+
+  type Row = { month: string; product: number; lines: number; revenue: number };
+  const prices = (rows: Row[], share = 1): ItemPrices => ({
+    window: { start: "2026-05-01", end: "2026-07-31", months: 3, days: 92 },
+    rows,
+    coverage: [M0, M1].map((month) => ({
+      month,
+      revenueShare: share,
+      lines: rows.filter((r) => r.month === month).reduce((s, r) => s + r.lines, 0),
+      revenue: rows.filter((r) => r.month === month).reduce((s, r) => s + r.revenue, 0),
+      products: rows.filter((r) => r.month === month).length,
+    })),
+  });
+  const items = {
+    products: [
+      { name: "Cappuccino", categoryId: null, category: null, type: null, lines: 0, revenue: 0 },
+      { name: "Muffin", categoryId: null, category: null, type: null, lines: 0, revenue: 0 },
+      { name: "Cake", categoryId: null, category: null, type: null, lines: 0, revenue: 0 },
+    ],
+  } as unknown as Snapshot["items"];
+  const row = (month: string, pricePerItem: number): DecompositionRow => ({
+    month, guests: 100, visits: 200, revenue: 1000, items: 100,
+    visitsPerGuest: 2, spendPerVisit: 5, itemsPerVisit: 0.5, pricePerItem,
+  });
+
+  // ── 1. It refuses without the file at all ────────────────────────────────
+  const none = priceMix(null, items, row(M0, 5), row(M1, 6));
+  if (none.ok) errs.push("priceMix published with no itemPrices file");
+
+  // ── 2. Pure price: same basket, dearer coffee ────────────────────────────
+  //
+  // 100 coffees at $5.00 become 100 coffees at $6.00, and 100 muffins hold at
+  // $4.00 throughout. The average moves 4.50 → 5.00: **all price, no mix.**
+  const pureP = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M0, product: 1, lines: 100, revenue: 400 },
+      { month: M1, product: 0, lines: 100, revenue: 600 },
+      { month: M1, product: 1, lines: 100, revenue: 400 },
+    ]),
+    items, row(M0, 4.5), row(M1, 5),
+  );
+  if (!pureP.ok) errs.push(`pure price move refused: ${pureP.reason}`);
+  else {
+    if (Math.abs(pureP.priceEffect - 0.5) > 1e-9) errs.push(`pure price: price effect ${pureP.priceEffect}, expected 0.50`);
+    if (Math.abs(pureP.mixEffect) > 1e-9) errs.push(`pure price: mix effect ${pureP.mixEffect}, expected 0`);
+    if (pureP.movers[0]?.name !== "Cappuccino") errs.push("pure price: the coffee is not the top mover");
+  }
+
+  // ── 3. Pure mix: nothing changed price, they bought dearer things ────────
+  //
+  // The same $5 coffee and $4 muffin, and the split of lines moves from 50/50 to
+  // 75/25. The average moves 4.50 → 4.75: **all mix, no price.** This is the
+  // case OV-7 said the old bar could not tell apart from the one above.
+  const pureM = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M0, product: 1, lines: 100, revenue: 400 },
+      { month: M1, product: 0, lines: 150, revenue: 750 },
+      { month: M1, product: 1, lines: 50, revenue: 200 },
+    ]),
+    items, row(M0, 4.5), row(M1, 4.75),
+  );
+  if (!pureM.ok) errs.push(`pure mix move refused: ${pureM.reason}`);
+  else {
+    if (Math.abs(pureM.mixEffect - 0.25) > 1e-9) errs.push(`pure mix: mix effect ${pureM.mixEffect}, expected 0.25`);
+    if (Math.abs(pureM.priceEffect) > 1e-9) errs.push(`pure mix: price effect ${pureM.priceEffect}, expected 0`);
+    if (Math.abs(pureM.priceShare) > 1e-9) errs.push(`pure mix: price share ${pureM.priceShare}, expected 0`);
+  }
+
+  // ── 4. Both at once, and the identity that makes it a decomposition ──────
+  const both = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M0, product: 1, lines: 100, revenue: 400 },
+      { month: M1, product: 0, lines: 160, revenue: 1040 },
+      { month: M1, product: 1, lines: 40, revenue: 170 },
+    ]),
+    items, row(M0, 4.5), row(M1, 6.05),
+  );
+  if (!both.ok) errs.push(`mixed move refused: ${both.reason}`);
+  else {
+    const sum = both.priceEffect + both.mixEffect;
+    const move = both.toAvg - both.fromAvg;
+    if (Math.abs(sum - move) > 1e-9) {
+      errs.push(`the two effects sum to ${sum}, the average moved ${move} — Bennet must be exact`);
+    }
+  }
+
+  // ── 5. A launch is a mix change, never a price change ────────────────────
+  //
+  // Cake appears in the second month at $9 and did not exist in the first. It has
+  // no price to compare, so the whole of its arrival must land in mix.
+  const launch = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M1, product: 0, lines: 100, revenue: 500 },
+      { month: M1, product: 2, lines: 20, revenue: 180 },
+    ]),
+    items, row(M0, 5), row(M1, 5.67),
+  );
+  if (!launch.ok) errs.push(`a launch refused: ${launch.reason}`);
+  else if (Math.abs(launch.priceEffect) > 1e-9) {
+    errs.push(`a new product produced a price effect of ${launch.priceEffect} — it must be mix`);
+  }
+
+  // ── 6. Each refusal, made to fire ────────────────────────────────────────
+  const thin = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M1, product: 0, lines: 100, revenue: 600 },
+    ], 0.5),
+    items, row(M0, 5), row(M1, 6),
+  );
+  if (thin.ok) errs.push("published on 50% revenue coverage");
+
+  const churned = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M1, product: 1, lines: 100, revenue: 600 },
+    ]),
+    items, row(M0, 5), row(M1, 6),
+  );
+  if (churned.ok) errs.push("published with no product sold in both months");
+
+  const disagree = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M1, product: 0, lines: 100, revenue: 600 },
+    ]),
+    // Product lines say prices rose; the decomposition says average item price fell.
+    items, row(M0, 6), row(M1, 5),
+  );
+  if (disagree.ok) errs.push("published while the two universes disagreed on direction");
+
+  // Prices up hard, mix down hard, and the average barely moves. Projecting that
+  // onto the bar would draw two large cancelling columns.
+  const cancelling = priceMix(
+    prices([
+      { month: M0, product: 0, lines: 100, revenue: 500 },
+      { month: M0, product: 1, lines: 100, revenue: 1500 },
+      { month: M1, product: 0, lines: 180, revenue: 1260 },
+      { month: M1, product: 1, lines: 20, revenue: 420 },
+    ]),
+    items, row(M0, 10), row(M1, 10.01),
+  );
+  if (cancelling.ok) {
+    errs.push(`published a rescale of ${cancelling.priceShare.toFixed(2)}× onto the bar`);
+  }
+
+  // ── 7. And the split divides the Shapley bar without moving the total ────
+  const from = { ...row(M0, 4.5), guests: 100, visitsPerGuest: 2, itemsPerVisit: 1, revenue: 900 };
+  const to = { ...row(M1, 5), guests: 110, visitsPerGuest: 2.1, itemsPerVisit: 1.05, revenue: 1212.75 };
+  const four = decompose(from, to);
+  const five = decompose(from, to, pureP);
+  if (Math.abs(four.revenueChange - five.revenueChange) > 1e-9) {
+    errs.push("splitting the price bar changed the modelled change");
+  }
+  if (five.terms.length !== four.terms.length + 1) {
+    errs.push(`split produced ${five.terms.length} terms, expected ${four.terms.length + 1}`);
+  }
+  const splitSum = five.terms.filter((t) => t.key === "priceLevel" || t.key === "itemMix")
+    .reduce((s, t) => s + t.value, 0);
+  const whole = four.terms.find((t) => t.key === "pricePerItem")!.value;
+  if (Math.abs(splitSum - whole) > 1e-9) {
+    errs.push(`the two halves sum to ${splitSum}, the bar they replace is ${whole}`);
+  }
+  // The reclassification is the point: a mix move is the guest's behaviour.
+  if (five.terms.find((t) => t.key === "itemMix")?.kind !== "real") {
+    errs.push("the mix half is not counted as real trade");
+  }
+
+  return errs;
+}
+
 async function main() {
   let failures = 0;
+
+  console.log("\nthe price / mix split, unit-tested against months built by hand");
+  const priceErrors = verifyPriceMix();
+  if (priceErrors.length) {
+    failures += priceErrors.length;
+    for (const e of priceErrors) console.log(`  ✗ ${e}`);
+  } else {
+    console.log("  ✓ separates a price rise from a trade-up exactly, files a launch as mix, and");
+    console.log("    refuses on thin coverage, a churned menu, a direction clash and a cancelling split");
+  }
 
   console.log("\nthe render rule (§4.3), unit-tested at both tiers");
   const ruleErrors = verifyRenderRule();

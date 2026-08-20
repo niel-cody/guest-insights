@@ -957,6 +957,64 @@ ORDER BY LINES DESC`;
 }
 
 /**
+ * Per-product, per-month lines and revenue — the price history the report has
+ * been refusing on since OV-7.
+ *
+ * ── The question this exists to answer ─────────────────────────────────────
+ *
+ * "Average item price" is revenue over items, and it moves identically whether
+ * a cappuccino got dearer or a guest traded up from a medium to a large. The
+ * report has always said it cannot separate the two, correctly, because nothing
+ * in the extract carried a **price per product per month**. This carries it.
+ *
+ * With one row per product per month, a like-for-like price effect and a mix
+ * effect are both computable: hold the mix and move the prices, then hold the
+ * prices and move the mix. See `priceMix` in `src/lib/metrics.ts`, which does
+ * the arithmetic and states when it will not.
+ *
+ * ── Three decisions that make it comparable to the decomposition ───────────
+ *
+ * **1. `product_line`, not `paid_line`.** A modifier's price is not a product's
+ * price, and "1 Sugar" moving from free to $0.20 is not a coffee getting dearer.
+ * The definition is the shared one at the top of this section, so this cannot
+ * drift from what the basket and the favourites list count.
+ *
+ * **2. The same people as the decomposition** — `eligible`, joined through
+ * `person_orders`. The revenue decomposition runs on identified guests, and a
+ * price split computed over *all* trade would be describing a different
+ * population from the bars it is splitting.
+ *
+ * **3. `PRODUCT_ID`, never the name.** Coffee Guru renames products the way it
+ * renames categories, and a rename mid-window would otherwise read as one
+ * product being delisted and a second, identically-priced one appearing — which
+ * lands in the mix effect as a real shift. The name is resolved once by
+ * `productDictQuery` and applied to all history, exactly as venues and
+ * categories are.
+ *
+ * What it still cannot say is whether a *displayed* price changed: this is
+ * revenue over lines, so a product sold at a discount half the month reads as
+ * cheaper. That is named in the surface rather than fixed here — the discount is
+ * on the order, not the line.
+ */
+export function itemPriceMonthlyQuery({ orgId, w, pairs, cardMonths }: Args) {
+  return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
+${itemsCte(orgId, w)},
+${PEOPLE},
+mine AS (
+  SELECT DISTINCT po.ORDER_ID, DATE_TRUNC('month', po.D)::DATE AS MONTH
+  FROM person_orders po JOIN eligible e ON e.PERSON_ID = po.PERSON_ID
+)
+SELECT m.MONTH, pl.PRODUCT_ID,
+  COUNT(*) AS LINES,
+  SUM(pl.TOTAL_PRICE) AS REVENUE
+FROM product_line pl
+JOIN mine m ON m.ORDER_ID = pl.ORDER_ID
+WHERE pl.PRODUCT_ID IS NOT NULL
+GROUP BY 1, 2
+ORDER BY 1, 2`;
+}
+
+/**
  * The quantity trap, measured rather than asserted.
  *
  * The extract publishes what it found so the check on the other side has

@@ -561,13 +561,15 @@ async function extractPeriod(
   // Items last: they are the largest join in the extract, and everything above
   // is independent of them, so a failure here does not cost the rest of the run.
   console.log("  items, categories, baskets…");
-  const [catMix, productDict, guestItems, itemIntegrity, visitHistory] = await Promise.all([
-    query<Row>(Q.categoryMixQuery(args)),
-    query<Row>(Q.productDictQuery(args)),
-    query<Row>(Q.guestItemsQuery(args)),
-    query<Row>(Q.itemIntegrityQuery(args)),
-    query<Row>(Q.visitHistoryQuery(args, VISIT_HISTORY_CAP)),
-  ]);
+  const [catMix, productDict, guestItems, itemIntegrity, visitHistory, itemPriceMonths] =
+    await Promise.all([
+      query<Row>(Q.categoryMixQuery(args)),
+      query<Row>(Q.productDictQuery(args)),
+      query<Row>(Q.guestItemsQuery(args)),
+      query<Row>(Q.itemIntegrityQuery(args)),
+      query<Row>(Q.visitHistoryQuery(args, VISIT_HISTORY_CAP)),
+      query<Row>(Q.itemPriceMonthlyQuery(args)),
+    ]);
 
   // ── shape ─────────────────────────────────────────────────────────────────
   const venueList = venues
@@ -1263,6 +1265,47 @@ async function extractPeriod(
       paidRevenue: r2(num(integrity.PAID_REVENUE)),
       orderRevenue: r2(totals.revenue),
     },
+  });
+
+  // ── per-product monthly prices ────────────────────────────────────────────
+  //
+  // The file that lifts OV-7's refusal. Products are carried as indexes into the
+  // dictionary written above, so this cannot disagree with `items.json` about
+  // what a product is, and a product the dictionary never saw is dropped rather
+  // than given a phantom index.
+  //
+  // Coverage is published beside the rows because it is the reason the surface
+  // may decline: product lines are a narrower universe than the order-header
+  // item count the decomposition divides by, so the two never match exactly, and
+  // a split computed on 70% of the revenue is not a split of the whole.
+  const decompRevenueByMonth = new Map(
+    decomposition.map((r) => [day(r.MONTH)!, num(r.REVENUE)]),
+  );
+  const priceRows = itemPriceMonths
+    .map((r) => ({
+      month: day(r.MONTH)!,
+      product: productIndex.get(String(r.PRODUCT_ID)) ?? -1,
+      lines: num(r.LINES),
+      revenue: r2(num(r.REVENUE)),
+    }))
+    .filter((r) => r.product >= 0 && r.month);
+
+  const priceMonths = [...new Set(priceRows.map((r) => r.month))].sort();
+  write(org.slug, period, "itemPrices", {
+    window: { ...w, days: windowDays },
+    rows: priceRows,
+    coverage: priceMonths.map((m) => {
+      const rows = priceRows.filter((r) => r.month === m);
+      const revenue = r2(rows.reduce((a, r) => a + r.revenue, 0));
+      const decomp = decompRevenueByMonth.get(m) ?? 0;
+      return {
+        month: m,
+        revenueShare: decomp ? r4(revenue / decomp) : 0,
+        lines: rows.reduce((a, r) => a + r.lines, 0),
+        revenue,
+        products: rows.length,
+      };
+    }),
   });
 
   // Per-guest item behaviour, attached to the guests file so the drawer needs

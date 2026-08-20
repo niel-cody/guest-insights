@@ -2,12 +2,124 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.9.3`** — the version and commit render in the app header on every
+**Current: `v0.9.4`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.9.4 — the change chart starts and ends at a revenue figure, and the price question gets an answer
+
+*"Where the change came from"* plotted the four factors as contributions on an
+axis of change: the first column was **guests, +$126** and the last was
+**modelled change, +$8,669**. Both correct, and neither is a sentence an operator
+has ever said. What they say is *"we did $694k in May and $703k in July — what
+happened?"*
+
+The chart now answers that question in its own shape. **The first column is the
+first month's recorded revenue and the last is the last month's**, with every
+factor as a step between them.
+
+### The objection the old chart carried was wrong
+
+Its note argued the endpoints could not be drawn — *"a waterfall between $694k
+and $703k would draw two enormous columns with four hairlines between them."*
+That is true only on an axis anchored at zero, and a bridge chart is never drawn
+on one. Scaled to the path it plots, **the steps get exactly the same vertical
+resolution they had before**, because it is the same path offset by $694k.
+
+The endpoint columns run off the bottom, so the truncation is marked three times
+rather than assumed: a break glyph at the base of each, a fade into it, and a
+sentence saying **their heights cannot be compared**.
+
+### Rounding is a bar now, not only a paragraph
+
+C-2 put the modelled-versus-recorded gap into prose: the four factors are stored
+rounded to four decimals, so they sum to $8,669.48 where recorded revenue moved
+$8,651.47. That $18.01 is now its own hairline column and its own table row, and
+**the bridge closes on recorded July revenue** — a reader can put a ruler on the
+chart and land on the figure printed at the top of the page. An exactness claim
+the reader can check earns the trust one they cannot check spends.
+
+### Two colour channels instead of one overloaded one
+
+Hue was carrying direction *and* kind: a red "fewer visits" bar against an orange
+"average item price" bar. Those two fills sit at **ΔE 7.1 in normal vision** —
+below the floor at which two colours can be told apart at all, before
+colour-vision deficiency is considered.
+
+They are now separate channels. **Hue is direction** — green added revenue, red
+took it away, ΔE 31 apart — and **fill is kind**: solid for real trade, outlined
+for average item price. The real-versus-price split bar beneath the chart uses
+the same two channels rather than a third scheme of its own, and now shows what
+neither version did: at Coffee Guru the two halves point in **opposite**
+directions.
+
+### What has not changed about the chart
+
+The model. Same factors, same symmetric-Shapley arithmetic, same figures to the
+cent. The axis moved; the decomposition did not.
+
+### The price question — the other half of this release
+
+OV-7 renamed *"price per item"* to *"average item price"* because the figure
+moves identically whether a cappuccino got dearer or a guest traded up from a
+medium to a large, and named separating the two as the next step. **This is that
+step**, in two halves that land at different times.
+
+### The extract now carries a price per product per month
+
+`itemPriceMonthlyQuery` returns one row per product per month: lines and
+revenue, on **product lines** — a paid modifier is not a product's price — and
+over the **same identified guests** the revenue decomposition runs on, so a split
+of a bar is measured on the population that drew the bar. Products key on
+`PRODUCT_ID`, never the name, because a rename mid-window would otherwise read as
+one product delisting and a second identically-priced one launching, and land in
+the mix effect as a real shift.
+
+### `priceMix` splits the bar, exactly, and says when it will not
+
+Average product-line price is `A = Σ sₚ·uₚ`. The Bennet indicator separates a
+move in it into a **price** half — the same basket, repriced — and a **mix**
+half — the same prices, a different basket — and the two sum to `A₁ − A₀` with no
+residual. A product sold in only one month has no price to compare, so its whole
+movement is mix: **a menu launch is not a price rise.**
+
+The Shapley bar is then *divided* in that ratio rather than recomputed, so the
+modelled change, the bridge and the reconciliation are all untouched by whether
+the split published.
+
+**The reclassification is the point.** A like-for-like price rise is the
+merchant's own decision and is price. A guest choosing the large flat white is
+that guest's decision and is **real trade** — where the whole bar used to be
+filed as price, so the front-page *"most of it is price"* sentence was crediting
+guests' trading up to the price list.
+
+### Five named refusals, each one exercised
+
+The split declines, in the place the answer would have been and with the reason
+attached, when there is no file, when product lines cover too little of the
+month's revenue, when too few lines sit on products sold in both months, when the
+two universes disagree about which way price moved, or when the two effects
+largely cancel and projecting them onto the bar would draw two big columns that
+add to a small one. The floors are named constants in `PRICE_MIX` and are
+**provisional** — the query shipped with the arithmetic, so the first extract is
+also the first calibration.
+
+`npm run verify` drives all five until they fire, and drives the arithmetic
+against months built by hand where the right answer is known: a pure price move,
+a pure trade-up, both at once, and a launch. It is a **unit** proof rather than a
+corrupted fixture because there is no snapshot to corrupt yet.
+
+### Until an extract runs, nothing changes on screen
+
+Every snapshot on disk predates the query, so `itemPrices` is null, the split
+refuses with *"this snapshot was extracted before per-product prices were
+collected"*, and the four-bar decomposition stands exactly as it did. Run
+`npm run extract` and the fifth and sixth columns appear on their own.
 
 ---
 

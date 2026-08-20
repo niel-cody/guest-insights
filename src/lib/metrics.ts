@@ -11,7 +11,7 @@
 import type {
   Cohorts,
   AnalysisWindow, Coverage, DaypartRow, Dayparts, DecompositionRow, Guest, LifecycleRow,
-  Items, Members, Network, Org, SegmentRow, Segments,
+  ItemPrices, Items, Members, Network, Org, SegmentRow, Segments,
 } from "./types";
 
 // ── formatting ──────────────────────────────────────────────────────────────
@@ -696,7 +696,18 @@ export type Decomposition = {
   recordedChange: number;
   /** Recorded minus modelled. Rounding in the four stored factors. */
   reconciliation: number;
-  terms: { key: string; label: string; value: number; kind: "real" | "price"; operand: string }[];
+  /**
+   * `label` states the direction the factor moved and is what prose and the
+   * table use. `name` is the factor's plain name, for the chart's x-axis where
+   * the bar itself already shows the direction and a five-word label would not
+   * fit under a 44px column.
+   */
+  terms: { key: string; label: string; name: string; value: number; kind: "real" | "price"; operand: string }[];
+  /**
+   * The price/mix split, or its refusal, or null where it was never attempted.
+   * The surface prints the reason rather than going quiet.
+   */
+  split: PriceMix | null;
   real: number;
   price: number;
 };
@@ -718,11 +729,218 @@ export type Decomposition = {
  * the next step rather than implied to be already done.
  */
 const TERMS = [
-  { key: "guests", label: "guests", kind: "real" as const },
-  { key: "visitsPerGuest", label: "visits per guest", kind: "real" as const },
-  { key: "itemsPerVisit", label: "items per visit", kind: "real" as const },
-  { key: "pricePerItem", label: "average item price", kind: "price" as const },
+  { key: "guests", name: "Guests", label: "guests", kind: "real" as const },
+  { key: "visitsPerGuest", name: "Visits per guest", label: "visits per guest", kind: "real" as const },
+  { key: "itemsPerVisit", name: "Items per visit", label: "items per visit", kind: "real" as const },
+  { key: "pricePerItem", name: "Average item price", label: "average item price", kind: "price" as const },
 ];
+
+// ── the price / mix split ───────────────────────────────────────────────────
+
+/**
+ * Floors the split has to clear before it will publish. **Provisional.**
+ *
+ * These are stated here rather than buried at their call sites because they are
+ * the thing to argue with, and because **none of them has yet met real data** —
+ * the query that feeds this landed with the maths, so the first extract is also
+ * the first calibration. Each says what it is protecting against; if one turns
+ * out to be wrong it should be moved deliberately and noted, not discovered by a
+ * reader wondering why a bar disappeared.
+ */
+export const PRICE_MIX = {
+  /** Product-line revenue as a share of the month's decomposition revenue. */
+  MIN_REVENUE_COVERAGE: 0.9,
+  /** Share of lines on products present in *both* months. A like-for-like claim needs a like. */
+  MIN_MATCHED_LINES: 0.8,
+  /**
+   * How far outside the bar the split may push a part.
+   *
+   * The two effects can offset — prices up, mix down — and when they do, their
+   * sum is small while each part is large. Rescaling that onto the Shapley bar
+   * produces two enormous bars that cancel, which is arithmetically fine and
+   * reads as a finding it is not. Beyond this the split refuses and the single
+   * bar stands.
+   */
+  MAX_SHARE: 1.35,
+  MIN_SHARE: -0.35,
+} as const;
+
+export type PriceMix =
+  | {
+      ok: true;
+      /** Average product-line price in each month. Not `pricePerItem` — see `reason` on the refusal. */
+      fromAvg: number;
+      toAvg: number;
+      /** Dollars per item, and they sum to `toAvg − fromAvg` exactly. */
+      priceEffect: number;
+      mixEffect: number;
+      /** `priceEffect` over the total move. The share of the price bar that is a real price change. */
+      priceShare: number;
+      /** Line-weighted revenue coverage of the two months, worst first. */
+      coverage: number;
+      matchedLines: number;
+      /** The products that moved the average most, price-wise. Empty without the dictionary. */
+      movers: { name: string; from: number; to: number; change: number; lines: number; effect: number }[];
+    }
+  | { ok: false; reason: string };
+
+/**
+ * Did prices go up, or did guests buy dearer things? **The OV-7 refusal, lifted.**
+ *
+ * ── What it does ───────────────────────────────────────────────────────────
+ *
+ * Average product-line price is `A = Σ sₚ·uₚ` — each product's share of lines
+ * times its price. Between two months both move, and the Bennet indicator splits
+ * the difference into the two exactly:
+ *
+ *     ΔA = Σ (u₁−u₀)·(s₀+s₁)/2   ← price: the same basket, repriced
+ *        + Σ (s₁−s₀)·(u₀+u₁)/2   ← mix:   the same prices, a different basket
+ *
+ * It is symmetric — neither month is the base — and it sums to `A₁ − A₀` with no
+ * residual, which is the same property the four-factor Shapley has and the
+ * reason it is used rather than a Laspeyres index with an interaction term
+ * nobody can interpret.
+ *
+ * A product that appears in only one month has no price to compare, so its price
+ * effect is zero by construction and its whole movement lands in mix. **A new
+ * product arriving is a mix change, not a price change**, and treating it any
+ * other way would let a menu launch read as a price rise.
+ *
+ * ── What it refuses, and why each refusal exists ───────────────────────────
+ *
+ * The split runs on **product lines**; the decomposition runs on the order
+ * header's item count. They are close but not the same universe, so this is a
+ * proportional split of a bar rather than a recomputation of it, and it declines
+ * whenever that proportion cannot be trusted:
+ *
+ *   - **no file** — the snapshot predates the query;
+ *   - **thin coverage** — product lines account for too little of the month's
+ *     revenue, so the split would describe a corner of the trade;
+ *   - **too much churn** — too few lines sit on products present in both months,
+ *     so there is no like to compare like against;
+ *   - **the two universes disagree** — product-line price moved one way and
+ *     `pricePerItem` moved the other, which means the bar being split is not the
+ *     quantity that was split;
+ *   - **unstable rescale** — the parts offset, and projecting them onto the bar
+ *     would draw two large cancelling columns.
+ *
+ * Every one of those returns a sentence, not a null, because the surface has to
+ * say which it hit.
+ */
+export function priceMix(
+  prices: ItemPrices | null,
+  items: Items | null,
+  from: DecompositionRow,
+  to: DecompositionRow,
+): PriceMix {
+  if (!prices) {
+    return { ok: false, reason: "this snapshot was extracted before per-product prices were collected" };
+  }
+
+  const monthRows = (m: string) => prices.rows.filter((r) => r.month === m);
+  const a = monthRows(from.month);
+  const b = monthRows(to.month);
+  if (!a.length || !b.length) {
+    return { ok: false, reason: "one of the two months carries no product-line data" };
+  }
+
+  const cover = (m: string) => prices.coverage.find((c) => c.month === m)?.revenueShare ?? 0;
+  const coverage = Math.min(cover(from.month), cover(to.month));
+  if (coverage < PRICE_MIX.MIN_REVENUE_COVERAGE) {
+    return {
+      ok: false,
+      reason:
+        `product lines account for ${pct(coverage, 0)} of one month's revenue, below the ` +
+        `${pct(PRICE_MIX.MIN_REVENUE_COVERAGE, 0)} this needs`,
+    };
+  }
+
+  const linesA = a.reduce((s, r) => s + r.lines, 0);
+  const linesB = b.reduce((s, r) => s + r.lines, 0);
+  if (!linesA || !linesB) return { ok: false, reason: "a month has no product lines to weigh" };
+
+  const byProduct = new Map<number, { l0: number; r0: number; l1: number; r1: number }>();
+  const slot = (p: number) => {
+    const cur = byProduct.get(p) ?? { l0: 0, r0: 0, l1: 0, r1: 0 };
+    byProduct.set(p, cur);
+    return cur;
+  };
+  for (const r of a) { const c = slot(r.product); c.l0 += r.lines; c.r0 += r.revenue; }
+  for (const r of b) { const c = slot(r.product); c.l1 += r.lines; c.r1 += r.revenue; }
+
+  const matched = [...byProduct.values()].filter((c) => c.l0 > 0 && c.l1 > 0);
+  const matchedLines =
+    Math.min(
+      matched.reduce((s, c) => s + c.l0, 0) / linesA,
+      matched.reduce((s, c) => s + c.l1, 0) / linesB,
+    );
+  if (matchedLines < PRICE_MIX.MIN_MATCHED_LINES) {
+    return {
+      ok: false,
+      reason:
+        `only ${pct(matchedLines, 0)} of lines sit on products sold in both months, below the ` +
+        `${pct(PRICE_MIX.MIN_MATCHED_LINES, 0)} a like-for-like comparison needs`,
+    };
+  }
+
+  let priceEffect = 0;
+  let mixEffect = 0;
+  const movers: { index: number; from: number; to: number; change: number; lines: number; effect: number }[] = [];
+  for (const [index, c] of byProduct) {
+    const s0 = c.l0 / linesA;
+    const s1 = c.l1 / linesB;
+    // A product sold in one month only has no price to compare. Holding its
+    // price constant sends its whole movement to mix, which is what a launch or
+    // a delisting is.
+    const u0 = c.l0 ? c.r0 / c.l0 : c.l1 ? c.r1 / c.l1 : 0;
+    const u1 = c.l1 ? c.r1 / c.l1 : u0;
+    const p = (u1 - u0) * ((s0 + s1) / 2);
+    priceEffect += p;
+    mixEffect += (s1 - s0) * ((u0 + u1) / 2);
+    if (c.l0 > 0 && c.l1 > 0) {
+      movers.push({ index, from: u0, to: u1, change: u1 - u0, lines: c.l0 + c.l1, effect: p });
+    }
+  }
+
+  const fromAvg = a.reduce((s, r) => s + r.revenue, 0) / linesA;
+  const toAvg = b.reduce((s, r) => s + r.revenue, 0) / linesB;
+  const move = toAvg - fromAvg;
+  const headline = to.pricePerItem - from.pricePerItem;
+
+  if (move === 0) return { ok: false, reason: "average product-line price did not move at all" };
+  if (headline !== 0 && Math.sign(move) !== Math.sign(headline)) {
+    return {
+      ok: false,
+      reason:
+        "product-line price and average item price moved in opposite directions, so the split " +
+        "would not be a split of the bar it is drawn under",
+    };
+  }
+
+  const priceShare = priceEffect / move;
+  if (priceShare > PRICE_MIX.MAX_SHARE || priceShare < PRICE_MIX.MIN_SHARE) {
+    return {
+      ok: false,
+      reason:
+        "the price and mix effects largely cancel, so projecting them onto the bar would draw " +
+        "two large columns that add to a small one",
+    };
+  }
+
+  const names = items?.products ?? [];
+  return {
+    ok: true,
+    fromAvg, toAvg, priceEffect, mixEffect, priceShare, coverage, matchedLines,
+    movers: movers
+      .filter((m) => names[m.index])
+      .sort((x, y) => Math.abs(y.effect) - Math.abs(x.effect))
+      .slice(0, 6)
+      .map((m) => ({
+        name: names[m.index].name,
+        from: m.from, to: m.to, change: m.change, lines: m.lines, effect: m.effect,
+      })),
+  };
+}
 
 /**
  * An operand pair printed at whatever precision makes the movement visible.
@@ -752,7 +970,17 @@ function operandPair(a: number, b: number, isCount: boolean): string {
  * per item` against −$287.83, because the labels were hard-coded to the positive
  * sense of the factor.
  */
-export function decompose(from: DecompositionRow, to: DecompositionRow): Decomposition {
+export function decompose(
+  from: DecompositionRow,
+  to: DecompositionRow,
+  /**
+   * The price/mix split, when it publishes. The four-factor Shapley does not
+   * change: its `average item price` term is *divided* in the ratio the split
+   * found, so the bars still sum to the same modelled change and the bridge
+   * still closes on the same figure.
+   */
+  split: PriceMix | null = null,
+): Decomposition {
   const keys = TERMS.map((t) => t.key) as (keyof DecompositionRow)[];
   const a = keys.map((k) => Number(from[k]));
   const b = keys.map((k) => Number(to[k]));
@@ -802,15 +1030,67 @@ export function decompose(from: DecompositionRow, to: DecompositionRow): Decompo
   const modelledChange = values.reduce((s, v) => s + v, 0);
   const recordedChange = to.revenue - from.revenue;
 
+  /**
+   * ── The price bar becomes two bars, when the evidence allows ─────────────
+   *
+   * `average item price` has always been two things added together: a price
+   * change and a mix change. Naming it honestly was OV-7; separating it needs
+   * per-product monthly prices, and `priceMix` does the separating and states
+   * when it will not.
+   *
+   * The Shapley term is **divided**, not recomputed. Its two parts sum to it
+   * exactly, so every figure downstream — the modelled change, the bridge, the
+   * reconciliation — is untouched by whether the split published.
+   *
+   * The `kind` on each part is the payoff, and it corrects a misclassification
+   * the single bar could not avoid: a like-for-like price rise is the merchant's
+   * own decision and is **price**; a guest choosing the large flat white is that
+   * guest's decision and is **real trade**. The whole bar used to be filed as
+   * price, so the front-page "most of it is price" sentence was crediting
+   * guests' trading up to the price list.
+   */
+  const final = split?.ok
+    ? terms.flatMap((t) => {
+        if (t.kind !== "price") return [t];
+        const priceValue = t.value * split.priceShare;
+        const mixValue = t.value - priceValue;
+        const moved = split.toAvg - split.fromAvg;
+        const money2 = (v: number) => `$${v.toFixed(2)}`;
+        return [
+          {
+            key: "priceLevel",
+            name: "Price changes",
+            label:
+              moved === 0 ? "prices unchanged" : moved > 0 ? "Higher prices" : "Lower prices",
+            value: priceValue,
+            kind: "price" as const,
+            operand: `${money2(split.fromAvg)} → ${money2(split.fromAvg + split.priceEffect)} like for like`,
+          },
+          {
+            key: "itemMix",
+            name: "Item mix",
+            label:
+              split.mixEffect === 0 ? "mix unchanged" : split.mixEffect > 0 ? "Traded up" : "Traded down",
+            value: mixValue,
+            // A guest choosing a dearer item is that guest's behaviour, not the
+            // merchant's price list. This is the reclassification the split buys.
+            kind: "real" as const,
+            operand: `${money2(split.mixEffect)} per item from what they chose`,
+          },
+        ];
+      })
+    : terms;
+
   return {
     from, to,
     revenueChange: modelledChange,
     recordedChange,
     /** Recorded minus modelled. Rounding in the stored factors, nothing else. */
     reconciliation: recordedChange - modelledChange,
-    terms,
-    real: terms.filter((t) => t.kind === "real").reduce((s, t) => s + t.value, 0),
-    price: terms.filter((t) => t.kind === "price").reduce((s, t) => s + t.value, 0),
+    terms: final,
+    split,
+    real: final.filter((t) => t.kind === "real").reduce((s, t) => s + t.value, 0),
+    price: final.filter((t) => t.kind === "price").reduce((s, t) => s + t.value, 0),
   };
 }
 

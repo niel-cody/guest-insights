@@ -16,7 +16,8 @@ import { previousReadable } from "@/lib/periods";
 import { runChecks } from "@/lib/checks";
 import {
   attributionPct, causalReading, count, coverageState,
-  decompose, delta, excludedSingleVisitCards, money, monthLabel, opportunityPerVenueWeek, pct, ratio,
+  decompose, delta, excludedSingleVisitCards, money, monthLabel, opportunityPerVenueWeek, pct,
+  priceMix, ratio,
   rollUpSegments, tileCount, valueClaims, visitBands, windowShort,
 } from "@/lib/metrics";
 
@@ -125,7 +126,15 @@ export default async function OverviewPage({
 
   const first = decomposition[0];
   const last = decomposition.at(-1);
-  const growth = first && last && first !== last ? decompose(first, last) : null;
+  /**
+   * The price/mix split runs before the decomposition because it changes what
+   * the decomposition's fourth bar *is*: where it publishes, "average item
+   * price" becomes a price bar and a mix bar, and the mix half is reclassified
+   * as real trade. Where it refuses, it hands back the sentence saying why and
+   * the four-bar version stands unchanged.
+   */
+  const split = first && last ? priceMix(snap.itemPrices, snap.items, first, last) : null;
+  const growth = first && last && first !== last ? decompose(first, last, split) : null;
 
   return (
     <>
@@ -801,34 +810,97 @@ export default async function OverviewPage({
                 </>
               }
             >
-              {/* ── OV-7, the question note I asked and the answer ────────────
+              {/* ── OV-7, the question I asked, and the answer ───────────────
                   "Are we saying a product is now sold for a higher price than
-                  it was before?" The honest answer is **no, and the panel used
-                  to imply otherwise.** Revenue over items moves when a price
-                  goes up and moves identically when the mix shifts toward
-                  pricier items with no price change at all — a guest buying a
-                  large flat white instead of a small one registers here as a
-                  higher price.
+                  it was before?" For a long time the honest answer was **no,
+                  and the panel used to imply otherwise** — revenue over items
+                  moves when a price goes up and moves identically when the mix
+                  shifts toward pricier items, so a guest buying a large flat
+                  white instead of a small one registered as a price rise.
 
-                  The factor is renamed to what it measures. Separating a true
-                  price effect from a mix effect needs item-level price history
-                  the extract does not carry, so it is named as the next step
-                  rather than implied to be already done. */}
+                  OV-7 renamed the factor to what it measured and named the
+                  split as the next step. This is that step: `itemPriceMonthly`
+                  carries a price per product per month, `priceMix` separates a
+                  like-for-like price move from a mix move, and the block below
+                  prints whichever of the two it can support.
+
+                  **The refusal has not been deleted, only conditioned.** Where
+                  the coverage is thin, the menu churned, or the two effects
+                  cancel, this says so in the same place the answer would have
+                  been — see `PRICE_MIX` for the floors and what each protects. */}
               <div className="mb-4 rounded-lg border border-line bg-surface-sunken px-4 py-3">
-                <p className="max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
-                  <strong className="text-ink">
-                    &quot;Average item price&quot; is not the same as a price rise.
-                  </strong>{" "}
-                  It is revenue divided by items, and it moves the same amount whether you put prices up or
-                  your guests shifted toward more expensive items. A large flat white instead of a small one
-                  registers here identically to a price increase.{" "}
-                  <strong className="text-ink">This build cannot yet separate the two</strong> — that needs
-                  item-level price history against item-level volumes, and the extract carries the volumes
-                  but not the prices.
-                </p>
+                {growth.split?.ok ? (
+                  /* ── OV-7 answered ────────────────────────────────────────
+                     The question that opened OV-7 was "are we saying a product
+                     is now sold for a higher price than it was before?" The
+                     honest answer was **no, and the panel used to imply
+                     otherwise**. It is now yes or no with the arithmetic behind
+                     it, because the extract carries a price per product per
+                     month and `priceMix` splits the bar on it. */
+                  <>
+                    <p className="max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                      <strong className="text-ink">
+                        &quot;Average item price&quot; is split into the two things it is made of.
+                      </strong>{" "}
+                      Like for like — the same products, repriced — an item moved{" "}
+                      <span className="tnum">
+                        {growth.split.priceEffect >= 0 ? "+" : "−"}$
+                        {Math.abs(growth.split.priceEffect).toFixed(2)}
+                      </span>
+                      . What guests chose to buy moved it a further{" "}
+                      <span className="tnum">
+                        {growth.split.mixEffect >= 0 ? "+" : "−"}$
+                        {Math.abs(growth.split.mixEffect).toFixed(2)}
+                      </span>
+                      . <strong className="text-ink">Only the first is a price rise</strong> — the second is
+                      a guest trading up or down, and it is counted as real trade.
+                    </p>
+                    {growth.split.movers.length > 0 && (
+                      <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                        Biggest movers on price:{" "}
+                        {growth.split.movers.slice(0, 3).map((m, i) => (
+                          <span key={m.name}>
+                            {i > 0 && "; "}
+                            <strong className="text-ink">{m.name}</strong>{" "}
+                            <span className="tnum">
+                              ${m.from.toFixed(2)} → ${m.to.toFixed(2)}
+                            </span>
+                          </span>
+                        ))}
+                        .
+                      </p>
+                    )}
+                    <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-muted">
+                      Measured on product lines, which cover{" "}
+                      <span className="tnum">{pct(growth.split.coverage, 0)}</span> of the revenue in the
+                      thinner of the two months, and on the{" "}
+                      <span className="tnum">{pct(growth.split.matchedLines, 0)}</span> of lines sold in
+                      both. A product discounted for part of a month reads as cheaper here — the discount
+                      sits on the order, not on the line.
+                    </p>
+                  </>
+                ) : (
+                  /* ── The refusal, naming itself where the figure would be ── */
+                  <>
+                    <p className="max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                      <strong className="text-ink">
+                        &quot;Average item price&quot; is not the same as a price rise.
+                      </strong>{" "}
+                      It is revenue divided by items, and it moves the same amount whether you put prices
+                      up or your guests shifted toward more expensive items. A large flat white instead of
+                      a small one registers here identically to a price increase.
+                    </p>
+                    <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
+                      <strong className="text-ink">The two are not separated here</strong>
+                      {growth.split ? <> — {growth.split.reason}.</> : "."} Splitting them needs a price per
+                      product per month against that product&apos;s volumes, measured on the same guests as
+                      the bars above.
+                    </p>
+                  </>
+                )}
                 <p className="mt-2 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">
-                  The four factors are multiplicative and the decomposition shares the movement across all
-                  of them, so it is not that some are &quot;also&quot; driving the basket — each gets its
+                  The factors are multiplicative and the decomposition shares the movement across all of
+                  them, so it is not that some are &quot;also&quot; driving the basket — each gets its
                   share and the shares sum to the total.
                 </p>
               </div>

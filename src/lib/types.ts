@@ -551,6 +551,40 @@ export type Items = {
   };
 };
 
+/**
+ * Per-product, per-month lines and revenue. The price history OV-7 said the
+ * extract did not carry.
+ *
+ * `product` indexes into `Items.products`, so this file cannot be read without
+ * `items.json` and cannot disagree with it about what a product is. Rows are
+ * the same population as `decomposition` — identified guests — because the split
+ * they support is a split of a bar in that decomposition.
+ *
+ * Null on any snapshot extracted before `itemPriceMonthlyQuery` existed, which
+ * is why `priceMix` returns null rather than assuming the file is there.
+ */
+export type ItemPrices = {
+  window: AnalysisWindow;
+  /** One row per product per month. `product` indexes `Items.products`. */
+  rows: { month: string; product: number; lines: number; revenue: number }[];
+  /**
+   * What this covers of the trade it is used to explain, per month.
+   *
+   * A split computed on 70% of the revenue is not a split of the whole, and the
+   * surface refuses below a floor rather than publishing one. Product lines are
+   * a narrower universe than the order-header item count the decomposition runs
+   * on, so the two never match exactly and the gap has to be visible.
+   */
+  coverage: {
+    month: string;
+    /** Product-line revenue this month, over the decomposition's revenue for it. */
+    revenueShare: number;
+    lines: number;
+    revenue: number;
+    products: number;
+  }[];
+};
+
 // ── §6.2: the heatmap, and §7.3's day grid ──────────────────────────────────
 
 /**
@@ -692,6 +726,8 @@ export type Snapshot = {
   network: Network;
   venueMonthly: VenueMonth[];
   items: Items | null;
+  /** Per-product monthly prices. Null before `itemPriceMonthlyQuery` existed. */
+  itemPrices: ItemPrices | null;
   /** Segment × day × daypart, whole population. Null before the query existed. */
   segmentBehaviour: SegmentBehaviourRow[] | null;
   /** Member tier, 21 months. Loaded per org, not per card period — see §4.3. */

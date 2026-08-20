@@ -13,7 +13,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cache } from "react";
 import type {
-  Cohorts, Coverage, DayGrid, Dayparts, GuestRows, Guests, Items, Members, Network, Org,
+  Cohorts, Coverage, DayGrid, Dayparts, GuestRows, Guests, ItemPrices, Items, Members, Network, Org,
   Scatter, SegmentBehaviourRow, Snapshot, Team, VenueCrossRow,
 } from "./types";
 import { unpackGuests } from "./guest-columns";
@@ -62,7 +62,8 @@ export const getOrg = cache(
 export const getSnapshot = cache(async (slug: string, period: string): Promise<Snapshot> => {
   const [
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, itemPrices, segmentBehaviour,
+    cohorts, team,
   ] = await Promise.all([
     read<Snapshot["org"]>(slug, period, "org"),
     read<Snapshot["coverage"]>(slug, period, "coverage"),
@@ -77,13 +78,17 @@ export const getSnapshot = cache(async (slug: string, period: string): Promise<S
     read<Snapshot["network"]>(slug, period, "network"),
     read<Snapshot["venueMonthly"]>(slug, period, "venueMonthly"),
     read<Items>(slug, period, "items").catch(() => null),
+    // Null on any snapshot extracted before the per-product price query existed.
+    // `priceMix` refuses on null rather than the surface assuming a file.
+    read<ItemPrices>(slug, period, "itemPrices").catch(() => null),
     read<SegmentBehaviourRow[]>(slug, period, "segmentBehaviour").catch(() => null),
     getCohorts(slug),
     getTeam(slug, period),
   ]);
   return {
     org, coverage, lifecycle, decomposition, segments, members, dayparts,
-    dayGrid, venueCross, scatter, network, venueMonthly, items, segmentBehaviour, cohorts, team,
+    dayGrid, venueCross, scatter, network, venueMonthly, items, itemPrices, segmentBehaviour,
+    cohorts, team,
   };
 });
 
