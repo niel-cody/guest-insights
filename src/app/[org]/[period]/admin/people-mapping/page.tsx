@@ -6,19 +6,34 @@ import { teamChecks } from "@/lib/checks";
 import { count, money, pct, windowShort } from "@/lib/metrics";
 import { VERDICT_LABEL, VERDICT_MEANING, VERDICT_TONE } from "@/lib/team";
 import type { TeamVerdict } from "@/lib/types";
-import { Unavailable } from "../Unavailable";
+import { Unavailable } from "../../team/Unavailable";
 import { Standfirst } from "@/components/shell/Standfirst";
 
 export const dynamic = "force-static";
-export const metadata = { title: "People" };
+export const metadata = { title: "People Mapping" };
 
 /** The order the queue is worked in: worst evidence first, not best. */
 const ORDER: TeamVerdict[] = ["conflict", "collision", "proposed", "confirmed", "unmatched", "not-a-person"];
 
 /**
- * People. The identity spine, and the first screen in the section.
+ * People Mapping. The identity spine, and the thing the Team section divides by.
  *
- * ── Why this comes before the league table ─────────────────────────────────
+ * ── It moved out of Team, and something had to move with it ────────────────
+ *
+ * This was the first screen in Team, placed there on the argument that a
+ * reviewer who meets the league table before they meet the unproven matches
+ * underneath it will believe the league table. That argument was right about
+ * the risk and wrong about the fix: **this is not a report.** It is a review
+ * queue a manager works through once and returns to when the roll changes, and
+ * a queue sitting at the top of a reporting section is a chore in the path of
+ * everybody who came to read something.
+ *
+ * So it lives in Admin, where configuration lives, and the caveat it used to
+ * carry by adjacency now travels to the two reports that actually depend on it.
+ * `SpineChip` sits in the header of Performance and Margin, states how many of
+ * the joins beneath those figures are unproven, and links back here. The rule
+ * this preserves is the one that mattered: **no reader reaches a per-person
+ * figure without being told what it was divided by.**
  *
  * Everything downstream — sales per labour hour, cost per head, who to put on
  * Friday dinner — is a division of something the POS knows by something the
@@ -26,10 +41,8 @@ const ORDER: TeamVerdict[] = ["conflict", "collision", "proposed", "confirmed", 
  * Flour Wine the POS holds 53 identities, Tanda holds 83 employees, and **not
  * one id appears in both**. Five names match exactly.
  *
- * A report that opened on a ranked list would be asking the reader to trust
- * thirty-five joins it has not shown them. So the joins come first, ordered
- * worst-evidence-first, and the reader is told which of them the rest of the
- * section is willing to divide by.
+ * The queue is ordered worst-evidence-first, so the rows most likely to be
+ * wrong are the rows a manager sees on arrival.
  *
  * ── The screen is a queue, not a result ────────────────────────────────────
  *
@@ -58,8 +71,8 @@ export default async function TeamPeoplePage({
       org={org}
       periods={periods}
       period={current}
-      title="People"
-      section="Team"
+      title="People Mapping"
+      section="Admin"
       checks={checks.length ? checks : undefined}
     />
   );

@@ -108,7 +108,8 @@ async function main() {
       isOverview ||
       isPlaceholder ||
       /\/(behaviour|guests)$/.test(name) ||
-      /\/team\/(people|performance|margin)$/.test(name);
+      /\/team\/(performance|margin)$/.test(name) ||
+      /\/admin\/people-mapping$/.test(name);
 
     console.log(`\n${name}`);
 
@@ -558,10 +559,26 @@ async function main() {
       }
       for (const item of [
         "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Guests",
-        "People", "Performance", "Margin", "Staff Scorecard", "Attendance",
+        "Performance", "Margin", "Staff Scorecard", "Attendance",
       ]) {
         check(`the sidebar carries "${item}"`, html.includes(item));
       }
+
+      /**
+       * Admin is a real group, and it is closed.
+       *
+       * Its one item is only rendered when the group is expanded, so the label
+       * cannot be asserted here and should not be — **a review queue that is
+       * collapsed by default is the move working.** It was taken out of the
+       * reporting path deliberately; putting it back in the reader's face via
+       * an open group would be the same chore in a different place.
+       *
+       * What has to hold instead is that the group exists to be opened, and
+       * that nobody who needs the queue depends on finding it here — which is
+       * what the spine chip on every costed report is for, asserted separately
+       * against those pages.
+       */
+      check("Admin is a group in the sidebar", html.includes("Admin"));
 
       /**
        * The group is called Team, and the word Staff survives in exactly one
@@ -579,6 +596,20 @@ async function main() {
         "a nav group still reads Staff");
 
       /**
+       * People Mapping left Team, and the caveat it used to carry by adjacency
+       * had to leave with it rather than evaporate.
+       *
+       * Asserted as a pair, because either half alone is the failure state: the
+       * queue still in Team is the move half-done, and the queue gone from Team
+       * with no chip on the reports is a per-person figure with nothing saying
+       * what it was divided by. That second state is the one that ships
+       * silently — every page still renders, every number still appears.
+       */
+      check("the review queue is not in the Team section",
+        !/>\s*People\s*</.test(navBlock),
+        "People is still a Team nav item");
+
+      /**
        * Every nav item resolves to a route the build actually produced.
        *
        * The old assertion listed the five Customers items and rejected a sixth,
@@ -594,13 +625,37 @@ async function main() {
       const unique = [...new Set(navLinks)].sort();
       const known = [
         "overview", "behaviour", "guests", "loyalty-spend", "loyalty-redemption",
-        "team/people", "team/performance", "team/margin",
+        "team/performance", "team/margin",
         "team/staff-scorecard", "team/attendance",
+        "admin/people-mapping",
         "retention",
       ];
       const strays = unique.filter((h) => !known.includes(h));
       check("every nav item points at a route this build renders", strays.length === 0,
         `found ${strays.join(", ")}`);
+    }
+
+    /**
+     * A per-person figure never renders without saying what it was divided by.
+     *
+     * This is the half of the People Mapping move that can ship broken and look
+     * completely fine: every page still renders, every rate still appears, and
+     * the only thing missing is the sentence saying twenty-four of the joins
+     * beneath them are first-name guesses.
+     *
+     * Skipped where the organisation has no workforce system at all — those
+     * pages render the Unavailable screen, which is a longer version of the
+     * same disclosure and has no joins to qualify.
+     */
+    if (/\/team\/(performance|margin)$/.test(name)) {
+      const noWorkforce = html.includes("has no workforce management integration");
+      check("a costed team report carries the identity spine chip",
+        noWorkforce || html.includes("data-spine-chip"),
+        "per-person rates with nothing saying what they were divided by");
+      check("the spine chip links to the queue it is naming",
+        noWorkforce || /data-spine-chip[^>]*/.test(html) === false ||
+          html.includes("/admin/people-mapping"),
+        "the chip states the problem and offers nowhere to fix it");
     }
 
     // ── §7.3: the truncation confession is gone ────────────────────────────

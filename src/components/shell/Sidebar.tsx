@@ -65,7 +65,7 @@ const CUSTOMERS = [
 ] as const;
 
 /**
- * The Team section. Three built reports, then the two that already ship.
+ * The Team section. Two built reports, then the two that already ship.
  *
  * ── The group is called Team, and it used to be called Staff ───────────────
  *
@@ -76,30 +76,49 @@ const CUSTOMERS = [
  * The production information architecture is being renamed to match, and this is
  * where that lands first.
  *
- * The order runs the same way Customers does — group level down to the
- * individual — but it starts one step earlier, because none of it works until
- * the two systems agree who a person is:
- *
- *   **People** is the identity spine. It is first because Performance and Margin
- *   both read through it, and a reviewer who meets the league table before they
- *   meet the 24 unproven matches underneath it will believe the league table.
- *
  *   **Performance** is who is doing well and *why* — the decomposition, not the
  *   ranking.
  *
  *   **Margin** is the money: what each service, day, week and month returns
  *   against what it costs.
  *
+ * ── People was here, and is now Admin › People Mapping ─────────────────────
+ *
+ * It led this section on the argument that a reviewer who meets the league
+ * table before they meet the unproven matches underneath it will believe the
+ * league table. The risk was real; the placement was the wrong answer to it.
+ * **It is a review queue, not a report** — worked through once, revisited when
+ * the roll changes — and a queue at the top of a reporting section is a chore
+ * standing in front of everybody who came to read something.
+ *
+ * The caveat it used to carry by adjacency now travels instead: `SpineChip`
+ * rides in the header of both reports below, says how many joins beneath those
+ * figures are unproven, and links to the queue. Chrome that follows the reader
+ * is how this build already handles recognition and the check register, and it
+ * is strictly stronger than adjacency — adjacency only works on the reader who
+ * arrives through the nav, and most arrive through a link.
+ *
  * Staff Scorecard and Attendance ship in production and are **not built,
  * changed or fixed here**. They are present so the section reads whole and so
  * nobody proposes building the thing that already exists.
  */
 const TEAM = [
-  { label: "People", href: "team/people", placeholder: false },
   { label: "Performance", href: "team/performance", placeholder: false },
   { label: "Margin", href: "team/margin", placeholder: false },
   { label: "Staff Scorecard", href: "team/staff-scorecard", placeholder: true },
   { label: "Attendance", href: "team/attendance", placeholder: true },
+] as const;
+
+/**
+ * Admin. Where the things that are configured rather than read live.
+ *
+ * One item so far. It is a real group rather than an inert rail icon because
+ * People Mapping is a real screen a manager acts on, and parking it under a
+ * heading that leads nowhere else is how a section becomes a drawer nobody
+ * opens.
+ */
+const ADMIN = [
+  { label: "People Mapping", href: "admin/people-mapping", placeholder: false },
 ] as const;
 
 const GROUPS: {
@@ -112,7 +131,7 @@ const GROUPS: {
   { label: "Operations", items: [] },
   { label: "Team", open: true, items: TEAM },
   { label: "Customers", open: true, items: CUSTOMERS },
-  { label: "Admin", items: [] },
+  { label: "Admin", items: ADMIN },
 ];
 
 export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }) {

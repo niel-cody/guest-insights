@@ -1,4 +1,5 @@
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { SpineChip } from "@/components/shell/SpineChip";
 import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { TeamDrivers } from "@/components/charts/TeamDrivers";
@@ -62,6 +63,7 @@ export default async function TeamPerformancePage({
       title="Performance"
       section="Team"
       checks={checks.length ? checks : undefined}
+      actions={team ? <SpineChip team={team} orgSlug={slug} period={period} /> : undefined}
     />
   );
 

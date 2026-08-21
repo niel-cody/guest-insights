@@ -1,4 +1,5 @@
 import { PageHeader, Page } from "@/components/shell/PageHeader";
+import { SpineChip } from "@/components/shell/SpineChip";
 import { Card, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { getPeriods, getSnapshot } from "@/lib/data";
@@ -60,6 +61,7 @@ export default async function TeamMarginPage({
       title="Margin"
       section="Team"
       checks={checks.length ? checks : undefined}
+      actions={team ? <SpineChip team={team} orgSlug={slug} period={period} /> : undefined}
     />
   );
 
