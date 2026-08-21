@@ -3,6 +3,7 @@ import { SpineChip } from "@/components/shell/SpineChip";
 import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { TeamDrivers } from "@/components/charts/TeamDrivers";
+import { MixGate } from "@/components/charts/MixGate";
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { teamChecks } from "@/lib/checks";
 import { count, money, pct, windowShort } from "@/lib/metrics";
@@ -257,6 +258,9 @@ export default async function TeamPerformancePage({
             )}
             <TeamDrivers people={rated} />
           </Card>
+
+          {/* ── the layer below average item value ────────────────────────── */}
+          <MixGate team={team} orgName={org.name} />
 
           {/* ── the table ─────────────────────────────────────────────────── */}
           <Card
