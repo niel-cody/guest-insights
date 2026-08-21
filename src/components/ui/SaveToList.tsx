@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Guest, Org } from "@/lib/types";
 import type { View } from "@/lib/url-state";
+import { loadLists, resolvedTier, saveLists, type SavedList as SavedListType } from "@/lib/lists";
 import { activeFilters, toQuery } from "@/lib/url-state";
 import { count, dayLabel, pct } from "@/lib/metrics";
 import { track } from "@/lib/instrument";
@@ -49,50 +50,13 @@ import { Pill } from "@/components/ui/Primitives";
  * you can is worse than no list at all.
  */
 
-export type SavedList = {
-  id: string;
-  name: string;
-  /** The rule. Evaluated on read — never a frozen set of ids. */
-  rule: Partial<View>;
-  scope: {
-    org: string;
-    period: string;
-    windowStart: string;
-    windowEnd: string;
-    venues: string[];
-    tier: "member" | "card";
-  };
-  createdAt: string;
-};
-
-const KEY = "guests.lists.v1";
-
-function load(): SavedList[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return JSON.parse(window.localStorage.getItem(KEY) ?? "[]") as SavedList[];
-  } catch {
-    return [];
-  }
-}
-
-function save(lists: SavedList[]) {
-  window.localStorage.setItem(KEY, JSON.stringify(lists));
-}
-
 /**
- * The tier a population actually resolves to, or null when it spans both.
- *
- * Derived from the rows rather than from the filter, because a rule with no
- * explicit tier can still select one — "seen once at Belconnen" is card-tier in
- * practice — and storing the tier that was *asked for* rather than the one that
- * came back is how a list ends up mislabelled.
+ * The store moved to `@/lib/lists` when Home became its second reader. Re-exported
+ * here because §7.4's writer is still this component, and every existing import
+ * of `SavedList` and `resolvedTier` points at this file.
  */
-export function resolvedTier(rows: Guest[]): "member" | "card" | null {
-  if (!rows.length) return null;
-  const first = rows[0].tier;
-  return rows.every((r) => r.tier === first) ? first : null;
-}
+export type { SavedList } from "@/lib/lists";
+export { resolvedTier };
 
 export function SaveToList({
   view, rows, org, period, label,
@@ -104,11 +68,11 @@ export function SaveToList({
   period: string;
   label?: string;
 }) {
-  const [lists, setLists] = useState<SavedList[]>([]);
+  const [lists, setLists] = useState<SavedListType[]>([]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
 
-  useEffect(() => setLists(load()), []);
+  useEffect(() => setLists(loadLists()), []);
 
   const tier = resolvedTier(rows);
   // Only enrolled people have a member record, and therefore a way to be
@@ -125,7 +89,7 @@ export function SaveToList({
 
   function commit() {
     if (!tier) return;
-    const entry: SavedList = {
+    const entry: SavedListType = {
       id: `${Date.now()}`,
       name: (name || suggested).slice(0, 80),
       rule: {
@@ -144,7 +108,7 @@ export function SaveToList({
     };
     const next = [entry, ...lists].slice(0, 20);
     setLists(next);
-    save(next);
+    saveLists(next);
     setName("");
     track("list.save", "guests", "save");
   }
@@ -280,7 +244,7 @@ export function SaveToList({
                         onClick={() => {
                           const next = lists.filter((x) => x.id !== l.id);
                           setLists(next);
-                          save(next);
+                          saveLists(next);
                         }}
                         className="text-ink-muted hover:text-ink"
                         aria-label={`Remove ${l.name}`}

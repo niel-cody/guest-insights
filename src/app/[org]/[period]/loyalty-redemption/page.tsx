@@ -29,7 +29,8 @@ export default function LoyaltyRedemptionPage() {
   return (
     <Placeholder
       title="Loyalty Redemption"
-      standfirst="Loyalty Redemption ships today and is unchanged by this proof of concept. It is here so the Customers section reads whole when you click down the sidebar."
+      section="Guests"
+      standfirst="Loyalty Redemption ships today and is unchanged by this proof of concept. It is here so the Guests section reads whole when you click down the sidebar."
       note={
         <div className="rounded-xl border border-line bg-surface-sunken px-5 py-4">
           <h2 className="text-[14px] font-semibold text-ink">One figure is deliberately absent</h2>

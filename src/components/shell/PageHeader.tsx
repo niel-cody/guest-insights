@@ -23,8 +23,8 @@ import type { Org } from "@/lib/types";
  * open on click rather than on hover (§8 rule 7 — hover does not exist on touch).
  */
 export function PageHeader({
-  org, title, section = "Customers", coverage, filters, actions, periods, period, checks,
-  coverageScope = "card",
+  org, title, section, coverage, filters, actions, periods, period, checks,
+  coverageScope = "card", population = true,
 }: {
   org: Org;
   title: string;
@@ -34,8 +34,15 @@ export function PageHeader({
    * It was the literal string "Customers" until there was a second section, at
    * which point every Team page quietly claimed to be a customer report. A label
    * that is right by coincidence stops being right the moment the product grows.
+   *
+   * **It is required, and it stopped defaulting when there were eight sections.**
+   * A default is a guess that a new page will belong to whichever section
+   * happened to be first, and with eight to choose from that guess is wrong
+   * seven times out of eight — silently, on a page that renders perfectly. The
+   * compiler asking the question once is cheaper than a Finance report labelled
+   * Guests.
    */
-  section?: string;
+  section: string;
   coverage?: CoverageState;
   /** Report-specific controls, rendered inside the shared bar. */
   filters?: ReactNode;
@@ -49,6 +56,11 @@ export function PageHeader({
    * figure over member-tier content.
    */
   coverageScope?: "card" | "mixed";
+  /**
+   * Whether this surface has a population to narrow. See `FilterBar.population`.
+   * False only on Home, which is a landing state rather than a report.
+   */
+  population?: boolean;
 }) {
   return (
     <header className="shrink-0 border-b border-line bg-surface">
@@ -84,7 +96,7 @@ export function PageHeader({
         </div>
       </div>
 
-      <FilterBar org={org} periods={periods} period={period} extra={filters} />
+      <FilterBar org={org} periods={periods} period={period} extra={filters} population={population} />
     </header>
   );
 }

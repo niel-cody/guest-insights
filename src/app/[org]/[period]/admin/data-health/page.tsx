@@ -73,7 +73,7 @@ export default async function DataHealthPage({
 
   return (
     <>
-      <PageHeader org={org} periods={periods} period={current} title="Data Health" section="Admin" />
+      <PageHeader org={org} periods={periods} period={current} title="Data Health" section="Platform" />
       <Page>
         <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
           <Standfirst

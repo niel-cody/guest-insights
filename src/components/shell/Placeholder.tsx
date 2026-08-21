@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
  *
  * Loyalty Spend and Loyalty Redemption ship today. **They are not being built,
  * changed or fixed here.** They appear in this POC for one reason: so a reviewer
- * clicking down the sidebar sees the whole Customers section and can tell us
+ * clicking down the sidebar sees the whole Guests section and can tell us
  * whether the shape is right, rather than reacting to three reports floating on
  * their own.
  *
@@ -22,11 +22,11 @@ import type { ReactNode } from "react";
  * an engineer later treats a mock as a contract.
  */
 export function Placeholder({
-  title, section = "Customers", standfirst, children, note,
+  title, section, standfirst, children, note,
 }: {
   title: string;
-  /** The section this stand-in sits in. Not always Customers any more. */
-  section?: string;
+  /** The section this stand-in sits in. Required for the reason `PageHeader.section` is. */
+  section: string;
   standfirst: string;
   children: ReactNode;
   note?: ReactNode;

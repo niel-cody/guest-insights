@@ -11,14 +11,19 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
  * Behaviour. That is what shows in the browser tab and in every screenshot
  * anybody takes, so three different reports arrived in reviewers' notes under
  * one name.
+ *
+ * The default is the product rather than a section. It was "Customers", which
+ * was correct while Insights was one section wide and became a lie the moment
+ * it was eight — a Team page falling through to the default would have
+ * announced itself as a customer report in the tab and in every screenshot.
  */
 export const metadata: Metadata = {
   title: {
-    default: "Customers — Oolio Insights",
+    default: "Oolio Insights",
     template: "%s — Oolio Insights",
   },
   description:
-    "The customer side of the sales report. Enrolment-free guest analytics on real Oolio Pay trade.",
+    "Enrolment-free guest and team analytics on real Oolio Pay trade.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

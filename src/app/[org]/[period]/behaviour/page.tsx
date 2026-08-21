@@ -119,6 +119,7 @@ export default async function BehaviourPage({
         periods={periods}
         period={current}
         title="Behaviour"
+        section="Guests"
         coverage={cov}
         // This page carries both tiers, so the chip must not assert the
         // card-tier figure over the member-tier section below the wall.

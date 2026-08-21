@@ -63,7 +63,7 @@ export default async function RetentionPage({
       periods={periods}
       period={current}
       title="Retention and Churn"
-      section="Customers"
+      section="Guests"
       coverage={coverageState(org, coverage)}
       coverageScope="mixed"
       checks={checks.length ? checks : undefined}

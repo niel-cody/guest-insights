@@ -104,10 +104,16 @@ async function main() {
     const isPlaceholder = /(loyalty-(spend|redemption)|team\/(staff-scorecard|attendance))$/.test(name);
     // The org and root routes are redirects with no chrome. Asserting a sidebar
     // on them would be asserting against a page that has no reader.
+    // Home is `/{org}/{period}` with nothing after it. It carries the shell,
+    // so every sidebar assertion below applies to it too — and it is the one
+    // page most readers will see first, so a nav defect there is the nav defect
+    // that gets seen.
+    const isHome = /^\/[^/]+\/[^/]+$/.test(name);
     const isReport =
+      isHome ||
       isOverview ||
       isPlaceholder ||
-      /\/(behaviour|guests)$/.test(name) ||
+      /\/(behaviour|guests|retention)$/.test(name) ||
       /\/team\/(performance|margin)$/.test(name) ||
       /\/admin\/(people-mapping|data-health)$/.test(name);
 
@@ -560,28 +566,125 @@ async function main() {
       }
     }
 
-    // ── §2 and §12: five items, no Customer Report, no sixth item ──────────
+    /**
+     * ── Home refuses live trading, and the refusal cannot quietly disappear ──
+     *
+     * This is the assertion that matters most on this page, because the failure
+     * mode is *addition*, not omission. Nobody deletes the refusal; somebody
+     * adds a "Today" tile beside it, populated from the last day of a closed
+     * extract, and it looks completely fine while being wrong by however long
+     * ago the extract closed.
+     *
+     * So both halves are asserted: the refusal is present, **and** the page
+     * carries no claim to be current. A page that says "no live feed" above a
+     * tile labelled Today is the half-done state, and the half-done state is
+     * the one that gets believed.
+     */
+    if (isHome) {
+      check("Home refuses live trading in so many words",
+        html.includes("This build has no live feed"));
+      check("Home names the date its figures actually stand at",
+        /closed on <strong[^>]*>[^<]+<\/strong>/.test(html));
+      for (const word of ["Today", "Right now", "Live now", "as at now"]) {
+        check(`Home makes no claim to be current: "${word}"`,
+          !new RegExp(`>\\s*${word}\\s*<`).test(html),
+          "a tile on a static extract claims to be live");
+      }
+      // §12 again, locally: the saved-list card links to the grid that can
+      // evaluate a rule, and never offers to act on one from here.
+      check("Home links to the surface that owns the population",
+        /href="\/[^/"]+\/[^/"]+\/guests(\?[^"]*)?"/.test(html));
+
+      /**
+       * Home carries no filter it does not honour.
+       *
+       * Its three cards are a refusal, an alert summary and the operator's own
+       * saved rules — none narrows by venue, tier or segment. A `Locations`
+       * dropdown here would write to the URL and change nothing on screen,
+       * which is §9.1 B2's defect verbatim: **a parameter that survives and is
+       * then ignored.** The period control is exempt and asserted present,
+       * because it is a route segment that selects the extract itself.
+       */
+      for (const dead of ["Locations", "Segment", "Customers"]) {
+        check(`Home offers no ${dead} filter`,
+          !new RegExp(`>\\s*${dead}\\s*<`).test(html),
+          "a filter that changes the URL and nothing on screen");
+      }
+      check("Home still lets the reader change period", html.includes("Date range"));
+    }
+
+    // ── The nav is eight subjects, plus Home and Platform ──────────────────
     //
-    // Asserted on the hrefs rather than on the labels: "Coverage" and "Venues"
-    // are ordinary words that appear in table headers and prose, and matching
-    // them as text fails on pages that are perfectly correct.
+    // Asserted on the hrefs rather than on the labels wherever a label is an
+    // ordinary word: "Sales", "Service" and "Inventory" appear in prose and
+    // table headers, and matching them as text passes on a build with no nav
+    // at all.
     if (isReport) {
       check("the sidebar carries no Customer Report", !html.includes("Customer Report"));
       for (const retired of ["coverage", "members", "trade", "venues"]) {
         check(`no nav link points at the retired /${retired} route`,
           !new RegExp(`href="/[^"]+/${retired}"`).test(html));
       }
+
+      /**
+       * All eight subjects render, including the six with nothing in them.
+       *
+       * The empty ones are the point of the assertion, not an afterthought. A
+       * reviewer is being asked whether this shape is right, and they cannot
+       * answer that from the two corners we happened to build — so a change
+       * that quietly drops Inventory because it has no items is a change that
+       * removes the question being asked. The same argument keeps Loyalty Spend
+       * in the nav.
+       */
+      for (const section of [
+        "Sales", "Menu &amp; Product", "Inventory", "Service",
+        "Team", "Guests", "Finance", "Exceptions",
+      ]) {
+        check(`the sidebar carries the ${section.replace("&amp;", "&")} section`,
+          html.includes(section));
+      }
+
+      /**
+       * An empty section states the question it exists to answer.
+       *
+       * This is the half of the move that can ship looking fine: eight headers
+       * render, six of them are grey, and nothing on screen distinguishes "not
+       * built yet" from "nobody has thought about this". The question is what
+       * makes the difference legible.
+       */
+      for (const question of [
+        "What did we sell?",
+        "What do I hold, what did it cost, where is it leaking?",
+        "How well did we deliver it?",
+        "Did the money arrive, does it reconcile?",
+        "Should this have happened?",
+      ]) {
+        check(`an empty section states its question: "${question}"`, html.includes(question));
+      }
+
       for (const item of [
-        "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Guests",
+        "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Individuals",
         "Performance", "Margin", "Staff Scorecard", "Attendance",
       ]) {
         check(`the sidebar carries "${item}"`, html.includes(item));
       }
 
       /**
-       * Admin is a real group, and it is closed.
+       * Home is a link and not a group.
        *
-       * Its one item is only rendered when the group is expanded, so the label
+       * It has no children by definition — it is the state you land in — and a
+       * disclosure triangle on it would promise a list that will never exist.
+       * Asserted as a link to the period root, which is the one href in the nav
+       * with no third segment.
+       */
+      check("Home is linked from every page",
+        new RegExp(`href="/[^/"]+/[^/"]+"[^>]*>`).test(html) && html.includes(">Home<"),
+        "no link to the period root");
+
+      /**
+       * Platform is a real group, and it is closed.
+       *
+       * Its items are only rendered when the group is expanded, so their labels
        * cannot be asserted here and should not be — **a review queue that is
        * collapsed by default is the move working.** It was taken out of the
        * reporting path deliberately; putting it back in the reader's face via
@@ -592,7 +695,33 @@ async function main() {
        * what the spine chip on every costed report is for, asserted separately
        * against those pages.
        */
-      check("Admin is a group in the sidebar", html.includes("Admin"));
+      check("Platform is a group in the sidebar", html.includes("Platform"));
+
+      /**
+       * The Insights section called Admin is gone.
+       *
+       * "Admin" is still on the far-left product rail, which is a different
+       * scope entirely. Two scopes wearing one word is how a reviewer ends up
+       * filing feedback about the wrong screen — so the word survives on the
+       * rail and nowhere in the section list. Asserted on the section nav only,
+       * which begins after the rail's own markup.
+       */
+      /**
+       * The section nav only — bounded by its own element.
+       *
+       * This must not be anchored on the word "Insights": it appears twice,
+       * and the first occurrence is the *rail's* own label, so a slice from
+       * there swallows the rail — including its Admin icon — and the assertion
+       * below fails on a build that is entirely correct. It also must not run
+       * to the end of the document, which carries the whole tree again as RSC
+       * flight data.
+       */
+      const navStart = html.indexOf("<nav");
+      const navEnd = html.indexOf("</nav>", navStart);
+      const sectionNav = navStart >= 0 && navEnd > navStart ? html.slice(navStart, navEnd) : "";
+      check("no Insights section is called Admin",
+        sectionNav !== "" && !/>\s*Admin\s*</.test(sectionNav),
+        "a section header still reads Admin");
 
       /**
        * The group is called Team, and the word Staff survives in exactly one
@@ -603,10 +732,15 @@ async function main() {
        * half-done — a group header updated and a heading left behind, or the
        * reverse — and the half-done state reads as a product that has not
        * decided what it calls its people.
+       *
+       * The slice used to run between "Operations" and "Customers", two group
+       * headers that no longer exist. It now runs from the Team header to the
+       * Guests header, which is the same span expressed in names the nav
+       * actually uses.
        */
-      const navBlock = between(html, html.indexOf("Operations"), html.indexOf("Customers"));
+      const navBlock = between(sectionNav, sectionNav.indexOf(">Team<"), sectionNav.indexOf(">Guests<"));
       check("the section is called Team, not Staff",
-        navBlock.includes("Team") && !/>\s*Staff\s*</.test(navBlock),
+        navBlock !== "" && !/>\s*Staff\s*</.test(navBlock),
         "a nav group still reads Staff");
 
       /**
@@ -622,6 +756,23 @@ async function main() {
       check("the review queue is not in the Team section",
         !/>\s*People\s*</.test(navBlock),
         "People is still a Team nav item");
+
+      /**
+       * Guests is a section, and nothing inside it is also called Guests.
+       *
+       * "Guests › Guests" reads as a mistake even when it is not, and the item
+       * has a better name anyway: Individuals is the only surface in the
+       * section that goes down to the person. The route is unchanged, so this
+       * is asserted on the label rather than the href — an href test would pass
+       * on exactly the build this is meant to catch.
+       */
+      const guestsIdx = sectionNav.indexOf(">Guests<");
+      const guestsBlock = between(sectionNav, guestsIdx + 1, sectionNav.indexOf(">Finance<"));
+      check("no item inside the Guests section is also called Guests",
+        guestsBlock !== "" && !/>\s*Guests\s*</.test(guestsBlock),
+        "Guests › Guests");
+      check("the individual-level report is called Individuals",
+        guestsBlock.includes(">Individuals<"));
 
       /**
        * Every nav item resolves to a route the build actually produced.

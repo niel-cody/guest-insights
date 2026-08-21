@@ -7,11 +7,22 @@ import { GridControls } from "./GridControls";
 
 export const dynamic = "force-static";
 
-/** Named per page: the tab and every screenshot used to read "Guests". */
-export const metadata = { title: "Guests" };
+/**
+ * Named per page: the tab and every screenshot used to read "Guests".
+ *
+ * It reads **Individuals** now. The section is called Guests, and a report
+ * called Guests inside a section called Guests reads as a mistake even when it
+ * is not — but the better argument is that this was always the more accurate
+ * name. Every other surface in the section computes over a population; this is
+ * the only one that goes down to the person.
+ *
+ * The route stays `/guests`. Links to it are in circulation, and a shared link
+ * that 404s is the defect Phase 0 spent its time removing.
+ */
+export const metadata = { title: "Individuals" };
 
 /**
- * Guests. §7. The slice-and-dice surface.
+ * Individuals. §7. The slice-and-dice surface.
  *
  * Deliberately just the grid. Every statistic about the population lives on
  * Overview and Behaviour, which compute on the whole population; this page
@@ -46,7 +57,8 @@ export default async function GuestsPage({
         org={org}
         periods={periods}
         period={current}
-        title="Guests"
+        title="Individuals"
+        section="Guests"
         coverage={cov}
         // §7.1's report-specific filters — value band and daypart — render
         // inside the shared bar rather than beside it. There is not a second

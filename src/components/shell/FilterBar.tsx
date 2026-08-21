@@ -52,7 +52,7 @@ import { IconChevron, IconX } from "./Icons";
  * from — which is the whole of release blocker B2. See `lib/url-state.ts`.
  */
 export function FilterBar({
-  org, periods, period, extra, venuePersists = true,
+  org, periods, period, extra, venuePersists = true, population = true,
 }: {
   org: Org;
   periods: Periods;
@@ -68,6 +68,24 @@ export function FilterBar({
    */
   extra?: ReactNode;
   venuePersists?: boolean;
+  /**
+   * Whether this surface has a population to narrow.
+   *
+   * False on Home, which is the only surface in Insights that is not a report.
+   * Its three cards are a refusal, an alert summary and the operator's own
+   * saved rules — **none of which narrows by venue, tier or segment.** Rendering
+   * those three controls there would put a filter bar above content that
+   * ignores it, which is worse than a disabled control: a disabled control at
+   * least says it is not working. A live `Locations` dropdown that changes the
+   * URL and nothing on screen is the §9.1 B2 defect exactly — a parameter that
+   * survives in the URL and is then ignored.
+   *
+   * The date range and the period **do** stay, because the period is a route
+   * segment rather than a filter: it selects which extract every figure on the
+   * page was drawn from, including the alerts, and Home states that date in its
+   * own standfirst.
+   */
+  population?: boolean;
 }) {
   const sp = useSearchParams();
   const router = useRouter();
@@ -123,6 +141,8 @@ export function FilterBar({
 
         <PeriodPicker all={periods} current={period} orgSlug={org.slug} />
 
+        {population && (
+          <>
         <Locations
           org={org}
           selected={view.venue}
@@ -167,9 +187,12 @@ export function FilterBar({
           ]}
         />
 
+          </>
+        )}
+
         {extra}
 
-        {isFiltered(view) && (
+        {population && isFiltered(view) && (
           <button
             type="button"
             onClick={() => {
@@ -196,7 +219,7 @@ export function FilterBar({
       {/* What the reader is actually looking at, spelled out. A filtered report
           that looks like an unfiltered one is how somebody quotes a venue's
           number as the estate's. */}
-      {chips.length > 0 && (
+      {population && chips.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[12px] text-ink-muted">Showing</span>
           {chips.map((c) => (

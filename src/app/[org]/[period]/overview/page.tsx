@@ -143,6 +143,7 @@ export default async function OverviewPage({
         periods={periods}
         period={current}
         title="Overview"
+        section="Guests"
         coverage={cov}
         checks={checks}
       />
