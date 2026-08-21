@@ -985,32 +985,43 @@ export type TeamMix = {
     revenue: number;
     orders: number;
   }[];
-  /** Is the order's creator the person who sold what is on it? */
+  /**
+   * Which staff column the mix is credited on, and whether it holds.
+   *
+   * The basis is `ASSIGNED_TO_ID` — the order's owner — and not
+   * `CREATED_BY_ID`, which names whoever opened it. The two differ on 16% of
+   * Meat Flour Wine's orders and 58% of Amalfi's, because a manager or host
+   * opens a table and the section's server owns it. Crediting the opener would
+   * rank who opens tables.
+   */
   attribution: {
-    lines: number;
-    noTimestamp: number;
-    /** A line predating its own order. A fault, not a service pattern. */
-    beforeOrder: number;
-    atOrder: number;
-    within5min: number;
-    within30min: number;
-    beyond30min: number;
-    medianLagSec: number | null;
-    maxLagSec: number | null;
-    /** Orders whose lines carry more than one distinct timestamp. */
-    ordersWithSpread: number;
     orders: number;
+    ordersAssigned: number;
+    ordersCreated: number;
+    /** Orders whose assignee is not the person who opened them. */
+    assignedDiffers: number;
+    /**
+     * Orders assigned to a login with no name — a shared terminal, a kiosk, a
+     * training session. Held out of every per-person figure by the same rule
+     * that holds them out of the league table, and counted so the share of
+     * trade nobody owns is visible rather than silently missing.
+     */
+    ordersAssignedUnnamed: number;
+    unnamedNet: number;
+    net: number;
+    createdIdentities: number;
+    assignedIdentities: number;
     /**
      * What the surfaces are allowed to say.
      *
-     * `sole-author` — lines land with the order. One person rang this basket,
-     *   and attributing it to them is a fact rather than an assumption.
-     * `spread` — lines arrive through a service. The mix is real at venue and
-     *   shift level and is **not** attributable to an individual.
-     * `unknown` — the timestamp carries no within-order information, usually
-     *   because the column is stamped once at write time. Nothing is claimed.
+     * `attributable` — the assignee column is populated and named on enough
+     *   trade to carry a per-person mix.
+     * `thin` — it is populated, but a large enough share of trade sits on
+     *   unnamed logins that the per-person picture would be a minority of the
+     *   venue. Published, with the missing share stated on the face.
+     * `absent` — no usable assignee. Nothing is attributed to anybody.
      */
-    verdict: "sole-author" | "spread" | "unknown";
+    verdict: "attributable" | "thin" | "absent";
   };
   /** Can a paid modifier be told from a product here? */
   modifierFlag: {
@@ -1045,6 +1056,60 @@ export type Team = {
   links: TeamLink[];
   people: TeamPerson[];
   margin: TeamMargin;
+  /**
+   * Whether the labour side covers the window the sales side is measured over.
+   *
+   * ── Amalfi is why this exists ──────────────────────────────────────────
+   *
+   * Its roster carries 1,275 timesheet segments and every one of them is in
+   * July. Extracted without this, the five windows on offer published wage
+   * percentages of 24.4%, 8.3%, 6.2%, 0.0% and 0.0% — one correct figure and
+   * four that divide one month of labour by three or five months of sales, or
+   * by no labour at all.
+   *
+   * **A wage percentage of 6.2% is the most dangerous number this section can
+   * produce.** It is well-formatted, plausible at a glance to anyone not in
+   * hospitality, and it tells an operator they are running the most efficient
+   * restaurant in the country when the truth is that two thirds of their
+   * timesheets are missing. Nobody raises it as a bug, because it is good news.
+   *
+   * This is the same shape as the card-capture grading that decides which
+   * periods are offered at all: a ratio may only be struck where both halves
+   * cover the same ground. The difference is that a card month can be graded
+   * before a window is offered, and labour cannot — the window is chosen by the
+   * card tier, so the labour gap is found inside it and has to be refused
+   * rather than avoided.
+   */
+  labour: {
+    /** Every month the analysis window spans, as `YYYY-MM-01`. */
+    monthsInWindow: string[];
+    /** Those carrying at least one costed timesheet segment. */
+    monthsWithCost: string[];
+    /**
+     * All of them.
+     *
+     * A fact, not a gate. Partial labour coverage is what a customer who
+     * adopted timesheets three months into a six-month history looks like, and
+     * blanking their report for it treats an ordinary onboarding timeline as a
+     * data fault. What it drives is the sentence saying the labour figures
+     * cover less ground than the report around them.
+     */
+    complete: boolean;
+    /**
+     * Net sales over the costed months only — the denominator every labour
+     * ratio here is struck on.
+     *
+     * This is the whole correction. The figure was never wrong because the
+     * window was long; it was wrong because the numerator covered one month
+     * and the denominator covered five. Restricting both halves to the same
+     * months turns Amalfi's 6.2% back into July's true 24.4%.
+     */
+    net: number;
+    /** Labour over `net`. Null where no month carries a costed timesheet. */
+    wagePct: number | null;
+    /** What the sub-window is and why, for the reader. Null when complete. */
+    note: string | null;
+  };
   /**
    * What each person sold, by category, and the two probes that decide
    * whether it may be said per person. Null on snapshots taken before the

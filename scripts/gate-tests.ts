@@ -41,7 +41,7 @@ const CG: Grant = { label: "Coffee Guru", password: "coffee-guru-password-1", or
 const MFW: Grant = { label: "Meat Flour Wine", password: "meat-flour-wine-pass-2", orgs: ["meat-flour-wine"] };
 const OOLIO: Grant = { label: "Oolio", password: "oolio-internal-pass-3", orgs: ["*"] };
 const GRANTS = [CG, MFW, OOLIO];
-const ALL = ["coffee-guru", "meat-flour-wine"];
+const ALL = ["coffee-guru", "meat-flour-wine", "amalfi"];
 
 console.log("\nthe access gate");
 
@@ -51,7 +51,17 @@ check("Coffee Guru may see Coffee Guru", grantAllows(CG, "coffee-guru"));
 check("Coffee Guru may NOT see Meat Flour Wine", !grantAllows(CG, "meat-flour-wine"));
 check("Meat Flour Wine may see Meat Flour Wine", grantAllows(MFW, "meat-flour-wine"));
 check("Meat Flour Wine may NOT see Coffee Guru", !grantAllows(MFW, "coffee-guru"));
-check("the internal grant sees both", grantAllows(OOLIO, "coffee-guru") && grantAllows(OOLIO, "meat-flour-wine"));
+check("the internal grant sees every org",
+  ALL.every((o) => grantAllows(OOLIO, o)));
+/**
+ * With two organisations, "refused the other one" and "refused every one it was
+ * not granted" are the same assertion and a bug between them is invisible. A
+ * third makes them different, so the refusal is asserted against the whole
+ * roster rather than against one named rival.
+ */
+check("a single-org grant is refused every org but its own",
+  ALL.filter((o) => o !== "meat-flour-wine").every((o) => !grantAllows(MFW, o)) &&
+    grantAllows(MFW, "meat-flour-wine"));
 // A prefix match here would let `coffee-guru` open `coffee-guru-staging`, which
 // is how a sibling deployment becomes a data leak.
 check("entitlement is not a prefix match", !grantAllows(CG, "coffee-guru-staging"));

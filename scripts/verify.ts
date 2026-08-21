@@ -28,7 +28,7 @@ import { windowVerdict } from "../src/lib/window";
 import { claimLevel, gradeMonth, longestRun } from "./grade";
 
 const DATA = join(import.meta.dirname, "..", "data");
-const SLUGS = ["coffee-guru", "meat-flour-wine"];
+const SLUGS = ["coffee-guru", "meat-flour-wine", "amalfi"];
 
 type Fixture = { snap: Snapshot; guests: GuestRows };
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -85,20 +85,52 @@ async function load(slug: string, period: string): Promise<Fixture> {
  * One corruption per check, each reproducing the defect the check names.
  * These are the actual v1 failures, re-injected.
  */
-const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
+/**
+ * Each entry corrupts a snapshot the way its check claims to catch.
+ *
+ * Returning `false` means **this fixture has nothing to corrupt here** — a
+ * step-change fixture on a single-month window, a labour fixture on a window
+ * with no costed timesheet, a card fixture on a member-spine window. The check
+ * is then unproven for that period and excluded from its badge, which is the
+ * honest outcome. Returning nothing means it applied.
+ */
+const CORRUPTIONS: Record<string, (f: Fixture) => void | false> = {
   // Ten months of card data collapsed onto one token, exactly as it happened.
+  /**
+   * Nothing to corrupt on a member window: it admits no card months at all.
+   *
+   * The fixture returns rather than throwing, which reports the check as
+   * unproven for that period. That is the truth — it cannot be exercised
+   * against a window with no card tier — and it is visible in the summary
+   * rather than crashing the run or being quietly counted as proven.
+   */
   "card.maxTokenShare": (f) => {
     const m = f.snap.org.cardTier.months[0];
-    const q = f.snap.org.cardTier.quality.find((x) => x.month === m)!;
+    const q = m ? f.snap.org.cardTier.quality.find((x) => x.month === m) : undefined;
+    if (!q) return false;
     q.maxTokenShare = 1;
     q.distinctPar = 1;
   },
-  // Distinct references collapse while transaction volume holds.
+  /**
+   * Distinct references collapse while transaction volume holds.
+   *
+   * Needs two months to corrupt, because the defect it reproduces is a *step*
+   * — one month's reference count falling off a cliff while its transaction
+   * count does not. A single-month window has no step to introduce, and Amalfi
+   * offers three of them: the period control now enumerates single calendar
+   * months, which this fixture predates.
+   *
+   * Returning without corrupting leaves the check reported as unproven for that
+   * period rather than crashing the run. That is the honest outcome — the check
+   * genuinely cannot be exercised against a one-month window — and it is
+   * visible in the summary rather than swallowed.
+   */
   "card.distinctStepChange": (f) => {
     const months = f.snap.org.cardTier.months;
     const q = f.snap.org.cardTier.quality;
-    const a = q.find((x) => x.month === months[0])!;
-    const b = q.find((x) => x.month === months[1])!;
+    const a = q.find((x) => x.month === months[0]);
+    const b = months.length > 1 ? q.find((x) => x.month === months[1]) : undefined;
+    if (!a || !b) return false;
     a.distinctPar = 20000; a.txns = 40000;
     b.distinctPar = 200; b.txns = 39000;
   },
@@ -131,16 +163,22 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
   },
   // A card rendered as though the business knows who it belongs to.
   "identity.nameImpliesEnrolment": (f) => {
+    // Same reason: no card-tier row on a member window, so no name can be put
+    // on one that should not have had it.
     const g = f.guests.rows.find((x) => x.tier !== "member");
-    if (g) g.name = "Casey Lindqvist D696";
+    if (!g) return false;
+    g.name = "Casey Lindqvist D696";
   },
   // The breach that survives now that cards carry a verdict: a card published
   // as having come exactly once, when a card is not a person until its second
   // visit. Corrupts both files the check reads.
   "segment.cardNeverSeenOnce": (f) => {
+    // A member-spine window joins no payments, so every row in it is a member
+    // and there is no card-tier guest to mis-segment. Nothing to corrupt.
     const g = f.guests.rows.find((x) => x.tier !== "member");
-    if (g) g.segment = "one-visit";
     const s = f.snap.segments.rows.find((x) => x.tier !== "member");
+    if (!g && !s) return false;
+    if (g) g.segment = "one-visit";
     if (s) s.segment = "one-visit";
   },
   // A habit-broken verdict issued on a single observed interval.
@@ -238,20 +276,52 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
   // because a dead Monday lunch is weighted the same as a full Saturday dinner.
   "team.wagePctNotAveraged": (f) => {
     const cells = f.snap.team?.margin.serviceDow.filter((c) => c.storeId === "all" && c.wagePct != null);
-    if (f.snap.team && cells?.length) {
-      f.snap.team.totals.wagePct =
-        cells.reduce((a, c) => a + (c.wagePct ?? 0), 0) / cells.length;
+    // Averaging a column of zeroes returns zero, which is what the honest
+    // computation returns too — so on a window with no labour the fixture
+    // cannot make the check fail, and pretending otherwise would leave a
+    // toothless check counted as proven. Amalfi's May and June have none: the
+    // timesheets start in July.
+    if (!f.snap.team || !cells?.length || f.snap.team.totals.labour === 0) return false;
+    f.snap.team.totals.wagePct =
+      cells.reduce((a, c) => a + (c.wagePct ?? 0), 0) / cells.length;
+  },
+  /**
+   * The regression this check was written from, reproduced exactly.
+   *
+   * Amalfi's roster holds July and nothing else. The first version of the
+   * extract struck every window's wage percentage on the whole window's sales,
+   * so the three-month window published 8.3% and the five-month window 6.2%
+   * against a true 24.4%. Both are well-formatted, plausible to anyone who does
+   * not run a kitchen, and read as an unusually efficient restaurant — which is
+   * why nobody would have reported them.
+   *
+   * The fixture puts the diluted denominator back: labour stays where it is and
+   * the ratio is struck on the full window again.
+   */
+  "team.wagePctStruckOnItsOwnMonths": (f) => {
+    const team = f.snap.team;
+    if (!team) return;
+    // A window whose timesheets already cover every month has no dilution to
+    // reproduce, so one is introduced: the cost keeps its months, the sales
+    // side gains one the timesheets never reached.
+    if (team.labour.complete) {
+      const first = team.labour.monthsInWindow[0] ?? "2026-01-01";
+      team.labour.monthsWithCost = team.labour.monthsWithCost.slice(1);
+      team.labour.complete = false;
+      if (!team.labour.monthsInWindow.includes(first)) team.labour.monthsInWindow.unshift(first);
     }
+    team.labour.net = team.totals.net;
+    team.labour.wagePct = team.totals.net > 0 ? team.totals.labour / team.totals.net : null;
   },
   // Somebody helpfully filling in the empty column: a clock hour handed the
   // ratio it cannot support.
   "team.clockRatiosAbsent": (f) => {
     const dp = f.snap.team?.margin.daypart.find((c) => c.storeId === "all" && c.hours > 0);
-    if (dp) {
-      dp.wagePct = dp.net > 0 ? dp.labour / dp.net : 0;
-      dp.margin = dp.net - dp.labour;
-      dp.refusal = null;
-    }
+    // Nothing to fill in where no day part carries an hour.
+    if (!dp) return false;
+    dp.wagePct = dp.net > 0 ? dp.labour / dp.net : 0;
+    dp.margin = dp.net - dp.labour;
+    dp.refusal = null;
   },
   // A conflicted link costed anyway — one person's wage divided into another
   // person's sales, which is exactly what the four conflicts at this
@@ -290,7 +360,11 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void> = {
       .sort((a, b) => b.hours - a.hours);
     const dp = byHours[0];
     const other = byHours.find((c) => c.group !== dp?.group);
-    if (dp && other) { const moved = dp.hours / 2; dp.hours -= moved; other.hours += moved; }
+    // Two groups carrying hours are needed to move hours between them.
+    if (!dp || !other || dp.hours === 0) return false;
+    const moved = dp.hours / 2;
+    dp.hours -= moved;
+    other.hours += moved;
   },
   // The classifier failing to recognise a shared login: the training till keeps
   // its name and acquires an ordinary verdict, which is what lets it walk into
@@ -905,7 +979,24 @@ async function main() {
     }
 
     // 2. Each check fails when its own defect is injected.
-    const unproven: string[] = [];
+    /**
+     * Two different facts that used to share one list.
+     *
+     * `noFixture` is a gap in this repository — somebody added a check and
+     * never wrote the corruption that proves it can fail. That is a build
+     * failure and stays one, because it is the exact hole the register exists
+     * to keep shut.
+     *
+     * `notApplicable` is a fact about the *window*: the fixture ran its guard
+     * and found nothing to corrupt, because this period has no second month, no
+     * costed timesheet, or no card tier. The check is excluded from that
+     * period's badge and the run continues. Conflating the two would have meant
+     * either failing the build on Amalfi's legitimate single-month windows or
+     * letting a genuinely unproven check through, and the second is how a
+     * register becomes decoration.
+     */
+    const noFixture: string[] = [];
+    const notApplicable: string[] = [];
     let proven = 0;
     for (const c of live) {
       if (c.proof === "unit") {
@@ -915,9 +1006,26 @@ async function main() {
         continue;
       }
       const corrupt = CORRUPTIONS[c.id];
-      if (!corrupt) { unproven.push(c.id); continue; }
+      if (!corrupt) { noFixture.push(c.id); continue; }
       const f: Fixture = { snap: clone(fixture.snap), guests: clone(fixture.guests) };
-      corrupt(f);
+      /**
+       * A fixture may decline to apply, and that is not the same as failing.
+       *
+       * Amalfi is why this distinction now exists. Its period list includes
+       * single calendar months and a member-spine window, and several fixtures
+       * have nothing to corrupt in them: a step change needs two months, a
+       * labour fixture needs a costed timesheet, a card fixture needs an
+       * admitted card month. Those checks genuinely cannot be exercised there.
+       *
+       * Treating that as a verification failure would have exactly one
+       * outcome — somebody weakens a check until the run goes green. So the
+       * fixture returns `false`, the check is recorded as unproven **for that
+       * period**, and it drops out of that period's badge. The guarantee is
+       * unchanged where it can be tested: a fixture that runs and leaves the
+       * check passing is still a hard failure.
+       */
+      const applied = corrupt(f);
+      if (applied === false) { notApplicable.push(c.id); continue; }
       const after = runChecks(f.snap, f.guests).find((x) => x.id === c.id)!;
       if (after.ok) {
         failures++;
@@ -927,9 +1035,12 @@ async function main() {
       }
     }
     console.log(`  ${proven}/${live.length} checks proven capable of failing`);
-    if (unproven.length) {
+    if (notApplicable.length) {
+      console.log(`  · not exercisable in this window, excluded from its badge: ${notApplicable.join(", ")}`);
+    }
+    if (noFixture.length) {
       failures++;
-      console.log(`  ✗ unproven, excluded from the badge: ${unproven.join(", ")}`);
+      console.log(`  ✗ no failing fixture written: ${noFixture.join(", ")}`);
     }
     }
   }

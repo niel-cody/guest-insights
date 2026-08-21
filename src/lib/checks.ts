@@ -13,7 +13,7 @@
  */
 import type { GuestRows, Snapshot, TeamMarginCell } from "./types";
 import { count, money, pairArithmetic, pct, recency, tileCount } from "./metrics";
-import { MIN_COVERAGE, claimLevel, windowRules, windowVerdict } from "./window";
+import { MIN_COVERAGE, claimLevel, spineOf, windowRules, windowVerdict } from "./window";
 import {
   STABLE_ABS_TOL as MAX_STABLE_ABS, STABLE_REL_TOL as MAX_STABLE_REL, retentionTrend,
 } from "./retention";
@@ -62,25 +62,48 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   const win = org.window;
   const checks: Check[] = [];
 
+  /**
+   * A member-spine window has no card months, and that is its design.
+   *
+   * The three card checks below assert against `cardTier.months`, which is
+   * empty by construction on a member window — payments are deliberately not
+   * joined, because the whole point of that window is to reach back further
+   * than card capture allows. Left ungated they fail on every member window
+   * with "no months admitted", which is not a defect being caught. It is a
+   * check being asked a question about something that is not there.
+   *
+   * **A register is only worth opening if red means something.** Three
+   * permanent false alarms on a legitimate window would teach a reader to skim
+   * past the badge, which costs more than the three checks are worth. They are
+   * omitted rather than reported as passing, so the count on the badge drops
+   * and the reader can see that fewer things were asserted here.
+   *
+   * Amalfi is the first organisation to offer a member window, which is why
+   * this surfaced now rather than when member windows were built.
+   */
+  const cardSpine = spineOf(org) === "card";
+
   // ── the five critical checks ──────────────────────────────────────────────
 
   // 1. Card capture. The failure that started all of this.
   const admitted = org.cardTier.quality.filter((q) => org.cardTier.months.includes(q.month));
   const worstToken = admitted.reduce((a, q) => Math.max(a, q.maxTokenShare), 0);
+  if (cardSpine) {
   checks.push(ok(
-    "card.maxTokenShare",
-    "No month in the analysis window has more than 10% of its card transactions on one reference.",
-    // The merchant is not named. This register renders inside every
-    // organisation's report, and the passwords now go to two different
-    // customers — so a worked example naming one of them is a disclosure to the
-    // other. The defect class is the useful part; whose data it happened to was
-    // never load-bearing.
-    "All ten corrupt months at one organisation in this dataset, which sat at 100% and passed every non-null coverage test.",
-    admitted.length > 0 && worstToken < 0.1,
-    admitted.length
-      ? `worst admitted month ${(worstToken * 100).toFixed(2)}% · rejected ${org.cardTier.quality.filter((q) => !q.ok).length} of ${org.cardTier.quality.length}`
-      : "no months admitted",
-  ));
+      "card.maxTokenShare",
+      "No month in the analysis window has more than 10% of its card transactions on one reference.",
+      // The merchant is not named. This register renders inside every
+      // organisation's report, and the passwords now go to two different
+      // customers — so a worked example naming one of them is a disclosure to the
+      // other. The defect class is the useful part; whose data it happened to was
+      // never load-bearing.
+      "All ten corrupt months at one organisation in this dataset, which sat at 100% and passed every non-null coverage test.",
+      admitted.length > 0 && worstToken < 0.1,
+      admitted.length
+        ? `worst admitted month ${(worstToken * 100).toFixed(2)}% · rejected ${org.cardTier.quality.filter((q) => !q.ok).length} of ${org.cardTier.quality.length}`
+        : "no months admitted",
+    ));
+  }
 
   // 2. A step change in distinct references not matched by a change in volume.
   const sorted = [...org.cardTier.quality].sort((a, b) => a.month.localeCompare(b.month));
@@ -309,13 +332,15 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   // ── window integrity ──────────────────────────────────────────────────────
 
   const monthsInWindow = coverage.monthly.filter((m) => m.month >= win.start && m.month <= win.end);
+  if (cardSpine) {
   checks.push(ok(
-    "window.cardMonthsOnly",
-    "Every month rendered is a month the payment identity can be trusted in.",
-    "`Card months available 12 of 25`, where eight pre-dated both venues trading and carried zero card revenue.",
-    monthsInWindow.length === coverage.monthly.length && coverage.monthly.every((m) => org.cardTier.months.includes(m.month)),
-    `${coverage.monthly.length} months rendered · ${org.cardTier.months.length} admitted · window ${win.start} → ${win.end}`,
-  ));
+      "window.cardMonthsOnly",
+      "Every month rendered is a month the payment identity can be trusted in.",
+      "`Card months available 12 of 25`, where eight pre-dated both venues trading and carried zero card revenue.",
+      monthsInWindow.length === coverage.monthly.length && coverage.monthly.every((m) => org.cardTier.months.includes(m.month)),
+      `${coverage.monthly.length} months rendered · ${org.cardTier.months.length} admitted · window ${win.start} → ${win.end}`,
+    ));
+  }
 
   const dpSum = dayparts.periods.reduce((a, d) => a + d.orders, 0);
   checks.push(ok(
@@ -506,15 +531,17 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
   // June 2023. Coverage is measured on *real* references only, so a month that
   // is 90% placeholder scores 10% here rather than 100% on a non-null count.
   const admittedCoverage = admitted.length ? Math.min(...admitted.map((m) => m.coverage)) : 0;
+  if (cardSpine) {
   checks.push(ok(
-    "card.coverageIsReal",
-    "Every admitted month carries a real card reference on enough of its trade to recover a population.",
-    "'PAR present on 82.87% of 405,116,084 rows' — a non-null count whose dominant value is the string 'N/A', which is how an estate with an eight-month reference blackout looked card-covered throughout it.",
-    admitted.length > 0 && admittedCoverage >= MIN_COVERAGE,
-    admitted.length
-      ? `weakest admitted month ${(admittedCoverage * 100).toFixed(0)}% of transactions carry a real reference · floor ${(MIN_COVERAGE * 100).toFixed(0)}%`
-      : "no months admitted",
-  ));
+      "card.coverageIsReal",
+      "Every admitted month carries a real card reference on enough of its trade to recover a population.",
+      "'PAR present on 82.87% of 405,116,084 rows' — a non-null count whose dominant value is the string 'N/A', which is how an estate with an eight-month reference blackout looked card-covered throughout it.",
+      admitted.length > 0 && admittedCoverage >= MIN_COVERAGE,
+      admitted.length
+        ? `weakest admitted month ${(admittedCoverage * 100).toFixed(0)}% of transactions carry a real reference · floor ${(MIN_COVERAGE * 100).toFixed(0)}%`
+        : "no months admitted",
+    ));
+  }
 
   const cb = members.coverBasis;
   const missingnessGap = cb.member.avgOrderWithCovers / Math.max(cb.member.avgOrderWithoutCovers, 1);
@@ -588,6 +615,80 @@ export function teamChecks(snap: Snapshot): Check[] {
     off.length
       ? `${off.map((g) => `${g.name} off by $${Math.max(g.net, g.labour).toFixed(0)}`).join(", ")}`
       : `${grains.length} grains agree to the dollar on ${money(t.net)} and ${money(t.labour)}`,
+  ));
+
+  /**
+   * 1b. The labour side must cover every month the sales side does.
+   *
+   * Amalfi is the fixture, and it is a live one rather than a constructed one:
+   * its roster carries 1,275 timesheet segments and every one is in July. On
+   * the five windows the period control offers, that produced wage percentages
+   * of 24.4%, 8.3%, 6.2%, 0.0% and 0.0% — one right answer and four that divide
+   * one month of cost by three, five, or no months of it.
+   *
+   * This check is worth more than the four figures it withholds. **A wage
+   * percentage that is too low is the only error in this section nobody
+   * reports**: it is good news, it is plausible to anyone who does not run a
+   * kitchen, and an operator acting on it rosters *up*. Every other defect here
+   * announces itself by looking wrong.
+   *
+   * Blocking, because unlike a warning it does not withhold a comparison — it
+   * withholds a number that is on screen and false.
+   */
+  const lab = team.labour;
+  /**
+   * The two halves of the wage percentage must cover the same months.
+   *
+   * Not that the window is fully costed — a customer who switched timesheets on
+   * three months into a six-month history is adopting the product, not
+   * breaking it, and blanking their report for that is punishing them for it.
+   * What must never happen is one month of cost divided by five months of
+   * sales, which is what produced Amalfi's 6.2%.
+   *
+   * **A wage percentage that is too low is the only error in this section
+   * nobody reports.** It is good news, plausible to anyone who does not run a
+   * kitchen, and an operator acting on it rosters up. Every other defect here
+   * announces itself by looking wrong.
+   *
+   * Provably capable of failing: it fails on any snapshot where the published
+   * rate is struck on the full-window net while the cost covers less of it,
+   * which is exactly what the first version of this extract produced.
+   */
+  /**
+   * Asserted structurally, against the month grain, rather than by comparing
+   * the two rates.
+   *
+   * The first version of this check tested whether the restricted rate differed
+   * from the diluted one — which passes trivially whenever they happen to
+   * agree, and passed its own corrupted fixture. A check that can be satisfied
+   * by coincidence is the thing this register exists to keep out.
+   *
+   * What must hold is exact: **the denominator is the sales of the costed
+   * months and nothing else.** The month grain already carries that sum, so
+   * the assertion compares two numbers that are computed from different code
+   * paths and must agree to the dollar.
+   */
+  const monthCells = all(team.margin.month);
+  const netOverCostedMonths = monthCells
+    .filter((c) => lab.monthsWithCost.includes(`${c.key}-01`))
+    .reduce((a, c) => a + c.net, 0);
+  const denominatorHolds =
+    lab.monthsWithCost.length === 0
+      ? lab.wagePct === null && lab.net === 0
+      : lab.wagePct !== null && Math.abs(lab.net - netOverCostedMonths) < 1;
+  out.push(ok(
+    "team.wagePctStruckOnItsOwnMonths",
+    "The wage percentage divides labour cost by sales from the same months, never by the whole window.",
+        /* The merchant is not named, for the reason stated at `card.maxTokenShare`:
+       this register renders inside every organisation's report and the
+       passwords go to different customers, so a worked example naming one of
+       them is a disclosure to the others. The layout tests assert it, and this
+       string is what they caught. The defect class is the useful part. */
+    "One month of labour over five months of trade. At one organisation in this dataset the roster holds a single month, and its five offered windows first published 24.4%, 8.3%, 6.2% and two flat zeroes — one right answer and four that read as an unusually efficient restaurant, which is why nobody would have reported them.",
+    denominatorHolds,
+    lab.monthsWithCost.length === 0
+      ? "no costed month in this window — no rate published"
+      : `${lab.monthsWithCost.length} of ${lab.monthsInWindow.length} months costed, rate struck on ${lab.monthsWithCost.length}`,
   ));
 
   // 2. A wage percentage is a ratio of sums, never a mean of ratios. The two

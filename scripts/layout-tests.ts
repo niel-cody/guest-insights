@@ -291,7 +291,21 @@ async function main() {
         "member-window content is back on this page without its clock warning");
     }
 
-    if (name.endsWith("/retention")) {
+    /**
+     * The retention assertions describe a chart, so they only apply where one
+     * was drawn.
+     *
+     * Amalfi trades over five months and its observation window is shorter than
+     * twice the lapse threshold, so the page refuses in full — correctly, and
+     * by the rule R-191 already enforces. Four assertions about the burn-down's
+     * corrections then read as regressions on a page that is doing exactly what
+     * it should.
+     *
+     * Gated on a marker rather than on the refusal's wording, because a test
+     * pinned to a sentence breaks the first time somebody improves the
+     * sentence.
+     */
+    if (name.endsWith("/retention") && !html.includes("data-retention-refused")) {
       // BH-7, moved with the chart. The burn-down is liked precisely for the
       // thing it does not prove, so the correction cannot follow the method
       // into the drawer.

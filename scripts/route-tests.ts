@@ -27,7 +27,7 @@ import type { Guest, Guests, Org } from "../src/lib/types";
 import { unpackGuests } from "../src/lib/guest-columns";
 
 const DATA = join(import.meta.dirname, "..", "data");
-const SLUGS = ["coffee-guru", "meat-flour-wine"];
+const SLUGS = ["coffee-guru", "meat-flour-wine", "amalfi"];
 
 let failures = 0;
 let passes = 0;
@@ -78,8 +78,26 @@ async function main() {
     // merchant with no dinner trade does not fail a test about dayparts.
     const cases: { param: string; query: string; predicate: (g: Guest) => boolean }[] = [];
 
-    cases.push({ param: "tier", query: "tier=member", predicate: (g) => g.tier === "member" });
-    cases.push({ param: "tier", query: "tier=card", predicate: (g) => g.tier === "card" });
+    /**
+     * A tier is only worth filtering on where the window has both of them.
+     *
+     * These two were the only literals in a list the comment above promises is
+     * built from the snapshot, and a member-spine window is where that caught
+     * up with them: it joins no payments, so every row in it is a member.
+     * `tier=member` narrows nothing because there is nothing to narrow, and
+     * `tier=card` renders an empty page — both correct, and both read as
+     * failures against an assertion that assumes two populations.
+     *
+     * Amalfi is the first organisation to offer such a window, which is why
+     * this surfaced now rather than when member windows were built.
+     */
+    for (const tier of ["member", "card"] as const) {
+      const present = rows.some((g) => g.tier === tier);
+      const other = rows.some((g) => g.tier !== tier);
+      if (present && other) {
+        cases.push({ param: "tier", query: `tier=${tier}`, predicate: (g) => g.tier === tier });
+      }
+    }
 
     const segment = rows.find((g) => g.segment)?.segment;
     if (segment) {

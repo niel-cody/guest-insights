@@ -2,12 +2,112 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.11.0`** — the version and commit render in the app header on every
+**Current: `v0.12.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.12.0 — a third organisation arrives, and finds four things
+
+Amalfi joins Coffee Guru and Meat Flour Wine: two venues, 70 employees, a
+costed roster. It is the second merchant carrying labour data, so the Team
+section finally has a comparison rather than a sample of one.
+
+It also broke four things, which is what a third organisation is for.
+
+### The mix was being credited to the wrong person
+
+`ORDER_ITEMS` carries no creator column — only `ORDER_ID`, product, price and a
+timestamp. The staff identity has to come off the order header, and the header
+has **two** staff columns.
+
+`CREATED_BY_ID` is whoever opened the order. `ASSIGNED_TO_ID` is whose sale it
+is. They differ on 1.5% of Coffee Guru's orders, 16% of Meat Flour Wine's and
+**58% of Amalfi's** — a host or manager opens the table and the section's server
+owns it. Crediting the opener would have ranked *who opens tables*, a roster
+fact wearing a skill label, and it is the exact defect the Performance report
+exists to refuse.
+
+The mix is credited to the assignee. It credits a whole basket to the server the
+order was assigned to, which is how a venue credits a sale — **not** a claim
+about who keyed each line, which the warehouse does not record at all.
+
+### A probe that asked the wrong question, and the false alarm it raised
+
+The first attribution probe compared each item line's timestamp to its order's,
+on the theory that a line rung long after the order opened belonged to somebody
+else. It reported 23.5% of paid lines *predating* the order they sat on, and
+this changelog nearly carried a warning that day parts were mis-cut.
+
+They are not. Measured at order grain, the header sits inside its own line span
+on 84% of orders and in the same clock hour as its first line on **99%** of
+them. The 23.5% is long tables, where the header lands mid-service and a single
+order contributes a hundred lines. Authorship was never a timing question.
+
+### Adoption is a timeline, not a defect
+
+Amalfi's roster holds July and nothing else. Its five offered windows first
+published wage percentages of 24.4%, 8.3%, 6.2%, 0.0% and 0.0% — one right
+answer and four that divide one month of cost by three, five, or no months of
+it.
+
+**A wage percentage that is too low is the only error in this section nobody
+reports.** It is good news, plausible to anyone who does not run a kitchen, and
+an operator who acts on it rosters up.
+
+The first fix refused any window whose labour did not cover every month. That
+was the wrong correction: a customer who trades for six months and switches
+timesheets on in month three is adopting the product, not breaking it, and
+blanking four of their five windows punishes them for it. The figure was never
+wrong because the window was long — it was wrong because the numerator covered
+one month while the denominator covered five.
+
+**Both halves are now restricted to the months the timesheets cover, and the
+sub-window travels with the figure.** Amalfi's five-month window reports July's
+true 24.4%, labelled July. `team.wagePctStruckOnItsOwnMonths` asserts the
+denominator structurally against the month grain — the first version compared
+the two rates, which passes by coincidence and passed its own corrupted fixture.
+
+### A member window has no card months, and three checks kept saying so
+
+Amalfi is the first organisation to offer a member-spine window. It joins no
+payments by design, so `card.maxTokenShare`, `card.coverageIsReal` and
+`window.cardMonthsOnly` failed on it every time with "no months admitted".
+
+That is not a defect being caught, it is a check being asked about something
+that is not there — and **a register is only worth opening if red means
+something.** Three permanent false alarms would teach a reader to skim past the
+badge. They are omitted on a member window rather than reported as passing, so
+the count drops and the reader can see that fewer things were asserted.
+
+The same window has no card-tier guests at all, which broke two route
+assertions that filtered on tier from a literal rather than from the snapshot —
+in a list whose own comment promises every case is built from the snapshot.
+
+### A fixture that cannot apply is not a fixture that failed
+
+Amalfi's period list includes single calendar months, and several corruption
+fixtures have nothing to corrupt in them: a step change needs two months, a
+labour fixture needs a costed timesheet, a card fixture needs an admitted card
+month.
+
+`npm run verify` counted those as failures, which has exactly one outcome —
+somebody weakens a check until the run goes green. Fixtures now return `false`
+to mean *nothing here to corrupt*; the check is excluded from that period's
+badge and named in the run. **A check with no fixture written at all is still a
+hard failure**, which is the hole the register exists to keep shut.
+
+### And the register nearly disclosed one customer to another
+
+The new check's description named Amalfi and its numbers. That string renders
+inside every organisation's report, and the passwords go to different
+customers. `checks.ts` states this rule at `card.maxTokenShare` and the layout
+tests assert it; it caught the violation before the push. The defect class is
+the useful part — whose data it happened to was never load-bearing.
 
 ---
 

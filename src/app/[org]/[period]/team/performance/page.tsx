@@ -4,6 +4,7 @@ import { Card, EmptyState, Pill, Tile } from "@/components/ui/Primitives";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { TeamDrivers } from "@/components/charts/TeamDrivers";
 import { MixGate } from "@/components/charts/MixGate";
+import { LabourGap } from "@/components/shell/LabourGap";
 import { getPeriods, getSnapshot } from "@/lib/data";
 import { teamChecks } from "@/lib/checks";
 import { count, money, pct, windowShort } from "@/lib/metrics";
@@ -261,6 +262,12 @@ export default async function TeamPerformancePage({
 
           {/* ── the layer below average item value ────────────────────────── */}
           <MixGate team={team} orgName={org.name} />
+
+          {/* Sales per labour hour is the one metric on this page that needs a
+              timesheet. Where the window's timesheets are incomplete it is
+              withheld and the gap is named — the per-cover rates above are
+              untouched, because none of them divides by an hour. */}
+          <LabourGap team={team} orgName={org.name} />
 
           {/* ── the table ─────────────────────────────────────────────────── */}
           <Card

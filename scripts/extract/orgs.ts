@@ -5,6 +5,12 @@
  * Flour Wine is the restaurant contrast — table service, covers recorded, far
  * lower enrolment. The pair is the argument: the same report has to work for a
  * daily-habit counter business and a monthly-occasion table-service one.
+ *
+ * Amalfi is the second restaurant group, and it is here to stop a
+ * table-service finding being a fact about one merchant. It is the second
+ * organisation carrying labour data, so the Team section finally has a
+ * comparison rather than a sample of one — and it is the first to show the two
+ * venues of one group behaving differently enough to matter.
  */
 export type OrgConfig = {
   slug: string;
@@ -30,6 +36,30 @@ export const ORGS: OrgConfig[] = [
     slug: "meat-flour-wine",
     id: "01JQ7QED4TAZTQS085NTV84C8T",
     name: "Meat Flour Wine",
+    vertical: "restaurant",
+    serviceModel: "table",
+    labels: { visit: "visit", visits: "visits", guest: "guest", guests: "guests" },
+  },
+  /**
+   * Amalfi. Two venues, both dine-in, and only one of them keys a party size.
+   *
+   * `Cinque Terre` records covers on 10,412 of 10,717 orders and averages $127
+   * an order. `Amalfi` records them on **five of 16,397** and averages $42, yet
+   * carries a table name on two thirds of its orders — so it is table service
+   * that does not key covers, not a counter.
+   *
+   * `serviceModel: "table"` is therefore right for the group and wrong for half
+   * its trade, and that is a real finding rather than a configuration problem:
+   * `quality.ts` already refuses a table-service organisation whose covers
+   * share falls below 90%, and it will fire here. The per-cover metrics that
+   * carry the Performance report cannot be computed for the Amalfi venue, and
+   * the honest output is a refusal naming the venue, not a per-order fallback
+   * quietly substituted for a per-cover figure.
+   */
+  {
+    slug: "amalfi",
+    id: "01KGEGQH67746QW76T3JMN5G9H",
+    name: "Amalfi",
     vertical: "restaurant",
     serviceModel: "table",
     labels: { visit: "visit", visits: "visits", guest: "guest", guests: "guests" },

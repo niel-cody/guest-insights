@@ -33,7 +33,7 @@ async function read<T>(slug: string, period: string, name: string): Promise<T> {
   return JSON.parse(await readFile(join(DATA, slug, period, `${name}.json`), "utf8")) as T;
 }
 
-export const ORG_SLUGS = ["coffee-guru", "meat-flour-wine"] as const;
+export const ORG_SLUGS = ["coffee-guru", "meat-flour-wine", "amalfi"] as const;
 export type OrgSlug = (typeof ORG_SLUGS)[number];
 
 export const getPeriods = cache(

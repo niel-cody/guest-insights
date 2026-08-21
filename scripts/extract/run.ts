@@ -1555,6 +1555,7 @@ async function extractTeam(
     links: [], people: [],
     margin: { daypart: [], service: [], serviceDow: [], dow: [], dowDaypart: [], week: [], month: [], day: [], dayService: [] },
     mix: null,
+    labour: { monthsInWindow: [], monthsWithCost: [], complete: false, net: 0, wagePct: null, note: null },
     sections: [],
     totals: { net: 0, labour: 0, leave: 0, plannedLabour: 0, hours: 0, penaltyHours: 0, penaltyCost: 0, wagePct: 0, margin: 0, netPerHour: 0 },
   };
@@ -2052,35 +2053,34 @@ async function extractTeam(
   }
 
   const a = attributionRows[0] ?? {};
-  const attrLines = num(a.LINES);
-  const ordersWithSpread = num(a.ORDERS_WITH_SPREAD);
-  const beyond30 = num(a.LINES_BEYOND_30MIN);
-  const within30 = num(a.LINES_WITHIN_30MIN);
-  const noTimestamp = num(a.LINES_NO_TIMESTAMP);
+  const attrOrders = num(a.ORDERS);
+  const ordersAssigned = num(a.ORDERS_ASSIGNED);
+  const ordersAssignedUnnamed = num(a.ORDERS_ASSIGNED_UNNAMED);
+  const attrNet = r2(num(a.NET));
+  const unnamedNet = r2(num(a.UNNAMED_NET));
 
   /**
-   * Three outcomes, and they are three different products.
+   * Three outcomes, struck on trade rather than on order count.
    *
-   * The order of these tests matters. "No information" has to be ruled out
-   * before "one author" can be claimed, because the two look identical in every
-   * aggregate: a column stamped once at write time puts every line at lag zero,
-   * which is exactly what a genuinely instant service looks like. The thing
-   * that separates them is whether *any* order anywhere shows a spread — a real
-   * quick service still varies by seconds across a few thousand orders, and a
-   * copied column never varies at all.
+   * An unnamed login is not a small problem in proportion to how often it
+   * appears — a kiosk rings many small orders and a section terminal rings a
+   * few large ones. What decides whether a per-person mix describes the venue
+   * or a corner of it is **the share of money nobody owns**, so that is what
+   * the thresholds are struck on.
    *
-   * The 5% floor on lines arriving more than half an hour after the order is a
-   * judgement made before seeing the number it tests, which is the honest way
-   * to set it and a bad way to leave it. **The first extract that runs this
-   * probe should be reviewed against it** rather than the number being taken as
-   * a pass because the build stayed green.
+   * A quarter is the line between "published with the gap stated" and
+   * "published as the whole picture". It is a judgement, named here, and the
+   * first extract at a new organisation should be read against it — Amalfi
+   * runs roughly a third of its orders on unnamed logins and will land on
+   * `thin` by design rather than by accident.
    */
+  const unnamedNetShare = attrNet ? unnamedNet / attrNet : 1;
   const attrVerdict: TeamMix["attribution"]["verdict"] =
-    attrLines === 0 || noTimestamp / Math.max(attrLines, 1) > 0.05 || ordersWithSpread === 0
-      ? "unknown"
-      : (beyond30 + within30) / attrLines > 0.05
-        ? "spread"
-        : "sole-author";
+    attrOrders === 0 || ordersAssigned / Math.max(attrOrders, 1) < 0.5
+      ? "absent"
+      : unnamedNetShare > 0.25
+        ? "thin"
+        : "attributable";
 
   const mf = modifierRows[0] ?? {};
   const mfPaidLines = num(mf.PAID_LINES);
@@ -2103,17 +2103,15 @@ async function extractTeam(
     categories: mixCategories,
     rows: mixRowsOut,
     attribution: {
-      lines: attrLines,
-      noTimestamp,
-      beforeOrder: num(a.LINES_BEFORE_ORDER),
-      atOrder: num(a.LINES_AT_ORDER),
-      within5min: num(a.LINES_WITHIN_5MIN),
-      within30min: within30,
-      beyond30min: beyond30,
-      medianLagSec: a.MEDIAN_LAG_SEC == null ? null : num(a.MEDIAN_LAG_SEC),
-      maxLagSec: a.MAX_LAG_SEC == null ? null : num(a.MAX_LAG_SEC),
-      ordersWithSpread,
-      orders: num(a.ORDERS),
+      orders: attrOrders,
+      ordersAssigned,
+      ordersCreated: num(a.ORDERS_CREATED),
+      assignedDiffers: num(a.ASSIGNED_DIFFERS),
+      ordersAssignedUnnamed,
+      unnamedNet,
+      net: attrNet,
+      createdIdentities: num(a.CREATED_IDENTITIES),
+      assignedIdentities: num(a.ASSIGNED_IDENTITIES),
       verdict: attrVerdict,
     },
     modifierFlag: {
@@ -2128,6 +2126,98 @@ async function extractTeam(
       usable: modifierUsable,
     },
   };
+
+  /**
+   * Does the labour side cover the same months the sales side does?
+   *
+   * Derived from the segments already fetched rather than from a new query, so
+   * the months this reports are exactly the months the cost figures were built
+   * from. A separate query could disagree with the aggregation it is meant to
+   * describe, which is the failure mode this whole file is arranged against.
+   *
+   * A segment counts as covering its month if it carries a cost. A roster row
+   * with zero cost is a published shift nobody was paid for yet, and treating
+   * it as coverage would let an unprocessed month look measured.
+   */
+  /**
+   * `START_TIME_TZ` arrives as a Date, not a string.
+   *
+   * The first version of this called `String()` on it, which produced
+   * "Wed Jul 01 2026 …" and a month key of "Wed Jul-01" that matched nothing —
+   * so every organisation reported zero costed months, including the one with
+   * six thousand six hundred segments. `tsLocal` is the same helper the
+   * apportionment loop above already uses, so the months counted here are the
+   * months the cost figures were actually built from.
+   */
+  const monthKey = (d: unknown) => {
+    const t = tsLocal(d);
+    return t ? `${t.toISOString().slice(0, 7)}-01` : null;
+  };
+  const monthsInWindow: string[] = [];
+  {
+    const cur = new Date(`${w.start.slice(0, 7)}-01T00:00:00Z`);
+    const last = `${w.end.slice(0, 7)}-01`;
+    for (let guard = 0; guard < 64; guard++) {
+      const m = cur.toISOString().slice(0, 10);
+      monthsInWindow.push(m);
+      if (m === last) break;
+      cur.setUTCMonth(cur.getUTCMonth() + 1);
+    }
+  }
+  const monthsWithCost = [
+    ...new Set(
+      labourRows
+        .filter((r) => num(r.COST) > 0)
+        .map((r) => monthKey(r.START_TIME_TZ))
+        .filter((m): m is string => m !== null),
+    ),
+  ]
+    .filter((m) => monthsInWindow.includes(m))
+    .sort();
+
+  const missingMonths = monthsInWindow.filter((m) => !monthsWithCost.includes(m));
+  const labourComplete = missingMonths.length === 0 && monthsWithCost.length > 0;
+
+  /**
+   * A late-adopted integration is a timeline, not a defect.
+   *
+   * The first version of this refused any window whose labour did not cover
+   * every month, which treats the normal shape of a customer relationship as a
+   * fault: somebody trades on the POS for six months, switches timesheets on in
+   * month three, and had four of their five offered windows blanked for it.
+   *
+   * The ratio is not wrong because the window is long. It is wrong because the
+   * **denominator** was the whole window while the numerator was one month of
+   * it. So the ratio is struck over the months the timesheets actually cover,
+   * and that sub-window travels with every figure computed from it. An operator
+   * gets 24.4% labelled *July* rather than 6.2% labelled nothing, which is a
+   * number they can act on instead of a blank they cannot.
+   *
+   * `complete` is retained as a fact rather than a gate: it drives the sentence
+   * that says the figures below cover less ground than the report around them.
+   */
+  const labourNet = monthsWithCost.length
+    ? all
+        .filter((c) => "date" in c && typeof (c as { date?: string }).date === "string")
+        .filter((c) => monthsWithCost.includes(`${(c as unknown as { date: string }).date.slice(0, 7)}-01`))
+        .reduce((a, c) => a + c.net, 0)
+    : 0;
+
+  const monthName = (m: string) =>
+    new Date(`${m}T00:00:00Z`).toLocaleDateString("en-AU", { month: "long", year: "numeric", timeZone: "UTC" });
+
+  const labourNote = labourComplete
+    ? null
+    : monthsWithCost.length === 0
+      ? `No timesheet in this window carries a cost, so wage percentage, margin after labour and ` +
+        `sales per labour hour are not computed. They are withheld rather than published as zero: ` +
+        `a zero wage percentage is not a low one, it is an absent one, and on a page of ratios it ` +
+        `reads as the best number there.`
+      : `Timesheets here start in ${monthName(monthsWithCost[0])}. Every labour figure below is ` +
+        `struck over ${monthsWithCost.map(monthName).join(", ")} — both halves of the ratio, not ` +
+        `just the cost — so it is the true rate for the months you have rather than a diluted rate ` +
+        `for the months you do not. The sales figures elsewhere in this section cover the full ` +
+        `window and are unaffected.`;
 
   const waged = empRows.filter((r) => String(r.TYPE) !== "Salaried");
   const team: Team = {
@@ -2163,6 +2253,12 @@ async function extractTeam(
     people,
     margin,
     mix,
+    labour: {
+      monthsInWindow, monthsWithCost, complete: labourComplete,
+      net: r2(labourNet),
+      wagePct: labourNet > 0 ? r4(totalLabour / labourNet) : null,
+      note: labourNote,
+    },
     sections: [...sectionAcc.entries()]
       .map(([section, s]) => ({
         section,

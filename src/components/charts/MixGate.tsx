@@ -1,9 +1,9 @@
 import { Card, EmptyState, Facts } from "@/components/ui/Primitives";
-import { count, pct } from "@/lib/metrics";
+import { count, money, pct } from "@/lib/metrics";
 import type { Team } from "@/lib/types";
 
 /**
- * What each person sells — and, first, whether that sentence is allowed.
+ * What each person sells — and, first, whose sale it was.
  *
  * ── Why the gate is a panel and not a silent branch ────────────────────────
  *
@@ -13,13 +13,12 @@ import type { Team } from "@/lib/types";
  * before either can name a person, and both are properties of the warehouse
  * rather than of the analysis:
  *
- *   1. **The order's creator has to be the person who sold what is on it.**
- *      `CREATED_BY_ID` is whoever opened the order. In table service somebody
- *      seats and opens, drinks go on, mains go on, and dessert is rung two
- *      hours later by whoever is still standing. Attribute all of it to the
- *      opener and the dessert ranking measures **who opens tables** — a roster
- *      fact wearing a skill label, which is the exact failure this whole report
- *      was built to refuse.
+ *   1. **The order has to be credited to the right person.** The header
+ *      carries two staff columns and they disagree — on 16% of Meat Flour
+ *      Wine's orders and 58% of Amalfi's. A manager or host opens the table
+ *      and the section's server owns it, so crediting the opener would rank
+ *      **who opens tables**, a roster fact wearing a skill label. The mix is
+ *      credited to the assignee.
  *
  *   2. **A paid modifier has to be distinguishable from a product.** Otherwise
  *      there is no attachment rate, because there is no denominator anybody can
@@ -27,9 +26,9 @@ import type { Team } from "@/lib/types";
  *
  * Both are measured at extract time and land here as verdicts. This panel
  * renders the answer either way, because **the measurement is the finding**: an
- * operator who learns that their till stamps every line with the order's own
- * timestamp has learned something they can act on with their POS vendor, and
- * they learn nothing at all from a section that quietly does not appear.
+ * operator who learns that a third of their trade is rung on unnamed logins has
+ * learned something they can fix this week, and they learn nothing at all from
+ * a section that quietly does not appear.
  *
  * The alternative — branch silently, show the mix when it works, show nothing
  * when it does not — produces a report that is different on different venues
@@ -69,41 +68,39 @@ export function MixGate({ team, orgName }: { team: Team; orgName: string }) {
 
   const a = mix.attribution;
   const m = mix.modifierFlag;
-  const late = a.lines ? (a.within30min + a.beyond30min) / a.lines : 0;
+  const unnamedShare = a.net ? a.unnamedNet / a.net : 0;
+  const differsShare = a.orders ? a.assignedDiffers / a.orders : 0;
 
   /** The evidence, stated the same way whichever verdict it produced. */
   const evidence = (
     <div className="mt-5 grid gap-5 md:grid-cols-2">
       <div>
         <h3 className="text-[12px] font-semibold tracking-wide text-ink-secondary uppercase">
-          When lines were rung, against when the order opened
+          Whose sale it was
         </h3>
         <div className="mt-2">
           <Facts
             rows={[
-              ["Paid lines measured", count(a.lines)],
-              ["Landing with the order", pct(a.lines ? a.atOrder / a.lines : 0)],
-              ["Within five minutes", pct(a.lines ? a.within5min / a.lines : 0)],
-              ["Five to thirty minutes", pct(a.lines ? a.within30min / a.lines : 0)],
-              ["Beyond thirty minutes", pct(a.lines ? a.beyond30min / a.lines : 0)],
+              ["Completed orders", count(a.orders)],
+              ["Carrying an assignee", pct(a.orders ? a.ordersAssigned / a.orders : 0)],
+              ["Assignee is not the person who opened it", pct(differsShare)],
               [
-                "Orders whose lines carry more than one timestamp",
-                `${count(a.ordersWithSpread)} of ${count(a.orders)}`,
+                "Assigned to an unnamed login",
+                `${count(a.ordersAssignedUnnamed)} orders · ${money(a.unnamedNet)}`,
               ],
+              ["Share of net sales nobody owns", pct(unnamedShare)],
               [
-                "Median lag",
-                a.medianLagSec == null ? "—" : `${Math.round(a.medianLagSec)}s`,
+                "Identities seen",
+                `${count(a.assignedIdentities)} assigned · ${count(a.createdIdentities)} opening`,
               ],
             ]}
           />
         </div>
-        {a.beforeOrder > 0 && (
-          <p className="mt-2 text-[12px] leading-relaxed text-ink-muted">
-            {count(a.beforeOrder)} lines carry a timestamp earlier than the order they sit on. A
-            line cannot precede its own order, so this is a warehouse fault rather than a service
-            pattern, and it is named here rather than absorbed into a bucket.
-          </p>
-        )}
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-muted">
+          An unnamed login is a shared terminal, a kiosk or a training session. Its trade is real
+          and counted at venue level; it is nobody&rsquo;s mix, and it is named here rather than
+          going quietly missing from the bottom of a league table.
+        </p>
       </div>
 
       <div>
@@ -119,7 +116,10 @@ export function MixGate({ team, orgName }: { team: Team; orgName: string }) {
                 `${count(m.ambiguousNames)} of ${count(m.names)}`,
               ],
               ["Paid lines on those names", pct(m.ambiguousLineShare)],
-              ["Revenue on those names", pct(m.paidRevenue ? m.ambiguousRevenue / m.paidRevenue : 0)],
+              [
+                "Revenue on those names",
+                pct(m.paidRevenue ? m.ambiguousRevenue / m.paidRevenue : 0),
+              ],
               ["Cleanly-marked paid modifier lines", count(m.cleanModifierLines)],
             ]}
           />
@@ -133,94 +133,93 @@ export function MixGate({ team, orgName }: { team: Team; orgName: string }) {
     </div>
   );
 
-  const attributionRefused = a.verdict !== "sole-author";
-
   return (
     <Card
       title="What each person sells"
       subtitle="The layer below average item value: not how much a basket was worth, but what was in it."
     >
-      {a.verdict === "unknown" && (
+      {a.verdict === "absent" && (
         <EmptyState
           tone="warning"
-          title="The till does not record when each line was rung, so this is not attributed to anyone"
+          title="No order at this organisation records who it belonged to, so nothing here is attributed to a person"
           body={
             <>
-              Every paid line at {orgName} carries its order&rsquo;s own timestamp and no order
-              anywhere shows a spread across its lines. That is what a column stamped once at write
-              time looks like, and it is indistinguishable from a service where every basket really
-              was rung in one moment — <strong className="text-ink">so nothing here separates the
-              two</strong>, and a per-person mix built on it would be a guess about who was standing
-              at the till.
-              <br />
-              <br />
-              This is a question for the POS vendor rather than a limit of the analysis. Line-level
-              timestamps would make every figure below attributable.
+              {pct(a.orders ? a.ordersAssigned / a.orders : 0)} of completed orders carry an
+              assignee. The mix is real at venue and shift level and will be published there, but a
+              per-person figure would be crediting sales to whoever happened to open the order —
+              which ranks who opens orders, not who sells.
             </>
           }
         />
       )}
 
-      {a.verdict === "spread" && (
+      {a.verdict === "thin" && (
         <EmptyState
           tone="warning"
-          title="Lines arrive through the service, so the mix belongs to a shift and not to a person"
+          title={`${pct(unnamedShare)} of net sales here is rung on logins with no name attached`}
           body={
             <>
-              {pct(late)} of paid lines are rung more than five minutes after their order opened,
-              and {count(a.ordersWithSpread)} of {count(a.orders)} orders carry lines at more than
-              one moment. At {orgName} an order is a service rather than a transaction: somebody
-              seats and opens it, and whoever is on rings the next course.
-              <br />
-              <br />
-              <strong className="text-ink">
-                Attributing the whole basket to whoever opened it would rank who opens tables, not
-                who sells.
+              {count(a.ordersAssignedUnnamed)} orders worth {money(a.unnamedNet)} are assigned to a
+              shared terminal, a kiosk or a training session rather than to a person. Those are held
+              out of everything below, so the per-person mix describes{" "}
+              <strong className="text-ink">{pct(1 - unnamedShare)} of {orgName}&rsquo;s trade
               </strong>{" "}
-              That is the same defect as ranking on net sales — a roster fact wearing a skill label
-              — and this report refuses it in one place for the same reason it refuses it in the
-              other. The mix is real at venue and shift level and will be published there.
+              and not all of it.
+              <br />
+              <br />
+              It is published on that basis rather than withheld, because the gap is nameable and
+              fixable: every one of those orders would be attributable if the till asked who was
+              ringing it. What is refused is the version that shows the ranking without the
+              sentence you have just read.
             </>
           }
         />
       )}
 
-      {!attributionRefused && !m.usable && (
-        <EmptyState
-          tone="warning"
-          title="No attachment rate is published, because a paid modifier cannot reliably be told from a product"
-          body={
-            <>
-              {count(m.ambiguousNames)} product names appear both flagged as a modifier and not,
-              carrying {pct(m.ambiguousLineShare)} of paid lines — above the {pct(0.02)} this build
-              will compute a rate on.
-              <br />
-              <br />
-              The error is not random, which is what makes it disqualifying rather than merely
-              annoying. Whether a modifier gets flagged depends on how the item was configured and
-              how it was rung, and both vary by person —{" "}
-              <strong className="text-ink">
-                so the noise sits on exactly the axis an attachment rate claims to measure
-              </strong>
-              . A ranking built on it would order people by their keying habits and call it
-              upselling. The category mix below is unaffected: it counts what was sold, not how it
-              was classified.
-            </>
-          }
-        />
+      {!m.usable && a.verdict !== "absent" && (
+        <div className={a.verdict === "thin" ? "mt-5" : ""}>
+          <EmptyState
+            tone="warning"
+            title="No attachment rate is published, because a paid modifier cannot reliably be told from a product"
+            body={
+              <>
+                {count(m.ambiguousNames)} product names appear both flagged as a modifier and not,
+                carrying {pct(m.ambiguousLineShare)} of paid lines — above the {pct(0.02)} this
+                build will compute a rate on.
+                <br />
+                <br />
+                The error is not random, which is what makes it disqualifying rather than merely
+                annoying. Whether a modifier gets flagged depends on how the item was configured and
+                how it was rung, and both vary by person —{" "}
+                <strong className="text-ink">
+                  so the noise sits on exactly the axis an attachment rate claims to measure
+                </strong>
+                . A ranking built on it would order people by their keying habits and call it
+                upselling. The category mix is unaffected: it counts what was sold, not how it was
+                classified.
+              </>
+            }
+          />
+        </div>
       )}
 
-      {!attributionRefused && (
-        <div className={m.usable ? "" : "mt-5"}>
+      {a.verdict !== "absent" && (
+        <div className={a.verdict === "thin" || !m.usable ? "mt-5" : ""}>
           <EmptyState
             title="The mix panels arrive at the next data refresh"
             body={
               <>
-                Attribution holds at {orgName}:{" "}
-                {pct(a.lines ? (a.atOrder + a.within5min) / a.lines : 0)} of paid lines are rung
-                within five minutes of their order opening, so the person who opened it is the
-                person who sold it. The per-person category mix has been extracted and the panels
-                that read it are being built against these numbers rather than ahead of them.
+                Sales are credited to the server the order was assigned to, which is how a venue
+                credits a sale — not a claim about who keyed each line, which the warehouse does not
+                record. At {orgName} the assignee differs from whoever opened the order on{" "}
+                {pct(differsShare)} of orders, so the distinction is doing real work rather than
+                being a technicality.
+                <br />
+                <br />
+                {count(mix.rows.length)} person-and-category rows across{" "}
+                {count(mix.categories.length)} categories
+                have been extracted. The panels that read them are being built against these numbers
+                rather than ahead of them.
               </>
             }
           />

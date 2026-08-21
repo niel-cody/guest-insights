@@ -115,10 +115,31 @@ GROUP BY 1, 2, 3`;
  * are not the same person to coach.
  *
  * The join is `ORDER_ITEMS.ORDER_ID` to `ORDERS.ORDER_ID`, and the staff
- * identity comes off the order header. **That is an assumption, not a fact**,
- * and it is the reason `posAttributionProbeQuery` exists below: `CREATED_BY_ID`
- * is whoever opened the order, and in table service the person who opens the
- * table is not necessarily the person who sold the dessert two hours later.
+ * identity comes off the order header — but **not from `CREATED_BY_ID`**, which
+ * is where this started and was wrong.
+ *
+ * `CREATED_BY_ID` is whoever opened the order. At Meat Flour Wine that is a
+ * different person from the one the order is assigned to on 1,512 of 9,410
+ * orders, and at Amalfi on 15,689 of 27,114 — a manager or host opens the
+ * table, the section's server owns it. Crediting the opener would have ranked
+ * **who opens tables**, which is a roster fact wearing a skill label and the
+ * exact defect this report was built to refuse.
+ *
+ * `ASSIGNED_TO_ID` is the order's owner. It is populated on every completed
+ * order at all three organisations and it draws from the same identity pool —
+ * one id at each org appears as an assignee and never as a creator. At Coffee
+ * Guru, a counter business, the two columns agree on 98.5% of orders, which is
+ * what a correct column looks like where one person really does ring and own
+ * the sale.
+ *
+ * ── What this attribution does and does not claim ──────────────────────────
+ *
+ * It credits a **whole basket to the server the order was assigned to**. That
+ * is how a venue credits a sale and how a server would expect to be measured.
+ * It is *not* a claim about who physically keyed each line, and nothing here
+ * should be worded as though it were: line-level authorship is not in the
+ * warehouse at all — `ORDER_ITEMS` carries no creator column, only `ORDER_ID`,
+ * product, price and a timestamp.
  *
  * Reads the shared `itemsCte` rather than restating the filters. The three
  * traps documented there — the mis-keyed quantity, the unreliable modifier
@@ -129,9 +150,9 @@ GROUP BY 1, 2, 3`;
 export function posStaffMixQuery(orgId: string, w: Window) {
   return `WITH ${itemsCte(orgId, w)},
 staff_order AS (
-  SELECT ORDER_ID, CREATED_BY_ID AS POS_ID
+  SELECT ORDER_ID, ASSIGNED_TO_ID AS POS_ID
   FROM ${ORDERS}
-  WHERE ${orderBase(orgId, w)}
+  WHERE ${orderBase(orgId, w)} AND ASSIGNED_TO_ID IS NOT NULL
 ),
 lines AS (
   SELECT s.POS_ID, p.CATEGORY_ID, p.CATEGORY_NAME, p.TYPE_NAME,
@@ -152,66 +173,51 @@ GROUP BY POS_ID, CATEGORY_ID`;
 }
 
 /**
- * Is the order's creator the person who sold what is on it?
+ * Which of the order header's two staff columns is the seller?
  *
- * ── Why a figure is not published until this is answered ───────────────────
+ * ── This replaced a probe that asked the wrong question ────────────────────
  *
- * Every per-person mix number rests on attributing an item line to whoever
- * opened the order it sits on. At a coffee counter that is one person and one
- * moment. At a table it is a service: somebody seats and opens, drinks go on,
- * mains go on, and dessert is rung two hours later by whoever is still on.
- * Attributing all of it to the opener would produce a dessert ranking that
- * measures **who opens tables**, which is a roster fact wearing a skill label —
- * the exact failure the Performance page was built to refuse.
+ * The first version compared each item line's timestamp to its order's, on the
+ * theory that lines rung long after the order opened belonged to somebody else.
+ * It returned an alarming result — 23.5% of paid lines at Meat Flour Wine
+ * appeared to *predate* the order they sat on — and the alarm was an artefact
+ * of the question. The header sits inside its own line span on 84% of orders
+ * and within the same clock hour as its first line on 99% of them, so the
+ * timing tells you a long table is a long table and nothing about authorship.
  *
- * The line's own timestamp is the evidence. Three outcomes, and they are
- * different products:
+ * Authorship was never a timing question. It is a column question, and the
+ * column exists: `ASSIGNED_TO_ID` names the order's owner where
+ * `CREATED_BY_ID` names whoever opened it.
  *
- *   1. **Line timestamps spread through the service.** Attribution to the
- *      opener is wrong for the later lines, and the mix must either refuse or
- *      be restricted to orders that closed quickly.
- *   2. **Line timestamps cluster at the order's own timestamp.** Either service
- *      really is one moment, or the column is stamped once at write time and
- *      carries no information. `DISTINCT_TS_PER_ORDER` separates those: a
- *      genuine quick service still varies by seconds, a copied column does not
- *      vary at all.
- *   3. **The column is null.** Nothing can be said, and nothing is.
+ * What this measures is whether that column can be leant on:
  *
- * Reported as a distribution rather than a single share, because the decision
- * it feeds — publish, restrict, or refuse — needs the shape and not a mean.
+ *   - **Coverage.** An order with no assignee is credited to nobody and drops
+ *     out of every per-person figure. At Amalfi roughly a third of orders sit
+ *     on an unnamed login, which the shared-login rule already classifies as
+ *     not a person — that is a finding about how the venue rings, not a fault.
+ *   - **Disagreement.** How often the assignee differs from the creator. Near
+ *     zero at a counter and high in table service is the column behaving; the
+ *     reverse would mean it is not what it appears to be.
+ *   - **Pool.** Assignee ids that never appear as a creator are people the
+ *     identity spine has never seen, and their trade cannot be costed.
  */
 export function posAttributionProbeQuery(orgId: string, w: Window) {
-  return `WITH ${itemsCte(orgId, w)},
-staff_order AS (
-  SELECT ORDER_ID, CREATED_BY_ID AS POS_ID, CREATED_AT_TZ AS ORDER_TS
-  FROM ${ORDERS}
-  WHERE ${orderBase(orgId, w)}
-),
-lag AS (
-  SELECT
-    s.ORDER_ID,
-    DATEDIFF(second, s.ORDER_TS, p.TS) AS LAG_SEC
-  FROM paid_line p JOIN staff_order s ON s.ORDER_ID = p.ORDER_ID
-),
-per_order AS (
-  SELECT ORDER_ID, COUNT(DISTINCT LAG_SEC) AS DISTINCT_LAGS
-  FROM lag GROUP BY ORDER_ID
-)
-SELECT
-  COUNT(*) AS LINES,
-  COUNT_IF(LAG_SEC IS NULL) AS LINES_NO_TIMESTAMP,
-  /* Negative would mean a line predates the order it is on: a data fault, not
-     a service pattern, and it has to be visible rather than absorbed. */
-  COUNT_IF(LAG_SEC < 0) AS LINES_BEFORE_ORDER,
-  COUNT_IF(LAG_SEC = 0) AS LINES_AT_ORDER,
-  COUNT_IF(LAG_SEC > 0 AND LAG_SEC <= 300) AS LINES_WITHIN_5MIN,
-  COUNT_IF(LAG_SEC > 300 AND LAG_SEC <= 1800) AS LINES_WITHIN_30MIN,
-  COUNT_IF(LAG_SEC > 1800) AS LINES_BEYOND_30MIN,
-  MEDIAN(LAG_SEC) AS MEDIAN_LAG_SEC,
-  MAX(LAG_SEC) AS MAX_LAG_SEC,
-  (SELECT COUNT_IF(DISTINCT_LAGS > 1) FROM per_order) AS ORDERS_WITH_SPREAD,
-  (SELECT COUNT(*) FROM per_order) AS ORDERS
-FROM lag`;
+  return `SELECT
+  COUNT(*) AS ORDERS,
+  COUNT_IF(ASSIGNED_TO_ID IS NOT NULL) AS ORDERS_ASSIGNED,
+  COUNT_IF(CREATED_BY_ID IS NOT NULL) AS ORDERS_CREATED,
+  COUNT_IF(ASSIGNED_TO_ID IS NOT NULL AND ASSIGNED_TO_ID <> CREATED_BY_ID) AS ASSIGNED_DIFFERS,
+  /* A blank name is a shared terminal, a kiosk or a training login. The
+     shared-login rule already holds those out of every per-person figure; they
+     are counted here so the share of trade nobody owns is visible rather than
+     silently missing from the bottom of a league table. */
+  COUNT_IF(NULLIF(TRIM(ASSIGNED_TO_NAME), '') IS NULL) AS ORDERS_ASSIGNED_UNNAMED,
+  SUM(IFF(NULLIF(TRIM(ASSIGNED_TO_NAME), '') IS NULL, TOTAL_PRICE - COALESCE(TOTAL_TAX, 0), 0)) AS UNNAMED_NET,
+  SUM(TOTAL_PRICE - COALESCE(TOTAL_TAX, 0)) AS NET,
+  COUNT(DISTINCT CREATED_BY_ID) AS CREATED_IDENTITIES,
+  COUNT(DISTINCT ASSIGNED_TO_ID) AS ASSIGNED_IDENTITIES
+FROM ${ORDERS}
+WHERE ${orderBase(orgId, w)}`;
 }
 
 /**

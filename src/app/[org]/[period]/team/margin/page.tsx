@@ -1,5 +1,6 @@
 import { PageHeader, Page } from "@/components/shell/PageHeader";
 import { SpineChip } from "@/components/shell/SpineChip";
+import { LabourGap } from "@/components/shell/LabourGap";
 import { Card, EmptyState, Facts, Pill, Tile } from "@/components/ui/Primitives";
 import { ExplainDrawer } from "@/components/ui/ExplainDrawer";
 import { getPeriods, getSnapshot } from "@/lib/data";
@@ -88,6 +89,22 @@ export default async function TeamMarginPage({
 
   const win = windowShort(team.window);
   const t = team.totals;
+
+  /**
+   * The published wage percentage is the one struck on its own months.
+   *
+   * `totals.wagePct` divides the window's labour by the window's sales, which
+   * is the same number wherever the timesheets cover the whole window and a
+   * diluted one wherever they do not — Amalfi's five-month window returns 6.2%
+   * there against a true 24.4%. The two agree by construction when
+   * `labour.complete`, so reading the restricted figure everywhere costs
+   * nothing and removes the chance of the wrong one reaching a tile.
+   *
+   * Null means no month in this window carries a costed timesheet. The report
+   * still renders — its sales side is untouched — and every labour ratio on it
+   * is withheld rather than shown as zero.
+   */
+  const wagePct = team.labour.wagePct;
   const all = <C extends TeamMarginCell>(cells: C[]): C[] => cellsFor(cells, "all");
 
   const groups = all(team.margin.service);
@@ -130,7 +147,7 @@ export default async function TeamMarginPage({
   const norms = weekdayNorms(all(team.margin.dayService) as DayServiceCell[]);
   const flagged = exceptions(norms);
   const overPlan = t.labour - t.plannedLabour;
-  const band = wageBand(t.wagePct);
+  const band = wageBand(wagePct);
   const tone = band?.tone === "good" ? "good" : (band?.tone ?? "warning");
 
   return (
@@ -138,6 +155,7 @@ export default async function TeamMarginPage({
       {header}
       <Page>
         <div className="mx-auto flex max-w-[1240px] flex-col gap-5">
+          <LabourGap team={team} orgName={org.name} />
           <Standfirst
             question="Where is the team working efficiently, and when?"
             body={
@@ -153,7 +171,7 @@ export default async function TeamMarginPage({
           <div className="grid gap-4 md:grid-cols-4">
             <Tile
               label="Wage percentage"
-              value={pct(t.wagePct, 1)}
+              value={wagePct == null ? "Not published" : pct(wagePct, 1)}
               accent={`var(--${tone})`}
               detail={`${money(t.labour)} labour · ${money(t.net)} net sales`}
               meta={`Leave excluded, ${win}`}
@@ -161,7 +179,11 @@ export default async function TeamMarginPage({
             <Tile
               label="After labour"
               value={money(t.margin)}
-              detail={`${pct(1 - t.wagePct, 1)} of net sales survives the wage bill`}
+              detail={
+                wagePct == null
+                  ? "No costed timesheet in this window"
+                  : `${pct(1 - wagePct, 1)} of net sales survives the wage bill`
+              }
               meta="Wage cost only — no food cost subtracted"
             />
             <Tile
@@ -186,7 +208,7 @@ export default async function TeamMarginPage({
               worst={worst}
               best={best}
               orgName={org.name}
-              wagePct={t.wagePct}
+              wagePct={wagePct ?? 0}
             />
           )}
 

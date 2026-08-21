@@ -77,7 +77,11 @@ export default async function RetentionPage({
       <>
         {header}
         <Page>
-          <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
+          {/* A stable marker for the layout tests. The four assertions about the
+              burn-down and its corrections describe a chart that is not drawn
+              here, and matching on the refusal prose would tie a test to a
+              sentence somebody will reasonably reword. */}
+          <div data-retention-refused="" className="mx-auto flex max-w-[1180px] flex-col gap-5">
             <Standfirst
               question="Are the people who came back still coming back?"
               body="Neither identity this build holds can answer it yet at this organisation."
