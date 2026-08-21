@@ -938,6 +938,97 @@ export type TeamIntegrity = {
   segments: number;
 };
 
+/**
+ * What each person sold, and whether that sentence is allowed to be said.
+ *
+ * ── Two gates before a single figure renders ──────────────────────────────
+ *
+ * The mix itself is easy: join item lines to the order header and read the
+ * staff id off it. Both of the hard parts are questions about whether the join
+ * means what it appears to mean, and both are answered here at extract time
+ * rather than argued about per panel.
+ *
+ * **`attribution`** asks whether the order's creator is the person who sold
+ * what is on it. If lines are rung through a service by whoever is on, then a
+ * dessert ranking built on the opener ranks *who opens tables* — a roster fact
+ * wearing a skill label, which is precisely what the Performance page exists to
+ * refuse.
+ *
+ * **`modifierFlag`** asks whether a paid modifier can be told from a product at
+ * all. The only marker is `MODIFIER_GROUP_NAME`, which the item extract already
+ * records failing badly at Coffee Guru. Its error is not random: whether a
+ * modifier gets flagged depends on how it was configured and rung, which varies
+ * by person — so the noise sits on exactly the axis an attachment rate claims
+ * to measure.
+ *
+ * Null on any snapshot extracted before these queries existed, the same way
+ * `ItemPrices` is, so a surface reads the absence rather than assuming a shape.
+ */
+export type TeamMix = {
+  window: AnalysisWindow;
+  /** Category dictionary. `rows.category` indexes into this. */
+  categories: { id: string; name: string; type: string | null }[];
+  /**
+   * One row per person per category. `person` is a `TeamPerson.id`.
+   *
+   * Only people the identity spine will divide by appear here, for the same
+   * reason they are the only ones carrying a cost figure: a mix attached to a
+   * conflict or a collision is one person's selling attributed to another.
+   */
+  rows: {
+    person: string;
+    category: number;
+    /** Non-modifier lines. What a "they sold twelve desserts" sentence counts. */
+    productLines: number;
+    /** Including paid modifiers. What category spend reconciles on. */
+    paidLines: number;
+    revenue: number;
+    orders: number;
+  }[];
+  /** Is the order's creator the person who sold what is on it? */
+  attribution: {
+    lines: number;
+    noTimestamp: number;
+    /** A line predating its own order. A fault, not a service pattern. */
+    beforeOrder: number;
+    atOrder: number;
+    within5min: number;
+    within30min: number;
+    beyond30min: number;
+    medianLagSec: number | null;
+    maxLagSec: number | null;
+    /** Orders whose lines carry more than one distinct timestamp. */
+    ordersWithSpread: number;
+    orders: number;
+    /**
+     * What the surfaces are allowed to say.
+     *
+     * `sole-author` — lines land with the order. One person rang this basket,
+     *   and attributing it to them is a fact rather than an assumption.
+     * `spread` — lines arrive through a service. The mix is real at venue and
+     *   shift level and is **not** attributable to an individual.
+     * `unknown` — the timestamp carries no within-order information, usually
+     *   because the column is stamped once at write time. Nothing is claimed.
+     */
+    verdict: "sole-author" | "spread" | "unknown";
+  };
+  /** Can a paid modifier be told from a product here? */
+  modifierFlag: {
+    names: number;
+    /** Names appearing both flagged and unflagged — the marker failing. */
+    ambiguousNames: number;
+    paidLines: number;
+    ambiguousLines: number;
+    paidRevenue: number;
+    ambiguousRevenue: number;
+    cleanModifierLines: number;
+    /** Ambiguous lines over paid lines. The share the refusal is struck on. */
+    ambiguousLineShare: number;
+    /** False means no attachment rate is published, at any grain. */
+    usable: boolean;
+  };
+};
+
 export type Team = {
   window: AnalysisWindow;
   /**
@@ -954,6 +1045,12 @@ export type Team = {
   links: TeamLink[];
   people: TeamPerson[];
   margin: TeamMargin;
+  /**
+   * What each person sold, by category, and the two probes that decide
+   * whether it may be said per person. Null on snapshots taken before the
+   * mix query existed.
+   */
+  mix: TeamMix | null;
   /** Section totals, for the multi-site roll-up the raw names prevent. */
   sections: {
     section: string;

@@ -150,7 +150,17 @@ export async function getAllOrgs(): Promise<Org[]> {
  */
 export const getTeam = cache(async (slug: string, period: string): Promise<Team | null> => {
   try {
-    return await read<Team>(slug, period, "team");
+    const team = await read<Team>(slug, period, "team");
+    /**
+     * `mix` is younger than every snapshot currently on disk.
+     *
+     * Normalised to null on read rather than left `undefined`, because the two
+     * are not the same fact to a consumer: a surface written against
+     * `TeamMix | null` will guard the null it was told about, and `undefined`
+     * only behaves identically until the first piece of code reaches for a key
+     * on it. The type says null, so the value is null.
+     */
+    return { ...team, mix: team.mix ?? null };
   } catch {
     return null;
   }

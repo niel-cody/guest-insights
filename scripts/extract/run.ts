@@ -27,7 +27,7 @@ import * as Q from "./queries";
 import * as C from "./cohort";
 import * as T from "./team";
 import type {
-  Team, TeamLink, TeamMargin, TeamMarginCell, TeamPerson, TeamVerdict,
+  Team, TeamLink, TeamMargin, TeamMarginCell, TeamMix, TeamPerson, TeamVerdict,
 } from "../../src/lib/types";
 import {
   allRuns, candidateWindows, claimLevel, gradeMonth, longestRun, monthsBetween,
@@ -1554,6 +1554,7 @@ async function extractTeam(
     },
     links: [], people: [],
     margin: { daypart: [], service: [], serviceDow: [], dow: [], dowDaypart: [], week: [], month: [], day: [], dayService: [] },
+    mix: null,
     sections: [],
     totals: { net: 0, labour: 0, leave: 0, plannedLabour: 0, hours: 0, penaltyHours: 0, penaltyCost: 0, wagePct: 0, margin: 0, netPerHour: 0 },
   };
@@ -1563,8 +1564,10 @@ async function extractTeam(
     return;
   }
 
-  const [posRows, grainRows, salesRows, empRows, deptRows, labourRows, plannedRows, nullStart] =
-    await Promise.all([
+  const [
+    posRows, grainRows, salesRows, empRows, deptRows, labourRows, plannedRows, nullStart,
+    mixRows, attributionRows, modifierRows,
+  ] = await Promise.all([
       query<Row>(T.posStaffQuery(org.id, w)),
       query<Row>(T.posStaffGrainQuery(org.id, w)),
       query<Row>(T.salesGrainQuery(org.id, w)),
@@ -1573,6 +1576,9 @@ async function extractTeam(
       query<Row>(T.labourQuery(storeIds, w)),
       query<Row>(T.plannedQuery(storeIds, w)),
       query<Row>(T.labourNullStartQuery(storeIds)),
+      query<Row>(T.posStaffMixQuery(org.id, w)),
+      query<Row>(T.posAttributionProbeQuery(org.id, w)),
+      query<Row>(T.modifierFlagProbeQuery(org.id, w)),
     ]);
 
   // The gate. No employee roll and no costed segment means no workforce system,
@@ -1992,6 +1998,137 @@ async function extractTeam(
     { confirmed: 0, proposed: 0, conflict: 0, collision: 0, unmatched: 0, "not-a-person": 0 } as Record<TeamVerdict, number>,
   );
 
+  /**
+   * The mix, and the two questions that decide whether it may name a person.
+   *
+   * Both verdicts are struck here rather than on a page, for the reason the
+   * whole `lib/team.ts` vocabulary exists: a surface that re-derives a rule its
+   * own way is asserting against a second implementation, and the two drift.
+   * The pages read `verdict` and `usable` and do as they are told.
+   */
+  const mixCatIndex = new Map<string, number>();
+  const mixCategories: TeamMix["categories"] = [];
+  const catIdx = (id: string, name: string, type: string | null) => {
+    let i = mixCatIndex.get(id);
+    if (i === undefined) {
+      i = mixCategories.length;
+      mixCategories.push({ id, name, type });
+      mixCatIndex.set(id, i);
+    }
+    return i;
+  };
+
+  /**
+   * Only people the spine will divide by get a mix.
+   *
+   * The same rule that governs cost and sales-per-labour-hour: a conflict or a
+   * collision is exactly the case where one person's selling would be
+   * attributed to another, and a dessert count is no less wrong for being a
+   * count rather than a dollar. Shared logins are excluded by the same pass —
+   * their trade is real and counted at venue level, and it is nobody's mix.
+   */
+  const mixablePos = new Set(
+    matches
+      .filter((m) => m.verdict === "confirmed" || m.verdict === "proposed")
+      .map((m) => m.posId),
+  );
+
+  const mixRowsOut: TeamMix["rows"] = [];
+  for (const r of mixRows) {
+    const posId = String(r.POS_ID);
+    if (!mixablePos.has(posId)) continue;
+    mixRowsOut.push({
+      person: pseudonymise(posId),
+      category: catIdx(
+        String(r.CATEGORY_ID),
+        String(r.CATEGORY_NAME ?? "Uncategorised"),
+        r.TYPE_NAME == null ? null : String(r.TYPE_NAME),
+      ),
+      productLines: num(r.PRODUCT_LINES),
+      paidLines: num(r.PAID_LINES),
+      revenue: r2(num(r.REVENUE)),
+      orders: num(r.ORDERS),
+    });
+  }
+
+  const a = attributionRows[0] ?? {};
+  const attrLines = num(a.LINES);
+  const ordersWithSpread = num(a.ORDERS_WITH_SPREAD);
+  const beyond30 = num(a.LINES_BEYOND_30MIN);
+  const within30 = num(a.LINES_WITHIN_30MIN);
+  const noTimestamp = num(a.LINES_NO_TIMESTAMP);
+
+  /**
+   * Three outcomes, and they are three different products.
+   *
+   * The order of these tests matters. "No information" has to be ruled out
+   * before "one author" can be claimed, because the two look identical in every
+   * aggregate: a column stamped once at write time puts every line at lag zero,
+   * which is exactly what a genuinely instant service looks like. The thing
+   * that separates them is whether *any* order anywhere shows a spread — a real
+   * quick service still varies by seconds across a few thousand orders, and a
+   * copied column never varies at all.
+   *
+   * The 5% floor on lines arriving more than half an hour after the order is a
+   * judgement made before seeing the number it tests, which is the honest way
+   * to set it and a bad way to leave it. **The first extract that runs this
+   * probe should be reviewed against it** rather than the number being taken as
+   * a pass because the build stayed green.
+   */
+  const attrVerdict: TeamMix["attribution"]["verdict"] =
+    attrLines === 0 || noTimestamp / Math.max(attrLines, 1) > 0.05 || ordersWithSpread === 0
+      ? "unknown"
+      : (beyond30 + within30) / attrLines > 0.05
+        ? "spread"
+        : "sole-author";
+
+  const mf = modifierRows[0] ?? {};
+  const mfPaidLines = num(mf.PAID_LINES);
+  const mfAmbiguousLines = num(mf.AMBIGUOUS_LINES);
+  const ambiguousLineShare = mfPaidLines ? mfAmbiguousLines / mfPaidLines : 1;
+
+  /**
+   * Two percent of paid lines, and the same caveat as above applies.
+   *
+   * An attachment rate counts lines, so the share of lines the marker cannot
+   * classify is the error bar on the metric. Two percent is a rounding error on
+   * a rate used to compare people; five would be enough to reorder a ranking on
+   * noise alone. The floor is named here and read everywhere, so raising it
+   * under pressure is one visible edit rather than a quiet drift.
+   */
+  const modifierUsable = mfPaidLines > 0 && ambiguousLineShare < 0.02;
+
+  const mix: TeamMix = {
+    window: win,
+    categories: mixCategories,
+    rows: mixRowsOut,
+    attribution: {
+      lines: attrLines,
+      noTimestamp,
+      beforeOrder: num(a.LINES_BEFORE_ORDER),
+      atOrder: num(a.LINES_AT_ORDER),
+      within5min: num(a.LINES_WITHIN_5MIN),
+      within30min: within30,
+      beyond30min: beyond30,
+      medianLagSec: a.MEDIAN_LAG_SEC == null ? null : num(a.MEDIAN_LAG_SEC),
+      maxLagSec: a.MAX_LAG_SEC == null ? null : num(a.MAX_LAG_SEC),
+      ordersWithSpread,
+      orders: num(a.ORDERS),
+      verdict: attrVerdict,
+    },
+    modifierFlag: {
+      names: num(mf.NAMES),
+      ambiguousNames: num(mf.AMBIGUOUS_NAMES),
+      paidLines: mfPaidLines,
+      ambiguousLines: mfAmbiguousLines,
+      paidRevenue: r2(num(mf.PAID_REVENUE)),
+      ambiguousRevenue: r2(num(mf.AMBIGUOUS_REVENUE)),
+      cleanModifierLines: num(mf.CLEAN_MODIFIER_LINES),
+      ambiguousLineShare,
+      usable: modifierUsable,
+    },
+  };
+
   const waged = empRows.filter((r) => String(r.TYPE) !== "Salaried");
   const team: Team = {
     window: win,
@@ -2025,6 +2162,7 @@ async function extractTeam(
     links,
     people,
     margin,
+    mix,
     sections: [...sectionAcc.entries()]
       .map(([section, s]) => ({
         section,

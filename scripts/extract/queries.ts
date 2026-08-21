@@ -800,7 +800,7 @@ ORDER BY 1, 2`;
  */
 const ITEMS = "OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC.ORDER_ITEMS";
 
-function itemsCte(orgId: string, w: Window) {
+export function itemsCte(orgId: string, w: Window) {
   return `item_raw AS (
   SELECT
     ORDER_ID,

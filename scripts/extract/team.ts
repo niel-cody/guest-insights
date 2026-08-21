@@ -37,6 +37,7 @@
  * of why the join is hard and hiding them would hide the finding.
  */
 import { DAYPARTS, daypartCase } from "./orgs";
+import { itemsCte } from "./queries";
 
 const P = "OOLIO_PLATFORM_DATALAKE_TEST.PUBLIC";
 const ORDERS = `${P}.ORDERS`;
@@ -99,6 +100,166 @@ export function posStaffGrainQuery(orgId: string, w: Window) {
 FROM ${ORDERS}
 WHERE ${orderBase(orgId, w)}
 GROUP BY 1, 2, 3`;
+}
+
+/**
+ * What each POS identity actually sold, by category.
+ *
+ * ── The question this answers, and the one it cannot ───────────────────────
+ *
+ * Performance already decomposes net per cover into items per cover times
+ * average item value, and says which of the two is moving. This is the level
+ * below: **average item value is a mix.** A server with a high average item
+ * value is selling steak and wine; one with a high items-per-cover is selling
+ * sides and desserts. Both can arrive at the same revenue per cover, and they
+ * are not the same person to coach.
+ *
+ * The join is `ORDER_ITEMS.ORDER_ID` to `ORDERS.ORDER_ID`, and the staff
+ * identity comes off the order header. **That is an assumption, not a fact**,
+ * and it is the reason `posAttributionProbeQuery` exists below: `CREATED_BY_ID`
+ * is whoever opened the order, and in table service the person who opens the
+ * table is not necessarily the person who sold the dessert two hours later.
+ *
+ * Reads the shared `itemsCte` rather than restating the filters. The three
+ * traps documented there — the mis-keyed quantity, the unreliable modifier
+ * flag, the category name that is not the key — apply here identically, and a
+ * second copy of that logic would drift from the customer half's category mix
+ * and leave two answers to "how much dessert did this venue sell".
+ */
+export function posStaffMixQuery(orgId: string, w: Window) {
+  return `WITH ${itemsCte(orgId, w)},
+staff_order AS (
+  SELECT ORDER_ID, CREATED_BY_ID AS POS_ID
+  FROM ${ORDERS}
+  WHERE ${orderBase(orgId, w)}
+),
+lines AS (
+  SELECT s.POS_ID, p.CATEGORY_ID, p.CATEGORY_NAME, p.TYPE_NAME,
+         p.TOTAL_PRICE, p.IS_PRODUCT, p.ORDER_ID
+  FROM paid_line p JOIN staff_order s ON s.ORDER_ID = p.ORDER_ID
+)
+SELECT
+  POS_ID,
+  COALESCE(CATEGORY_ID, '(uncategorised)') AS CATEGORY_ID,
+  COALESCE(MAX(CATEGORY_NAME), 'Uncategorised') AS CATEGORY_NAME,
+  MAX(TYPE_NAME) AS TYPE_NAME,
+  COUNT_IF(IS_PRODUCT) AS PRODUCT_LINES,
+  COUNT(*) AS PAID_LINES,
+  SUM(TOTAL_PRICE) AS REVENUE,
+  COUNT(DISTINCT ORDER_ID) AS ORDERS
+FROM lines
+GROUP BY POS_ID, CATEGORY_ID`;
+}
+
+/**
+ * Is the order's creator the person who sold what is on it?
+ *
+ * ── Why a figure is not published until this is answered ───────────────────
+ *
+ * Every per-person mix number rests on attributing an item line to whoever
+ * opened the order it sits on. At a coffee counter that is one person and one
+ * moment. At a table it is a service: somebody seats and opens, drinks go on,
+ * mains go on, and dessert is rung two hours later by whoever is still on.
+ * Attributing all of it to the opener would produce a dessert ranking that
+ * measures **who opens tables**, which is a roster fact wearing a skill label —
+ * the exact failure the Performance page was built to refuse.
+ *
+ * The line's own timestamp is the evidence. Three outcomes, and they are
+ * different products:
+ *
+ *   1. **Line timestamps spread through the service.** Attribution to the
+ *      opener is wrong for the later lines, and the mix must either refuse or
+ *      be restricted to orders that closed quickly.
+ *   2. **Line timestamps cluster at the order's own timestamp.** Either service
+ *      really is one moment, or the column is stamped once at write time and
+ *      carries no information. `DISTINCT_TS_PER_ORDER` separates those: a
+ *      genuine quick service still varies by seconds, a copied column does not
+ *      vary at all.
+ *   3. **The column is null.** Nothing can be said, and nothing is.
+ *
+ * Reported as a distribution rather than a single share, because the decision
+ * it feeds — publish, restrict, or refuse — needs the shape and not a mean.
+ */
+export function posAttributionProbeQuery(orgId: string, w: Window) {
+  return `WITH ${itemsCte(orgId, w)},
+staff_order AS (
+  SELECT ORDER_ID, CREATED_BY_ID AS POS_ID, CREATED_AT_TZ AS ORDER_TS
+  FROM ${ORDERS}
+  WHERE ${orderBase(orgId, w)}
+),
+lag AS (
+  SELECT
+    s.ORDER_ID,
+    DATEDIFF(second, s.ORDER_TS, p.TS) AS LAG_SEC
+  FROM paid_line p JOIN staff_order s ON s.ORDER_ID = p.ORDER_ID
+),
+per_order AS (
+  SELECT ORDER_ID, COUNT(DISTINCT LAG_SEC) AS DISTINCT_LAGS
+  FROM lag GROUP BY ORDER_ID
+)
+SELECT
+  COUNT(*) AS LINES,
+  COUNT_IF(LAG_SEC IS NULL) AS LINES_NO_TIMESTAMP,
+  /* Negative would mean a line predates the order it is on: a data fault, not
+     a service pattern, and it has to be visible rather than absorbed. */
+  COUNT_IF(LAG_SEC < 0) AS LINES_BEFORE_ORDER,
+  COUNT_IF(LAG_SEC = 0) AS LINES_AT_ORDER,
+  COUNT_IF(LAG_SEC > 0 AND LAG_SEC <= 300) AS LINES_WITHIN_5MIN,
+  COUNT_IF(LAG_SEC > 300 AND LAG_SEC <= 1800) AS LINES_WITHIN_30MIN,
+  COUNT_IF(LAG_SEC > 1800) AS LINES_BEYOND_30MIN,
+  MEDIAN(LAG_SEC) AS MEDIAN_LAG_SEC,
+  MAX(LAG_SEC) AS MAX_LAG_SEC,
+  (SELECT COUNT_IF(DISTINCT_LAGS > 1) FROM per_order) AS ORDERS_WITH_SPREAD,
+  (SELECT COUNT(*) FROM per_order) AS ORDERS
+FROM lag`;
+}
+
+/**
+ * Can a paid modifier be told from a product at this organisation?
+ *
+ * ── The attachment rate is not published until this says yes ───────────────
+ *
+ * "Which staff have the highest paid-modifier attachment rate" is the sharpest
+ * question in the brief and the one the data is least ready for. The only
+ * marker available is `MODIFIER_GROUP_NAME`, and `itemsCte` already records it
+ * failing at Coffee Guru: "1 Sugar" appears 25,981 times and is flagged on
+ * 2,480 of them. A rate computed on a marker that catches a tenth of its
+ * subject is not a measurement.
+ *
+ * Worse, the error would not be random. Whether a modifier gets flagged depends
+ * on how the item was configured and how it was rung — which varies by person,
+ * by venue and by till. **The noise would sit on exactly the axis the report
+ * claims to measure**, so a staff ranking built on it would be confidently
+ * ranking keying habits and calling it upselling.
+ *
+ * The test is the ambiguous name: a product name that appears both flagged and
+ * unflagged is the marker failing on its own terms, because the same thing
+ * cannot be a modifier on one line and a product on the next. Two numbers come
+ * back — how many names, and how much money sits on them. A handful of names
+ * carrying a rounding error is survivable; a tenth of revenue is not.
+ */
+export function modifierFlagProbeQuery(orgId: string, w: Window) {
+  return `WITH ${itemsCte(orgId, w)},
+by_name AS (
+  SELECT
+    PRODUCT_NAME,
+    COUNT(*) AS LINES,
+    SUM(TOTAL_PRICE) AS REVENUE,
+    COUNT_IF(IS_PRODUCT) AS AS_PRODUCT,
+    COUNT_IF(NOT IS_PRODUCT) AS AS_MODIFIER
+  FROM paid_line
+  WHERE PRODUCT_NAME IS NOT NULL
+  GROUP BY PRODUCT_NAME
+)
+SELECT
+  COUNT(*) AS NAMES,
+  COUNT_IF(AS_PRODUCT > 0 AND AS_MODIFIER > 0) AS AMBIGUOUS_NAMES,
+  SUM(LINES) AS PAID_LINES,
+  SUM(IFF(AS_PRODUCT > 0 AND AS_MODIFIER > 0, LINES, 0)) AS AMBIGUOUS_LINES,
+  SUM(REVENUE) AS PAID_REVENUE,
+  SUM(IFF(AS_PRODUCT > 0 AND AS_MODIFIER > 0, REVENUE, 0)) AS AMBIGUOUS_REVENUE,
+  SUM(IFF(NOT (AS_PRODUCT > 0 AND AS_MODIFIER > 0) AND AS_MODIFIER > 0, LINES, 0)) AS CLEAN_MODIFIER_LINES
+FROM by_name`;
 }
 
 /**
