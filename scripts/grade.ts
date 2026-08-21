@@ -272,6 +272,264 @@ export function allRuns(months: MonthRow[]): { start: string; end: string; month
   return runs.reverse();
 }
 
+// ── the selectable window set ───────────────────────────────────────────────
+
+/**
+ * Which identity spine a window is measured on. **The §4.3 wall, as a type.**
+ *
+ * `card` windows recognise people by payment reference, and are therefore
+ * bounded by card-capture grading — at Coffee Guru the longest unbroken run of
+ * trustworthy months is three, and no amount of product work extends it.
+ *
+ * `member` windows recognise people by loyalty scan, which never failed. They
+ * reach back twenty-one months, and they see a **smaller, different population**
+ * — enrolled people who scanned — so a member window is not a longer version of
+ * a card window and the two must never be added together. Every surface that
+ * cannot answer on the scan tier refuses on a member window and says which
+ * clock it needs.
+ */
+export type PeriodKind = "card" | "member";
+
+/** How a candidate was arrived at, which is what groups it in the control. */
+export type PeriodGroup = "month" | "run" | "rolling" | "member";
+
+export type PeriodCandidate = {
+  /**
+   * `2026-07_2026-07`, `2026-05_2026-07`, and `m-2025-08_2026-07` for a member
+   * window.
+   *
+   * The `m-` prefix is not decoration. A card six-month window and a member
+   * six-month window cover the same calendar months, so without it they collide
+   * on one route segment — and the collision would serve a card snapshot to a
+   * reader who asked for the member one. The two are different populations on
+   * different clocks; they get different URLs.
+   */
+  id: string;
+  label: string;
+  /**
+   * Other names the same window goes by. A run that is also "Last 3 months"
+   * keeps the run label and lists the preset, so a reader looking for the
+   * preset still finds it rather than concluding it is missing.
+   */
+  aliases: string[];
+  group: PeriodGroup;
+  kind: PeriodKind;
+  /** First day of the first month, last day of the last. */
+  start: string;
+  end: string;
+  months: number;
+  claim: ClaimLevel;
+  /**
+   * Whether the underlying months support it. **Not** whether a snapshot has
+   * been extracted — that is decided by the extract and written separately, so
+   * a window can be legitimate and simply not built yet.
+   */
+  gradable: boolean;
+  /** The months inside the window that failed, newest last. Empty when gradable. */
+  failing: { month: string; reason: string }[];
+};
+
+const nextMonth = (m: string, n = 1) => {
+  const d = new Date(`${m}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/** The last day of the month a first-of-month date names. */
+export function monthEndOf(firstOfMonth: string): string {
+  const d = new Date(`${firstOfMonth}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+};
+
+const shortMonth = (m: string) =>
+  new Date(`${m}T00:00:00Z`).toLocaleDateString("en-AU", { month: "short", year: "numeric", timeZone: "UTC" });
+
+const longMonth = (m: string) =>
+  new Date(`${m}T00:00:00Z`).toLocaleDateString("en-AU", { month: "long", year: "numeric", timeZone: "UTC" });
+
+/** `2026-05_2026-07`. One month collapses to `2026-07_2026-07`, not a special case. */
+export function windowId(startMonth: string, endMonth: string): string {
+  return `${startMonth.slice(0, 7)}_${endMonth.slice(0, 7)}`;
+}
+
+/**
+ * Every window an operator may ask for, and for each one either the data or the
+ * reason there is none.
+ *
+ * ── Why this is generated rather than listed ───────────────────────────────
+ *
+ * The control used to offer exactly the unbroken runs — three at Coffee Guru,
+ * one at Meat Flour Wine — and an operator asking *"how did April go?"* or
+ * *"show me the last twelve months"* had no way to learn whether the answer was
+ * "the product cannot" or "your payment feed was down". Those are different
+ * sentences with different owners, and only one of them is actionable.
+ *
+ * So every candidate is enumerated and **graded rather than filtered**. A window
+ * whose months all pass becomes selectable; a window whose months do not is
+ * still offered, and names the months that failed and why. The second list is
+ * the more valuable half, exactly as the gap list already was — this widens it
+ * from "the stretches between runs" to "anything you might reasonably ask for".
+ *
+ * ── The four groups, and why each exists ───────────────────────────────────
+ *
+ * **month** — one calendar month. The question that started this: *"how did my
+ * members change in April?"* Nine of Coffee Guru's twenty-four are answerable.
+ *
+ * **run** — an unbroken stretch of trustworthy months. What the control offered
+ * before, kept because it is the longest card-tier answer that exists.
+ *
+ * **rolling** — the last 3, 6 or 12 complete months. These are the presets an
+ * operator actually reaches for, and at both organisations in this dataset the
+ * six- and twelve-month ones **fail**, because the 2025 blackout sits inside
+ * them. Offering them and showing why is the point; hiding them would leave the
+ * reader believing the product simply does not do it.
+ *
+ * **member** — the same rolling lengths on the loyalty scan, which never failed.
+ * These carry `kind: "member"` and a smaller population, and they are the only
+ * way a twelve-month question gets an answer in this dataset.
+ *
+ * `today` is injected rather than read, because a function whose output depends
+ * on the wall clock cannot be tested and this one decides what the product
+ * offers.
+ */
+export function candidateWindows(
+  months: MonthRow[],
+  /**
+   * The months the loyalty scan actually covers, from `cohorts.json`. Null on an
+   * organisation with no member history, which offers no member windows rather
+   * than empty ones.
+   */
+  memberSpan: { start: string; end: string } | null,
+): PeriodCandidate[] {
+  const sorted = [...months].sort((a, b) => a.month.localeCompare(b.month));
+  if (!sorted.length) return [];
+
+  const byMonth = new Map(sorted.map((m) => [m.month, m]));
+  const last = sorted[sorted.length - 1].month;
+  const first = sorted[0].month;
+
+  /** Every month in [start, end], whether or not it was graded. */
+  const span = (start: string, end: string): string[] => {
+    const out: string[] = [];
+    for (let m = start; m <= end; m = nextMonth(m)) out.push(m);
+    return out;
+  };
+
+  /**
+   * A card window is gradable only if **every** month in it passed. A month
+   * that was never graded — outside the tested range — fails too, and says so,
+   * because "we did not look" is not "it was fine".
+   */
+  const gradeSpan = (start: string, end: string) => {
+    const failing: { month: string; reason: string }[] = [];
+    for (const m of span(start, end)) {
+      const row = byMonth.get(m);
+      if (!row) failing.push({ month: m, reason: "outside the graded range" });
+      else if (!row.ok) failing.push({ month: m, reason: row.reason ?? "unavailable" });
+    }
+    return { gradable: failing.length === 0, failing };
+  };
+
+  const out: PeriodCandidate[] = [];
+  const seen = new Map<string, PeriodCandidate>();
+  const push = (c: PeriodCandidate) => {
+    const held = seen.get(c.id);
+    // First writer wins the label — the groups are pushed in the order a reader
+    // would rank them, so a window that is both "the latest run" and "last 3
+    // months" keeps the run label. The preset name becomes an alias rather than
+    // vanishing, because a reader hunting for "Last 3 months" and not finding it
+    // concludes the product cannot do it.
+    if (held) {
+      if (c.label !== held.label && !held.aliases.includes(c.label)) held.aliases.push(c.label);
+      return;
+    }
+    seen.set(c.id, c);
+    out.push(c);
+  };
+
+  const card = (
+    group: PeriodGroup, label: string, startMonth: string, endMonth: string,
+  ) => {
+    const { gradable, failing } = gradeSpan(startMonth, endMonth);
+    const n = monthsBetween(startMonth, endMonth);
+    push({
+      id: windowId(startMonth, endMonth),
+      label, aliases: [], group, kind: "card",
+      start: startMonth, end: monthEndOf(endMonth),
+      months: n, claim: claimLevel(n),
+      gradable, failing,
+    });
+  };
+
+  // ── runs first: they carry the most meaningful label ─────────────────────
+  for (const r of allRuns(sorted)) {
+    card("run", r.months === 1 ? longMonth(r.start) : `${shortMonth(r.start)} – ${shortMonth(r.end)}`,
+      r.start, r.end);
+  }
+
+  // ── rolling windows, ending at the last complete month ───────────────────
+  for (const n of [3, 6, 12]) {
+    const start = nextMonth(last, -(n - 1));
+    card("rolling", `Last ${n} months`, start, last);
+  }
+
+  // ── every calendar month that was graded ─────────────────────────────────
+  for (const m of [...sorted].reverse()) card("month", longMonth(m.month), m.month, m.month);
+
+  // ── the scan tier, which is a different clock and a different population ──
+  //
+  // No card grading applies: the loyalty scan never failed, so a member window
+  // is bounded by two things only.
+  //
+  // **The cohort span.** Member history starts when enrolment does — twenty-one
+  // months at Coffee Guru, **eight** at Meat Flour Wine. Assuming a fixed
+  // twenty-one would have offered Meat Flour Wine a twelve-month member window
+  // covering four months in which nobody had enrolled yet.
+  //
+  // **Months the venue was not trading.** `not trading` is the one card verdict
+  // that binds here too, because it is a business fact rather than a feed
+  // failure — there is no loyalty history from before a venue opened either.
+  if (memberSpan) {
+    const notTrading = (start: string, end: string) =>
+      span(start, end)
+        .map((m) => byMonth.get(m))
+        .filter((r): r is MonthRow => !!r && r.reason === "not trading")
+        .map((r) => ({ month: r.month, reason: "not trading" }));
+
+    const memberWindow = (label: string, start: string, n: number) => {
+      const failing = notTrading(start, last);
+      if (start < memberSpan.start) {
+        failing.unshift({
+          month: start,
+          reason: `earlier than the member history, which begins ${longMonth(memberSpan.start)}`,
+        });
+      }
+      push({
+        id: `m-${windowId(start, last)}`,
+        label, aliases: [], group: "member", kind: "member",
+        start, end: monthEndOf(last),
+        months: n, claim: claimLevel(n),
+        gradable: failing.length === 0,
+        failing,
+      });
+    };
+
+    for (const n of [6, 12]) memberWindow(`Last ${n} months`, nextMonth(last, -(n - 1)), n);
+
+    // And the whole of it, which is the longest answer this dataset holds.
+    const wholeStart = memberSpan.start > first ? memberSpan.start : first;
+    memberWindow(
+      `All member history · ${monthsBetween(wholeStart, last)} months`,
+      wholeStart,
+      monthsBetween(wholeStart, last),
+    );
+  }
+
+  return out;
+}
+
 /** Inclusive month count. Thirteen months is one year-on-year comparison, not twelve. */
 export function monthsBetween(start: string, end: string): number {
   const a = new Date(`${start}T00:00:00Z`);

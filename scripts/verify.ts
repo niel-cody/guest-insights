@@ -18,6 +18,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runChecks } from "../src/lib/checks";
 import { decompose, priceMix } from "../src/lib/metrics";
+import { spineState } from "../src/lib/window";
+import { candidateWindows, type GradeReason, type MonthRow } from "./grade";
 import type {
   AnalysisWindow, DecompositionRow, GuestRows, Guests, ItemPrices, Snapshot,
 } from "../src/lib/types";
@@ -665,8 +667,173 @@ function verifyPriceMix(): string[] {
   return errs;
 }
 
+/**
+ * The window offer list, and the spine rule that governs the long ones.
+ *
+ * ── Why a unit proof ───────────────────────────────────────────────────────
+ *
+ * `candidateWindows` decides **what the product offers an operator**, which
+ * makes a mistake in it invisible in exactly the way that matters: a window
+ * silently missing from the control cannot be noticed by anyone reading the
+ * control. There is no data corruption that reaches it either — it takes a
+ * graded month list and returns an offer, so the failing case has to be built.
+ *
+ * Each assertion below is a rule the control depends on, and each one has a
+ * way of going wrong that would ship looking fine.
+ */
+function verifyWindowSet(): string[] {
+  const errs: string[] = [];
+
+  const month = (m: string, ok: boolean, reason: GradeReason | null = null): MonthRow => ({
+    month: m, txns: 0, orders: 0, scannedOrders: 0, stores: 0, distinctPar: 0, withPar: 0,
+    ratio: 0, coverage: 0, maxTokenShare: 0, ok, reason,
+  });
+  const step = (m: string, n: number) => {
+    const d = new Date(`${m}T00:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  /** Twelve months to July 2026, with the named ones failed. */
+  const twelve = (failed: Record<string, GradeReason>) =>
+    Array.from({ length: 12 }, (_, i) => {
+      const m = step("2026-07-01", -(11 - i));
+      return failed[m] ? month(m, false, failed[m]) : month(m, true);
+    });
+
+  const span = { start: "2024-11-01", end: "2026-07-01" };
+
+  // ── 1. A clean year offers a clean twelve-month window ───────────────────
+  {
+    const c = candidateWindows(twelve({}), span);
+    const twelveM = c.find((x) => x.kind === "card" && x.months === 12);
+    if (!twelveM?.gradable) errs.push("a twelve-month window over twelve clean months was refused");
+    const run = c.find((x) => x.group === "run");
+    if (run?.months !== 12) errs.push(`the run should span all twelve months, got ${run?.months}`);
+  }
+
+  // ── 2. One bad month in the middle kills the window and names itself ─────
+  //
+  // The failure this guards: a window that quietly drops the bad month and
+  // reports on the eleven that remain, which is a year-on-year comparison with
+  // a hole in it presented as a year.
+  {
+    const c = candidateWindows(twelve({ "2026-01-01": "no card capture" }), span);
+    const twelveM = c.find((x) => x.kind === "card" && x.months === 12);
+    if (twelveM?.gradable) errs.push("a twelve-month window containing a failed month was offered");
+    if (twelveM?.failing.length !== 1) {
+      errs.push(`expected one failing month named, got ${twelveM?.failing.length}`);
+    }
+    if (twelveM?.failing[0]?.reason !== "no card capture") {
+      errs.push("the failing month did not carry its own reason through");
+    }
+    // And the clean months either side are still offered individually.
+    const dec = c.find((x) => x.id === "2025-12_2025-12");
+    if (!dec?.gradable) errs.push("a clean month beside a failed one was not offered");
+  }
+
+  // ── 3. A month outside the graded range fails, and says which ────────────
+  //
+  // "We did not look" is not "it was fine". A rolling twelve-month window over
+  // six graded months must refuse rather than report on six.
+  {
+    const six = Array.from({ length: 6 }, (_, i) => month(step("2026-07-01", -(5 - i)), true));
+    const c = candidateWindows(six, span);
+    const twelveM = c.find((x) => x.kind === "card" && x.months === 12);
+    if (twelveM?.gradable) errs.push("a twelve-month window over six graded months was offered");
+    if (!twelveM?.failing.some((f) => f.reason === "outside the graded range")) {
+      errs.push("an ungraded month did not name itself as ungraded");
+    }
+  }
+
+  // ── 4. Card and member windows never collide on one id ───────────────────
+  //
+  // They cover the same calendar months. Without the `m-` prefix they share a
+  // route segment, and the collision serves a card snapshot to a reader who
+  // asked for the member one — a different population, silently.
+  {
+    const c = candidateWindows(twelve({ "2026-01-01": "no card capture" }), span);
+    const ids = c.map((x) => x.id);
+    if (new Set(ids).size !== ids.length) errs.push("two candidates share one id");
+    const memberIds = c.filter((x) => x.kind === "member").map((x) => x.id);
+    if (!memberIds.length) errs.push("no member windows were offered");
+    if (memberIds.some((id) => !id.startsWith("m-"))) {
+      errs.push("a member window is not distinguishable from a card window by its id");
+    }
+  }
+
+  // ── 5. Member windows are bounded by enrolment, not by twenty-one ────────
+  //
+  // Meat Flour Wine holds eight months of member history. Assuming the longer
+  // organisation's span would offer a twelve-month member window covering four
+  // months in which nobody had enrolled.
+  {
+    const c = candidateWindows(twelve({}), { start: "2025-12-01", end: "2026-07-01" });
+    const m12 = c.find((x) => x.kind === "member" && x.months === 12);
+    if (m12?.gradable) errs.push("a member window reached back past the start of enrolment");
+    const m6 = c.find((x) => x.kind === "member" && x.months === 6);
+    if (!m6?.gradable) errs.push("a member window inside the enrolment span was refused");
+  }
+
+  // ── 6. `not trading` binds the member tier too ───────────────────────────
+  //
+  // It is a business fact rather than a feed failure: there is no loyalty
+  // history from before a venue opened either.
+  {
+    const rows = twelve({ "2025-09-01": "not trading" });
+    const c = candidateWindows(rows, span);
+    const m12 = c.find((x) => x.kind === "member" && x.months === 12);
+    if (m12?.gradable) errs.push("a member window spanned a month the venue was not trading");
+  }
+
+  // ── 7. An organisation with no member history offers no member windows ───
+  {
+    const c = candidateWindows(twelve({}), null);
+    if (c.some((x) => x.kind === "member")) {
+      errs.push("member windows were offered with no member history");
+    }
+  }
+
+  // ── 8. A window that is both a run and a preset keeps both names ─────────
+  {
+    const rows = twelve({
+      "2025-08-01": "no card capture", "2025-09-01": "no card capture",
+      "2025-10-01": "no card capture", "2025-11-01": "no card capture",
+      "2025-12-01": "no card capture", "2026-01-01": "no card capture",
+      "2026-02-01": "no card capture", "2026-03-01": "no card capture",
+      "2026-04-01": "no card capture",
+    });
+    const c = candidateWindows(rows, span);
+    const run = c.find((x) => x.group === "run");
+    if (!run?.aliases.includes("Last 3 months")) {
+      errs.push("the three-month run lost its 'Last 3 months' preset name");
+    }
+  }
+
+  // ── 9. The spine rule withholds card figures rather than printing zero ───
+  const asOrg = (spine?: "card" | "member") =>
+    ({ spine, window: { start: "2026-05-01", end: "2026-07-31", months: 3, days: 92 } } as unknown as Snapshot["org"]);
+  if (!spineState(asOrg("card")).cardMeasured) errs.push("a card window claimed card figures were unmeasured");
+  if (!spineState(asOrg()).cardMeasured) errs.push("a snapshot with no spine was not read as a card window");
+  const member = spineState(asOrg("member"));
+  if (member.cardMeasured) errs.push("a member window claimed its card figures were measured");
+  if (!member.statement) errs.push("a member window carries no statement to print in their place");
+
+  return errs;
+}
+
 async function main() {
   let failures = 0;
+
+  console.log("\nthe window offer set, unit-tested against month sets built by hand");
+  const windowErrors = verifyWindowSet();
+  if (windowErrors.length) {
+    failures += windowErrors.length;
+    for (const e of windowErrors) console.log(`  ✗ ${e}`);
+  } else {
+    console.log("  ✓ offers a clean year, refuses one with a hole and names the hole, refuses an");
+    console.log("    ungraded stretch, keeps card and member ids apart, bounds member windows by");
+    console.log("    enrolment and by trading, and withholds card figures on a member spine");
+  }
 
   console.log("\nthe price / mix split, unit-tested against months built by hand");
   const priceErrors = verifyPriceMix();

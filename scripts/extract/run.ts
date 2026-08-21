@@ -29,7 +29,10 @@ import * as T from "./team";
 import type {
   Team, TeamLink, TeamMargin, TeamMarginCell, TeamPerson, TeamVerdict,
 } from "../../src/lib/types";
-import { allRuns, claimLevel, gradeMonth, longestRun, monthsBetween } from "../grade";
+import {
+  allRuns, candidateWindows, claimLevel, gradeMonth, longestRun, monthsBetween,
+  type PeriodCandidate, type PeriodKind,
+} from "../grade";
 import { packGuests } from "../../src/lib/guest-columns";
 /** One segment vocabulary, shared by the URL contract, the surfaces and the extract. */
 import { SEGMENTS as SEGMENT_KEYS } from "../../src/lib/url-state";
@@ -253,19 +256,83 @@ async function extractOrg(org: OrgConfig) {
   );
 
   mkdirSync(join(DATA, org.slug), { recursive: true });
+
+  // 3b. The member tier, which is a different population on a different clock.
+  //     Written once per org rather than once per card period — filing a
+  //     21-month member window under a 92-day card period is precisely the
+  //     cross-tier read §4.3 exists to stop.
+  //
+  //     It runs before the window set is enumerated because it decides how far
+  //     back a member window may reach: enrolment starts when it starts, and at
+  //     Meat Flour Wine that is eight months, not twenty-one.
+  const memberSpan = await extractCohorts(org);
+
+  // 3c. Every window an operator might ask for.
+  //
+  //     The product used to extract exactly the unbroken runs — three at Coffee
+  //     Guru — so "how did April go?" and "show me the last twelve months" had
+  //     no answer and no explanation either. Now every candidate is enumerated
+  //     and graded: the ones whose months hold are extracted, and the ones that
+  //     do not are published with the months that failed and why.
+  const candidates = candidateWindows(complete, memberSpan);
+  const buildable = candidates.filter((c) => c.gradable);
+
+  console.log(
+    `  ${buildable.length} window${buildable.length === 1 ? "" : "s"} to extract of ` +
+      `${candidates.length} offered: ` +
+      ["run", "rolling", "month", "member"]
+        .map((g) => `${buildable.filter((c) => c.group === g).length} ${g}`)
+        .join(", "),
+  );
+
+  /**
+   * Extracted newest-first within the card runs, because the first entry in
+   * `periods` is what the product opens on and that has to stay the most recent
+   * unbroken run — not whichever window happened to sort first.
+   */
+  const ordered = [
+    ...buildable.filter((c) => c.group === "run"),
+    ...buildable.filter((c) => c.group !== "run"),
+  ];
+
+  const built: PeriodCandidate[] = [];
+  for (const c of ordered) {
+    await extractPeriod(
+      org,
+      { start: c.start, end: c.end, months: c.months },
+      allCardMonths, graded, pairs, mappedStores, discovery,
+      { id: c.id, kind: c.kind, label: c.label },
+    );
+    built.push(c);
+  }
+
+  /**
+   * Written **after** the extract rather than before it.
+   *
+   * `periods` is what the router generates static params from, so an entry with
+   * no snapshot behind it is a 404 waiting to happen. Writing this last means
+   * the file can only ever name windows that exist on disk — and a run that dies
+   * halfway leaves the previous file intact rather than a manifest promising
+   * pages the build cannot produce.
+   */
   writeFileSync(
     join(DATA, org.slug, "periods.json"),
     JSON.stringify({
       slug: org.slug,
       name: org.name,
-      /** Most recent first. The first entry is the default the product opens on. */
-      periods: runs.map((r) => ({
-        id: periodId({ start: r.start, end: monthEnd(r.end) }),
-        start: r.start,
-        end: monthEnd(r.end),
-        months: r.months,
-        claim: claimLevel(r.months),
+      /** Most recent run first. The first entry is the default the product opens on. */
+      periods: built.map((c) => ({
+        id: c.id,
+        start: c.start,
+        end: c.end,
+        months: c.months,
+        claim: c.claim,
+        kind: c.kind,
+        label: c.label,
+        group: c.group,
       })),
+      /** Everything offered, extracted or not, each with the reason where not. */
+      candidates,
       /** Why the rest of the calendar is not offered. */
       gaps,
       monthsTested: complete.length,
@@ -273,17 +340,6 @@ async function extractOrg(org: OrgConfig) {
       gradedAt: new Date().toISOString(),
     }),
   );
-
-  // 3b. The member tier, which is a different population on a different clock.
-  //     Written once per org rather than once per card period — filing a
-  //     21-month member window under a 92-day card period is precisely the
-  //     cross-tier read §4.3 exists to stop.
-  await extractCohorts(org);
-
-  for (const run of runs) {
-    await extractPeriod(org, { start: run.start, end: monthEnd(run.end), months: run.months },
-      allCardMonths, graded, pairs, mappedStores, discovery);
-  }
 }
 
 /**
@@ -294,7 +350,9 @@ async function extractOrg(org: OrgConfig) {
  * the same period, and a confound that lives in a different file from the trend
  * it confounds is a confound nobody sees.
  */
-async function extractCohorts(org: OrgConfig) {
+async function extractCohorts(
+  org: OrgConfig,
+): Promise<{ start: string; end: string } | null> {
   const from = "2024-01-01";
   const to = `${new Date().toISOString().slice(0, 7)}-01`;
   console.log(`\n  member cohorts  (${from} → ${to}, scan tier)`);
@@ -445,16 +503,38 @@ async function extractCohorts(org: OrgConfig) {
     `      cohorts.json  ${cohorts.length} cohorts · ${usable.length} usable months · ` +
       `${memberDays}d ${memberDays >= CANONICAL_LAPSE_DAYS * 2 ? "renders" : "refuses"}`,
   );
+
+  /**
+   * How far back a member window may reach.
+   *
+   * Enrolment starts when it starts: twenty-one months at Coffee Guru, **eight**
+   * at Meat Flour Wine. Returned rather than assumed, because assuming the
+   * longer of the two would have offered Meat Flour Wine a twelve-month member
+   * window covering four months in which nobody had enrolled yet.
+   */
+  return usable.length ? { start: memberFrom, end: memberTo } : null;
 }
 
 /** Last day of the month a run ends in. A run is named by months, measured by days. */
-function monthEnd(month: string): string {
-  const d = new Date(`${month}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  d.setUTCDate(0);
-  return d.toISOString().slice(0, 10);
-}
-
+/**
+ * One window, extracted.
+ *
+ * ── The member spine is the same extract with the payments join switched off ──
+ *
+ * A member window passes **no card months**, and that one change is the whole
+ * difference. `basePrelude` gates the payment join on the month list, so an
+ * empty list means no order ever acquires a PAR, `TIER` resolves to `member`
+ * wherever a loyalty scan happened and `unattributed` everywhere else, and the
+ * person spine becomes the member id alone.
+ *
+ * **What that costs is the thing to say out loud.** On a card window a member
+ * who forgot to scan is still recognised, through their card. On a member window
+ * they are not — the window sees scanned trade only. So the same three months
+ * hold *fewer* members on a member window than on a card one, and the two must
+ * never be compared or added. `spine` travels in `org.json` so every surface can
+ * tell which it is looking at, and so a card-share of zero reads as "not joined"
+ * rather than "nobody paid by card".
+ */
 async function extractPeriod(
   org: OrgConfig,
   w: { start: string; end: string; months: number },
@@ -463,10 +543,18 @@ async function extractPeriod(
   pairs: StorePair[],
   mappedStores: Set<string>,
   discovery: { start: string; end: string },
+  spec: { id: string; kind: PeriodKind; label: string } = {
+    id: periodId(w), kind: "card", label: periodId(w),
+  },
 ) {
-  const period = periodId(w);
-  const cardMonths = allCardMonths.filter((m) => m >= w.start && m <= w.end);
-  console.log(`\n  period ${period}  (${w.months} complete months)`);
+  const period = spec.id;
+  const cardMonths = spec.kind === "member"
+    ? []
+    : allCardMonths.filter((m) => m >= w.start && m <= w.end);
+  console.log(
+    `\n  period ${period}  (${w.months} complete months, ${spec.kind} spine)` +
+      (spec.kind === "member" ? " — payments not joined" : ""),
+  );
 
   const base = { orgId: org.id, w, pairs, cardMonths };
   const args = { ...base, lapseDays: CANONICAL_LAPSE_DAYS, slippingDays: 0 };
@@ -1044,6 +1132,12 @@ async function extractPeriod(
 
   write(org.slug, period, "org", {
     ...org, window: { ...w, days: windowDays }, discoveryWindow: discovery,
+    /**
+     * Which identity spine this snapshot was built on. Read by every surface
+     * that would otherwise print a card figure of zero as a finding.
+     */
+    spine: spec.kind,
+    periodLabel: spec.label,
     extractedAt: new Date().toISOString(),
     venues: venueList, calibration: calibrated,
     storeMap: { terminals: pairs.length, venuesResolved: mappedStores.size },

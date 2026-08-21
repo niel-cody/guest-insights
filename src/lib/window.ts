@@ -112,6 +112,68 @@ export function windowRules(org: Org) {
   };
 }
 
+// ── which spine, and what it stops you saying ───────────────────────────────
+
+/**
+ * The identity a window was measured on, and the consequence.
+ *
+ * ── Why a longer window is not simply a better window ──────────────────────
+ *
+ * Card capture caps the card tier at three months here. The loyalty scan never
+ * failed, so a member window reaches back twenty-one — and that is genuinely
+ * the only way a twelve-month question gets an answer in this dataset.
+ *
+ * **It is not the same report over more months.** A member window joins no
+ * payments at all, so a person exists in it only where they scanned. On a card
+ * window the card spine recovers a member who forgot; here it cannot, and the
+ * population is smaller and differently selected. Two figures that a reader
+ * would expect to match — members in May 2026 on a card window, members in May
+ * 2026 inside a member window — **will not match, and the second is the lower.**
+ *
+ * The consequence that matters most is the one a chart cannot show: every
+ * card-tier figure on a member snapshot is zero because nothing was joined, not
+ * because nothing happened. A card share of 0% is the single most dangerous
+ * number this build can print, because it is a confident, well-formatted, and
+ * completely false answer to "how many of your guests pay by card". So the
+ * surfaces do not print it — they print this.
+ */
+export type Spine = "card" | "member";
+
+export function spineOf(org: Org): Spine {
+  // Every snapshot extracted before member windows existed is a card snapshot.
+  // Absent is the correct answer for the whole back catalogue, not a fallback.
+  return org.spine ?? "card";
+}
+
+export type SpineState = {
+  spine: Spine;
+  /** Whether payments were joined at all. False on a member window. */
+  cardMeasured: boolean;
+  /** The banner, on a window where they were not. Null where they were. */
+  statement: string | null;
+  /** The shortest form, for a tile or a chart caption. */
+  short: string | null;
+};
+
+export function spineState(org: Org): SpineState {
+  const spine = spineOf(org);
+  if (spine === "card") {
+    return { spine, cardMeasured: true, statement: null, short: null };
+  }
+  return {
+    spine,
+    cardMeasured: false,
+    statement:
+      "This window is measured on the loyalty scan, not on payment cards. It reaches further back " +
+      "than card capture allows — but it sees scanned trade only, so a member who paid and did not " +
+      "scan is not in it, and the population is smaller than the same months on a card window. " +
+      "No payment was joined, so every card-tier figure here would be zero by construction; those " +
+      "figures are withheld rather than printed. Nothing on this page may be added to, or compared " +
+      "with, a card window.",
+    short: "Loyalty scan only · card figures not measured",
+  };
+}
+
 // ── R-205: what the window entitles you to claim ────────────────────────────
 
 export type { ClaimLevel } from "./types";

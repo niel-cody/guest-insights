@@ -14,9 +14,20 @@ import { IDENTITY_LABEL, IDENTITY_NOUN } from "@/lib/lexicon";
  * click away and never more than one click away.
  */
 export function CoverageChip({
-  state, scope = "card",
+  state, scope = "card", spine,
 }: {
   state: CoverageState;
+  /**
+   * The spine this window was measured on, from `spineState(org)`.
+   *
+   * On a member window no payment was joined, so `cardRevenueShare` is zero by
+   * construction. **A "recognised by card: 0%" bar is the most dangerous figure
+   * in this build** — confident, well-formatted, and a false answer to a
+   * question nobody asked it. The bar is withheld and the reason takes its
+   * place. Optional so a caller that has not been updated keeps today's
+   * behaviour, which is correct for every card window.
+   */
+  spine?: { cardMeasured: boolean; short: string | null };
   /**
    * Which tier this page's content is on.
    *
@@ -30,6 +41,7 @@ export function CoverageChip({
 }) {
   const [open, setOpen] = useState(false);
   const complete = state.gaps.length === 0;
+  const cardMeasured = spine?.cardMeasured ?? true;
 
   return (
     <div className="relative">
@@ -40,8 +52,12 @@ export function CoverageChip({
       >
         <span className="flex h-2 w-2 rounded-full" style={{ background: complete ? "var(--good)" : "var(--warning)" }} />
         <span className="font-medium text-ink">
-          {IDENTITY_LABEL.card}: recognising {attributionPct(state.identifiedRevenueShare)} of revenue
+          {cardMeasured ? IDENTITY_LABEL.card : "Loyalty scan"}: recognising{" "}
+          {attributionPct(state.identifiedRevenueShare)} of revenue
         </span>
+        {!cardMeasured && spine?.short && (
+          <span className="text-[12px] text-ink-muted">· card figures not measured</span>
+        )}
         {scope === "mixed" && (
           <span className="text-[12px] text-ink-muted">· {IDENTITY_NOUN.member} below differs</span>
         )}
@@ -57,9 +73,17 @@ export function CoverageChip({
 
           <div className="mt-3 space-y-2">
             <Bar label="Enrolled members" value={state.memberRevenueShare} color="var(--tier-member)" />
-            <Bar label="Recognised by card" value={state.cardRevenueShare} color="var(--tier-card)" />
+            {cardMeasured ? (
+              <Bar label="Recognised by card" value={state.cardRevenueShare} color="var(--tier-card)" />
+            ) : (
+              <p className="rounded-lg bg-surface-sunken px-2.5 py-2 text-[12px] leading-relaxed text-ink-secondary">
+                <strong className="text-ink">Recognised by card — not measured here.</strong> This
+                window joins no payments, so the figure would be 0% by construction rather than
+                because nobody paid by card.
+              </p>
+            )}
             <Bar
-              label="Not attributable"
+              label={cardMeasured ? "Not attributable" : "Did not scan"}
               value={1 - state.identifiedRevenueShare}
               color="var(--tier-unattributed)"
             />

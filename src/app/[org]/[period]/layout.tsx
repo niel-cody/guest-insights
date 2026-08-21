@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Instrumentation } from "@/components/shell/Instrumentation";
+import { SpineBanner } from "@/components/shell/SpineBanner";
 import { allOrgPeriods, getOrg, getPeriods } from "@/lib/data";
 
 /**
@@ -32,7 +33,13 @@ export default async function OrgLayout({
     <div className="flex h-screen overflow-hidden bg-surface-sunken">
       <Instrumentation />
       <Sidebar orgSlug={org.slug} period={period} />
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Above the surface, not inside it: a member window changes the
+            population every figure below is computed over, and no figure says
+            so on its own face. */}
+        <SpineBanner org={org} />
+        {children}
+      </main>
     </div>
   );
 }

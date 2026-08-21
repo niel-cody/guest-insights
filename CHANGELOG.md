@@ -2,12 +2,98 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.9.4`** — the version and commit render in the app header on every
+**Current: `v0.10.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.10.0 — the period control offers everything, and grades rather than filters
+
+The control offered exactly the unbroken runs of trustworthy card months —
+three at Coffee Guru, one at Meat Flour Wine. An operator asking *"how did April
+go?"* or *"show me the last twelve months"* had no way to learn whether the
+answer was **"the product cannot do that"** or **"your payment feed was down for
+eight months"**. Those are different sentences with different owners, and only
+one of them is actionable.
+
+Every window a reasonable person might ask for is now enumerated and **graded
+rather than filtered**: a single calendar month, an unbroken run, the last 3, 6
+or 12 months. The ones whose months hold are extracted. The ones that do not are
+still offered, and name the months that stopped them.
+
+Coffee Guru: **32 windows offered, 15 answerable.** Meat Flour Wine: **30
+offered, 6 answerable.** Both numbers are the product working.
+
+### Twelve months does not exist on the card tier, and now says so
+
+There is no contiguous run of trustworthy card months longer than three at
+either organisation. That was never a product cap — it is all the clean card
+data there is. "Last 12 months" now appears in the control reading *9 of 12
+months failed · no card capture, card capture partial, and 1 more*, which is a
+sentence a merchant can escalate.
+
+### So the long windows run on the loyalty scan instead
+
+The scan never failed. It reaches back twenty-one months at Coffee Guru and
+eight at Meat Flour Wine, and it is the only way a twelve-month question gets an
+answer in this dataset. A **member window** is the same extract with the
+payments join switched off — `basePrelude` already gates that join on the month
+list, so passing no card months is the entire change.
+
+**It is not the same report over more months, and everything says so.** A member
+window joins no payments, so a person exists in it only where they scanned: on a
+card window the card spine recovers a member who forgot, and here it cannot. The
+population is smaller and differently selected.
+
+- Member windows carry an `m-` id prefix. Without it they share a route segment
+  with the card window over the same months, and the collision would serve one
+  population to a reader who asked for the other.
+- `spineState` withholds card-tier figures rather than printing them. **A card
+  share of 0% is the most dangerous figure this build can produce** — confident,
+  well-formatted, and a false answer to "how many of your guests pay by card"
+  when the truth is that nothing was joined.
+- A standing banner sits in the layout rather than on each page, because a
+  member window changes the population every figure below is computed over and
+  **no figure says so on its own face**.
+
+### The offer list can be refreshed without the warehouse
+
+`npm run periods` regenerates it from grading already on disk. Which windows are
+answerable is decided entirely by the per-month card verdicts, and those are
+already recorded — so the second half of the control is correct on a laptop with
+no credentials. It calls the same `candidateWindows` the extract does, so the
+two cannot drift into offering different things.
+
+### Weeks are deliberately not offered
+
+The shortest window is a calendar month. R-191 requires an observation window of
+at least twice the lapse threshold — 178 days at Coffee Guru — so a week would
+render a page of withheld retention, churn and lifecycle figures. Offering a
+preset that produces mostly refusals is not honesty, it is a bad preset.
+
+### Nine assertions, each one a way this could ship looking fine
+
+`npm run verify` drives the offer set against month sets built by hand: a clean
+year offers a clean year; one bad month in the middle kills the window and names
+itself; an ungraded stretch refuses rather than reporting on what it has; card
+and member ids never collide; member windows are bounded by enrolment and by
+trading rather than by a constant; an organisation with no member history is
+offered none; and a run that is also a preset keeps both names.
+
+A mistake in this function is invisible in the way that matters — **a window
+silently missing from the control cannot be noticed by anyone reading the
+control.**
+
+### What is live now, and what waits on an extract
+
+The control, the offer list, the grading and every refusal are live. **The new
+windows are not built yet**: each one is a full query run, so `npm run extract`
+produces them, and until then they show as *answerable — will open at the next
+data refresh*. Nothing that was selectable before has changed.
 
 ---
 

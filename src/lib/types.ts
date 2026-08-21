@@ -88,6 +88,21 @@ export type Org = {
   labels: { visit: string; visits: string; guest: string; guests: string };
   window: AnalysisWindow;
   discoveryWindow: { start: string; end: string };
+  /**
+   * Which identity spine this snapshot was built on.
+   *
+   * `card` recognises people by payment reference and recovers a member who
+   * forgot to scan. `member` joins no payments at all: the population is
+   * scanned trade only, so it is **smaller and different**, and a card figure
+   * of zero on such a snapshot means "not joined", never "nobody paid by card".
+   *
+   * Optional because every snapshot extracted before member windows existed is
+   * a card snapshot. Read it through `spine()` in `src/lib/window.ts` rather
+   * than defaulting at each call site.
+   */
+  spine?: "card" | "member";
+  /** What the period control calls this window. Absent on older snapshots. */
+  periodLabel?: string;
   extractedAt: string;
   venues: Venue[];
   calibration: Calibration;

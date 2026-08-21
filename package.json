@@ -1,6 +1,6 @@
 {
   "name": "guest-insights",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "extract": "tsx scripts/extract/run.ts",
     "verify": "tsx scripts/verify.ts",
     "partner": "tsx scripts/partner-select.ts",
+    "periods": "tsx scripts/periods.ts",
     "test:routes": "tsx scripts/route-tests.ts",
     "check": "npm run verify && npm run test:gate && npm run test:routes && npm run build && npm run test:layout",
     "grade:members": "tsx scripts/grade-members.ts",

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { spineState } from "@/lib/window";
 import { CoverageChip } from "@/components/ui/CoverageChip";
 import { ChecksDrawer } from "@/components/ui/ChecksDrawer";
 import { SessionChip } from "@/components/shell/SessionChip";
@@ -77,7 +78,9 @@ export function PageHeader({
               Overview and is now rendered nowhere. The register travels with the
               chip instead, so it cannot come apart from it again. */}
           {checks && <ChecksDrawer checks={checks} />}
-          {coverage && <CoverageChip state={coverage} scope={coverageScope} />}
+          {coverage && (
+            <CoverageChip state={coverage} scope={coverageScope} spine={spineState(org)} />
+          )}
         </div>
       </div>
 
