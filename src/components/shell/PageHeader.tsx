@@ -89,8 +89,28 @@ export function PageHeader({
   );
 }
 
+/**
+ * The scrolling body of a report, and the edge where it meets the chrome.
+ *
+ * The header above this had a 1px rule under it whether or not there was
+ * anything beneath to divide — a divider drawn on principle rather than on
+ * evidence. The sentinel below is a zero-height sticky element at the top of
+ * the scroller that fades a soft edge in over the first 24px of scroll and is
+ * invisible at rest, so the separation appears exactly when content starts
+ * passing under the chrome.
+ *
+ * It is a CSS scroll-driven animation, so there is no scroll listener and no
+ * client boundary on a page that is otherwise entirely server-rendered. Where
+ * `animation-timeline` is unsupported it never appears, which is what this
+ * looked like before.
+ */
 export function Page({ children }: { children: ReactNode }) {
-  return <div className="flex-1 overflow-y-auto p-6">{children}</div>;
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div data-scroll-edge="" aria-hidden />
+      <div className="p-6">{children}</div>
+    </div>
+  );
 }
 
 /**

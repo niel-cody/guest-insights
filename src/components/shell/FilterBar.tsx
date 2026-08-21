@@ -304,7 +304,7 @@ function Locations({
         <span className="font-medium text-ink">{label}</span>
         <IconChevron className="h-4 w-4 text-ink-muted" />
       </summary>
-      <div className="absolute top-full left-0 z-30 mt-1 max-h-[320px] w-[280px] overflow-y-auto rounded-xl border border-line bg-surface-raised p-2 shadow-lg">
+      <div className="absolute top-full left-0 z-30 mt-1 max-h-[320px] w-[280px] overflow-y-auto rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
         <button
           type="button"
           onClick={() => onChange([])}

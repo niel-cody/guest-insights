@@ -61,11 +61,14 @@ export function CoverageChip({
         {scope === "mixed" && (
           <span className="text-[12px] text-ink-muted">· {IDENTITY_NOUN.member} below differs</span>
         )}
-        <IconChevron className={`h-4 w-4 text-ink-muted transition-transform ${open ? "rotate-180" : ""}`} />
+        <IconChevron className={`h-4 w-4 text-ink-muted transition-transform duration-200 ease-in-out ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-30 mt-2 w-[420px] rounded-xl border border-line bg-surface-raised p-4 shadow-lg">
+        <div
+          data-pop=""
+          className="absolute top-full right-0 z-30 mt-2 w-[420px] origin-top-right rounded-xl border border-line bg-surface-raised p-4 shadow-panel"
+        >
           <p className="text-[13px] leading-relaxed text-ink-secondary">
             Of the trade taken in the window below, we can attribute this share of
             revenue to a returning person.

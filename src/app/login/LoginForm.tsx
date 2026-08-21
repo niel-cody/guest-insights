@@ -47,7 +47,7 @@ export function LoginForm({ next }: { next: string }) {
       <button
         type="submit"
         disabled={pending}
-        className="mt-1 rounded-lg px-3 py-2 text-[14px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+        className="mt-1 rounded-lg px-3 py-2 text-[14px] font-medium text-white hover:opacity-90 disabled:opacity-60"
         style={{ background: "var(--accent)" }}
       >
         {pending ? "Checking…" : "Open the report"}

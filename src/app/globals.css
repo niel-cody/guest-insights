@@ -172,6 +172,51 @@
   --color-card-tier:      var(--tier-card);
   --color-unattributed:   var(--tier-unattributed);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /*
+    The named type scale, for new work.
+
+    Size, leading and tracking are declared as one step rather than three
+    independent choices, because they are one decision: hierarchy comes from
+    weight, size and leading together, and a size picked without its leading is
+    half a decision. Large steps run tight on both; body runs loose enough to
+    read a paragraph in; the label steps run tighter in leading and looser in
+    tracking because they are single lines that have to stay legible small.
+
+    Existing pages use the arbitrary sizes and get their tracking from the table
+    at the foot of this file. New panels should reach for these.
+  */
+  --text-figure: 30px;
+  --text-figure--line-height: 1;
+  --text-figure--letter-spacing: -0.025em;
+
+  --text-figure-sm: 22px;
+  --text-figure-sm--line-height: 1.05;
+  --text-figure-sm--letter-spacing: -0.019em;
+
+  --text-title: 19px;
+  --text-title--line-height: 1.25;
+  --text-title--letter-spacing: -0.015em;
+
+  --text-section: 17px;
+  --text-section--line-height: 1.3;
+  --text-section--letter-spacing: -0.011em;
+
+  --text-heading: 15px;
+  --text-heading--line-height: 1.35;
+  --text-heading--letter-spacing: -0.006em;
+
+  --text-body: 13px;
+  --text-body--line-height: 1.6;
+  --text-body--letter-spacing: 0;
+
+  --text-label: 12px;
+  --text-label--line-height: 1.45;
+  --text-label--letter-spacing: 0.003em;
+
+  --text-micro: 11px;
+  --text-micro--line-height: 1.4;
+  --text-micro--letter-spacing: 0.007em;
 }
 
 html, body { height: 100%; }
@@ -190,3 +235,278 @@ body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; border: 3px solid var(--surface); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/*
+  The three curves, defined once.
+
+  In `@theme` rather than on `:root` so that `var(--ease-out)` in hand-written
+  CSS and the `ease-out` utility in a className are the same curve. Declaring
+  them in both places is how a design system ends up with two vocabularies that
+  drift, and the drift is invisible until somebody screenshots the two.
+
+  These override Tailwind's built-in `ease-out` and `ease-in-out`, deliberately.
+  The built-ins are too weak to read as intentional — they are the reason the
+  sixteen transitions this build shipped with all felt like nothing in
+  particular.
+*/
+/*
+  Elevation, as two weights rather than nine borrowed steps.
+
+  Every floating surface in the build carried `shadow-lg` — a 200px column menu
+  and a 740px period picker cast the same shadow, so nothing on screen said
+  which of them was the bigger thing. A material reads as thick or thin by its
+  shadow, and using one step for every surface throws that away.
+
+  Two weights, because there are two kinds of floating surface here: menus and
+  tooltips that sit just off the page, and panels that cover a real part of it.
+  The drawers take a third, defined with the drawer itself, because they are the
+  only surfaces that span the full height of the viewport.
+
+  Both carry a hairline as their first layer. A shadow alone disappears against
+  a dark ground, and these have to hold in both themes.
+*/
+@theme {
+  --shadow-pop:
+    0 0 0 1px color-mix(in srgb, var(--line-strong) 55%, transparent),
+    0 4px 12px -2px rgb(0 0 0 / 0.12),
+    0 2px 4px -2px rgb(0 0 0 / 0.08);
+  --shadow-panel:
+    0 0 0 1px color-mix(in srgb, var(--line-strong) 65%, transparent),
+    0 16px 40px -8px rgb(0 0 0 / 0.20),
+    0 4px 10px -4px rgb(0 0 0 / 0.10);
+}
+
+@theme {
+  /* Entering and exiting. Starts fast, so the interface answers immediately. */
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  /* Movement on screen, where something travels rather than arrives. */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* The iOS sheet curve, for the drawers. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Motion.
+
+   The build had sixteen `transition-*` classes in four and a half thousand
+   lines of components, every one of them a bare Tailwind default — which is
+   150ms on an ease-in-out curve. That curve starts slow, and the moment it
+   starts slow is the moment the reader is watching most closely, so every
+   transition in the product felt a beat behind the click that caused it.
+
+   These tokens replace guessing per call site. Two rules govern all of them:
+
+   — **Exits are faster than enters.** The reader has already decided; the
+     system is just getting out of the way.
+   — **Nothing that a reader triggers dozens of times a day animates at all.**
+     The period picker, the sidebar and the report tabs get press feedback and
+     nothing else. Animation on a control used forty times a shift is a tax
+     charged forty times.
+
+   Curves are the strong variants, not the CSS built-ins. The built-ins are too
+   weak to read as deliberate.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --dur-press:  120ms;  /* press feedback — must feel like the same instant */
+  --dur-pop:    150ms;  /* info popovers */
+  --dur-menu:   200ms;  /* pickers, disclosure */
+  --dur-enter:  320ms;  /* drawer arriving */
+  --dur-exit:   200ms;  /* drawer leaving — faster, always */
+}
+
+/* ── Press feedback ─────────────────────────────────────────────────────────
+   Every pressable element answers the press itself, not the release. This is
+   the single cheapest thing that makes an interface feel like it is listening,
+   and the build had it on nothing.
+
+   Deliberately *not* gated behind `hover: hover` — press is the one piece of
+   feedback that matters more on touch than on a pointer. It also fires on
+   `:active`, which is pointer-down, rather than waiting for the click event.
+
+   Declared in `@layer base` on purpose. Unlayered rules beat every Tailwind
+   utility regardless of specificity, so an unlayered `transition` shorthand
+   here would silently kill `transition-colors` on every button in the product —
+   which is exactly what the first version of this did. In `base` the utilities
+   still win where a component asks for something specific.
+
+   The colour longhands are listed alongside `transform` so a button gets both
+   from one declaration and no call site has to remember to ask.
+
+   `.press-none` opts out. Wide row targets scale badly — a full-width button
+   shrinking 3% reads as the layout twitching rather than as a button answering
+   — so scrims, menu rows and disclosure headers take their existing hover
+   ground and no scale. */
+@layer base {
+  button, summary, [role="button"] {
+    transition:
+      transform        var(--dur-press) var(--ease-out),
+      color            var(--dur-press) ease,
+      background-color var(--dur-press) ease,
+      border-color     var(--dur-press) ease,
+      opacity          var(--dur-press) ease;
+  }
+  button:not(:disabled):not(.press-none):active,
+  summary:not(.press-none):active,
+  [role="button"]:not(:disabled):not(.press-none):active {
+    transform: scale(0.97);
+  }
+}
+
+/* ── Overlay choreography ───────────────────────────────────────────────────
+   Drawers enter and leave along the same path (in from the right, out to the
+   right). A panel that slides in from one edge and fades out in place breaks
+   the spatial relationship the reader just built, and the swipe-to-dismiss
+   instinct with it.
+
+   Driven by `data-state` rather than by mount, because the panels are not in
+   the server HTML when closed and the layout tests assert on that output. */
+[data-overlay-scrim] {
+  transition: opacity var(--dur-exit) var(--ease-out);
+  opacity: 0;
+}
+[data-overlay-scrim][data-state="open"] {
+  transition-duration: var(--dur-enter);
+  opacity: 1;
+}
+
+[data-overlay-panel] {
+  transition:
+    transform var(--dur-exit) var(--ease-out),
+    opacity   var(--dur-exit) var(--ease-out);
+  transform: translateX(100%);
+  opacity: 0;
+}
+[data-overlay-panel][data-state="open"] {
+  transition:
+    transform var(--dur-enter) var(--ease-drawer),
+    opacity   var(--dur-enter) var(--ease-drawer);
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* A drawer is a big surface, and a big surface should read as thick: a wider,
+   softer shadow than a chip gets, plus a close contact shadow so the edge sits
+   on the page rather than floating above a blur. Replaces `shadow-2xl`, which
+   is a generic elevation borrowed from a system that is not this one. */
+[data-overlay-panel] {
+  box-shadow:
+    -1px 0 0 0 color-mix(in srgb, var(--line-strong) 60%, transparent),
+    -24px 0 60px -12px rgb(0 0 0 / 0.28),
+    -8px 0 16px -8px rgb(0 0 0 / 0.16);
+}
+
+/* ── Popovers scale from their trigger ──────────────────────────────────────
+   `transform-origin: center` is wrong for anything anchored to a control: the
+   panel grows out of its own middle instead of out of the thing that opened
+   it, and the link between the two is left for the reader to infer.
+
+   Modals are exempt and stay centred — they are not anchored to anything. */
+[data-pop] {
+  animation: pop-in var(--dur-pop) var(--ease-out) both;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Progressive disclosure opens rather than jumps ─────────────────────────
+   `<details>` snaps its content into existence. `interpolate-size` lets the
+   height be animated to `auto`; where it is unsupported the content simply
+   appears as it does today. */
+@supports (interpolate-size: allow-keywords) {
+  :root { interpolate-size: allow-keywords; }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size    var(--dur-menu) var(--ease-out),
+      content-visibility var(--dur-menu) var(--ease-out) allow-discrete;
+  }
+  details[open]::details-content { block-size: auto; }
+}
+
+/* ── The scroll edge ────────────────────────────────────────────────────────
+   A 1px rule under the header is a divider whether or not there is anything to
+   divide. This is a sentinel inside the scroll container that fades a soft edge
+   in as content passes beneath the chrome, and stays invisible at rest.
+
+   Pure CSS scroll-driven animation, so there is no client boundary and no
+   scroll listener. Where `animation-timeline` is unsupported it never appears,
+   which is exactly today's behaviour. */
+@supports (animation-timeline: scroll()) {
+  [data-scroll-edge] {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    height: 0;
+    box-shadow: 0 6px 12px -6px rgb(0 0 0 / 0.18);
+    opacity: 0;
+    animation: scroll-edge-in linear both;
+    animation-timeline: scroll(nearest);
+    animation-range: 0 24px;
+  }
+  @keyframes scroll-edge-in {
+    to { opacity: 1; }
+  }
+}
+
+/* ── Accessibility: the three preferences, answered ─────────────────────────
+   Reduced motion is not *no* feedback. Movement goes; the fades and colour
+   changes that carry meaning stay, because those are what tell a reader the
+   state changed at all. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-enter: 160ms; --dur-exit: 140ms; }
+
+  button:active, summary:active, [role="button"]:active { transform: none; }
+
+  [data-overlay-panel],
+  [data-overlay-panel][data-state="open"] { transform: none; }
+
+  [data-pop] { animation-name: pop-in-reduced; }
+  @keyframes pop-in-reduced {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  details::details-content { transition: none; }
+  [data-scroll-edge] { animation: none; opacity: 1; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-overlay-scrim] { background-color: rgb(0 0 0 / 0.6); }
+}
+
+@media (prefers-contrast: more) {
+  [data-overlay-panel],
+  [data-pop] { border-color: var(--ink-secondary); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Typography: tracking is a function of size.
+
+   A single letter-spacing value is wrong somewhere by definition. Letters read
+   as too far apart the larger they get, and too tight the smaller — so display
+   figures want negative tracking and 11px labels want a little positive. The
+   build ran every one of its fifteen sizes at the font's default.
+
+   This is applied by size rather than by migrating four hundred and sixty call
+   sites to a named scale. The named scale exists below for new work; this table
+   is what makes the existing pages right today. Anything that already carries a
+   `tracking-*` class is left alone — those are the uppercase labels, which need
+   the opposite treatment and already have it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.text-\[30px\]:not([class*="tracking-"]) { letter-spacing: -0.025em; }
+.text-\[28px\]:not([class*="tracking-"]) { letter-spacing: -0.024em; }
+.text-\[24px\]:not([class*="tracking-"]) { letter-spacing: -0.021em; }
+.text-\[22px\]:not([class*="tracking-"]) { letter-spacing: -0.019em; }
+.text-\[20px\]:not([class*="tracking-"]) { letter-spacing: -0.017em; }
+.text-\[19px\]:not([class*="tracking-"]) { letter-spacing: -0.015em; }
+.text-\[18px\]:not([class*="tracking-"]) { letter-spacing: -0.013em; }
+.text-\[17px\]:not([class*="tracking-"]) { letter-spacing: -0.011em; }
+.text-\[15px\]:not([class*="tracking-"]) { letter-spacing: -0.006em; }
+.text-\[14px\]:not([class*="tracking-"]) { letter-spacing: -0.002em; }
+.text-\[13px\]:not([class*="tracking-"]) { letter-spacing: 0; }
+.text-\[12px\]:not([class*="tracking-"]) { letter-spacing: 0.003em; }
+.text-\[11px\]:not([class*="tracking-"]) { letter-spacing: 0.007em; }
+.text-\[10px\]:not([class*="tracking-"]) { letter-spacing: 0.011em; }
+.text-\[9px\]:not([class*="tracking-"])  { letter-spacing: 0.014em; }

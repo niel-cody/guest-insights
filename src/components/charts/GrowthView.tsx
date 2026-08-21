@@ -48,7 +48,7 @@ export function GrowthView({ d, rows }: { d: Decomposition; rows: DecompositionR
                 type="button"
                 onClick={() => setView(o.key)}
                 aria-pressed={showing === o.key}
-                className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+                className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                   showing === o.key
                     ? "bg-surface-hover text-ink"
                     : "text-ink-secondary hover:text-ink"

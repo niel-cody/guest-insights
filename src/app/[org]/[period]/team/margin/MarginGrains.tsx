@@ -74,7 +74,7 @@ export function MarginGrains({ grains, initial }: { grains: Grain[]; initial?: s
             type="button"
             onClick={() => setKey(g.key)}
             aria-pressed={g.key === key}
-            className={`rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+            className={`rounded-lg border px-3 py-1.5 text-[13px] font-medium ${
               g.key === key
                 ? "border-accent bg-accent-soft text-accent"
                 : "border-line text-ink-secondary hover:bg-surface-hover"

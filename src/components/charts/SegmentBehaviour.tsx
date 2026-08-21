@@ -296,7 +296,7 @@ export function SegmentTiming({
               type="button"
               onClick={() => setMetric(o.key)}
               aria-pressed={metric === o.key}
-              className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+              className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
                 metric === o.key ? "bg-surface-hover text-ink" : "text-ink-secondary hover:text-ink"
               }`}
             >

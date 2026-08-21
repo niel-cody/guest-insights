@@ -230,7 +230,7 @@ export function DayMatrix({
                         // open and closed it again, and the tooltip never
                         // appeared on tap at all. Focus covers both tap and
                         // keyboard on its own; blur and mouse-leave close it.
-                        className="block rounded-[3px] border transition-opacity hover:opacity-80"
+                        className="press-none block rounded-[3px] border hover:opacity-80"
                         style={{
                           width: cellSize,
                           height: cellSize,
@@ -263,7 +263,7 @@ export function DayMatrix({
       {active && (
         <div
           role="tooltip"
-          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg border border-line-strong bg-surface-raised px-2.5 py-1.5 text-[12px] whitespace-nowrap text-ink shadow-lg"
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-lg border border-line-strong bg-surface-raised px-2.5 py-1.5 text-[12px] whitespace-nowrap text-ink shadow-pop"
           style={{ left: active.x, top: active.y - 6 }}
         >
           {active.text}

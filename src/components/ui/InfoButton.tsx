@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { IconInfo } from "@/components/shell/Icons";
 
 /**
@@ -73,6 +73,26 @@ export function InfoButton({
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
   const id = useId();
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /**
+   * Hover waits; click and focus do not.
+   *
+   * Four tiles across the top of a report carry four of these, a few pixels
+   * from the labels a reader is already scanning. With no delay, moving the
+   * pointer across that row pops three panels open and shut on the way past —
+   * the interface reacting to a movement that was never aimed at it.
+   *
+   * A quarter of a second is long enough to mean the pointer stopped here and
+   * short enough that a reader who did aim at it never notices waiting. The
+   * delay is on hover only: a click or a keyboard focus is unambiguous and
+   * opens immediately.
+   */
+  const cancelHover = useCallback(() => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+  }, []);
+  useEffect(() => cancelHover, [cancelHover]);
 
   // Escape closes, and a click anywhere outside closes. Both are here rather
   // than on the trigger because a popover that only closes by pressing the same
@@ -99,8 +119,14 @@ export function InfoButton({
     <span
       ref={wrap}
       className="relative inline-flex"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={() => {
+        cancelHover();
+        hoverTimer.current = setTimeout(() => setOpen(true), 250);
+      }}
+      onMouseLeave={() => {
+        cancelHover();
+        setOpen(false);
+      }}
     >
       <button
         type="button"
@@ -113,12 +139,21 @@ export function InfoButton({
         aria-label={label}
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        onClick={() => setOpen((v) => !v)}
-        onFocus={() => setOpen(true)}
-        onBlur={(e) => {
-          if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false);
+        onClick={() => {
+          cancelHover();
+          setOpen((v) => !v);
         }}
-        className="inline-grid h-4 w-4 place-items-center rounded-full text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+        onFocus={() => {
+          cancelHover();
+          setOpen(true);
+        }}
+        onBlur={(e) => {
+          if (!wrap.current?.contains(e.relatedTarget as Node)) {
+            cancelHover();
+            setOpen(false);
+          }
+        }}
+        className="inline-grid h-4 w-4 place-items-center rounded-full text-ink-muted hover:bg-surface-hover hover:text-ink-secondary focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
       >
         <IconInfo className="h-3.5 w-3.5" />
       </button>
@@ -127,8 +162,9 @@ export function InfoButton({
         <span
           id={id}
           role="tooltip"
-          className={`absolute top-6 z-30 block w-[300px] rounded-lg border border-line-strong bg-surface-raised px-3.5 py-3 text-[12px] leading-relaxed font-normal text-ink-secondary normal-case shadow-lg ${
-            align === "end" ? "right-0" : "left-0"
+          data-pop=""
+          className={`absolute top-6 z-30 block w-[300px] rounded-lg border border-line-strong bg-surface-raised px-3.5 py-3 text-[12px] leading-relaxed font-normal text-ink-secondary normal-case shadow-pop ${
+            align === "end" ? "right-0 origin-top-right" : "left-0 origin-top-left"
           }`}
           style={{ letterSpacing: "normal" }}
         >

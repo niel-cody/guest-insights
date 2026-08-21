@@ -161,7 +161,10 @@ export function SaveToList({
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-40 mt-2 w-[440px] rounded-xl border border-line bg-surface-raised p-4 shadow-lg">
+        <div
+          data-pop=""
+          className="absolute top-full right-0 z-40 mt-2 w-[440px] origin-top-right rounded-xl border border-line bg-surface-raised p-4 shadow-panel"
+        >
           <h3 className="text-[14px] font-semibold text-ink">Save this population as a list</h3>
 
           {/* Size and reach together. Never size alone. */}

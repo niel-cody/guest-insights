@@ -86,7 +86,7 @@ export function Tooltip({ tip, width }: { tip: TooltipState; width: number }) {
   const flip = tip.x > width * 0.6;
   return (
     <div
-      className="pointer-events-none absolute z-20 min-w-[160px] rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] shadow-lg"
+      className="pointer-events-none absolute z-20 min-w-[160px] rounded-lg border border-line bg-surface-raised px-3 py-2 text-[12px] shadow-pop"
       style={{
         left: flip ? undefined : tip.x + 14,
         right: flip ? width - tip.x + 14 : undefined,

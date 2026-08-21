@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { IconInfo, IconX } from "@/components/shell/Icons";
+import { useCallback, useRef, useState, type ReactNode } from "react";
+import { IconInfo } from "@/components/shell/Icons";
+import { Drawer } from "@/components/ui/Drawer";
 
 /**
  * The explain drawer. **Task 0 of the Build 5 review, and the reason five other
@@ -88,30 +89,16 @@ export function ExplainDrawer({
   const empty = isEmpty(showing) && isEmpty(made);
 
   const [open, setOpen] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
 
-  // Escape closes and focus returns to the trigger. A drawer that swallows
-  // focus is a drawer a keyboard user cannot leave, and this one covers a third
-  // of the screen.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        trigger.current?.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    // The page behind must not scroll while the drawer is over it.
-    const prior = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    panel.current?.focus();
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prior;
-    };
-  }, [open]);
+  // Focus returns to the trigger on every close, not just the Escape one. A
+  // drawer that swallows focus is a drawer a keyboard user cannot leave, and
+  // this one covers a third of the screen. Escape, the scrim and the close
+  // button all land here, so all three behave the same — they did not before.
+  const close = useCallback(() => {
+    setOpen(false);
+    trigger.current?.focus();
+  }, []);
 
   if (empty) return null;
 
@@ -127,71 +114,34 @@ export function ExplainDrawer({
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen(true)}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary transition-colors hover:border-line-strong hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:border-line-strong hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
       >
         <IconInfo className="h-3.5 w-3.5" />
         {triggerLabel}
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          {/* The scrim closes on click. A drawer that only closes by finding a
-              small × in a corner is a drawer people leave open. */}
-          <div
-            className="absolute inset-0 bg-black/35"
-            onClick={() => setOpen(false)}
-            aria-hidden
-          />
-          <div
-            ref={panel}
-            role="dialog"
-            aria-modal="true"
-            aria-label={label}
-            tabIndex={-1}
-            className="relative flex h-full w-full max-w-[440px] flex-col border-l border-line bg-surface shadow-2xl outline-none"
-          >
-            <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-              <div>
-                <p className="text-[11px] font-medium tracking-wide text-ink-muted uppercase">
-                  About this panel
-                </p>
-                <h2 className="mt-0.5 text-[15px] font-semibold text-ink">{title}</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  trigger.current?.focus();
-                }}
-                aria-label="Close"
-                className="-mr-1 inline-grid h-7 w-7 shrink-0 place-items-center rounded-lg text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-              >
-                <IconX className="h-4 w-4" />
-              </button>
-            </header>
+      <Drawer
+        open={open}
+        onClose={close}
+        label={label}
+        eyebrow="About this panel"
+        title={title}
+      >
+        {!isEmpty(showing) && <Section heading="What this is showing">{showing}</Section>}
+        {!isEmpty(made) && (
+          <Section heading="How it is made" first={isEmpty(showing)}>
+            {made}
+          </Section>
+        )}
 
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              {!isEmpty(showing) && (
-                <Section heading="What this is showing">{showing}</Section>
-              )}
-              {!isEmpty(made) && (
-                <Section heading="How it is made" first={isEmpty(showing)}>
-                  {made}
-                </Section>
-              )}
-
-              {/* The rule, stated to the reader rather than only to the author.
-                  A reader who knows nothing important is hidden in here reads
-                  the page faster, and a reader who suspects otherwise reads
-                  every drawer. */}
-              <p className="mt-6 border-t border-line pt-3 text-[11px] leading-relaxed text-ink-muted">
-                Nothing that changes how a figure should be read is in here. Caveats, refusals,
-                confidence intervals and the population a figure covers stay on the page.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+        {/* The rule, stated to the reader rather than only to the author. A
+            reader who knows nothing important is hidden in here reads the page
+            faster, and a reader who suspects otherwise reads every drawer. */}
+        <p className="mt-6 border-t border-line pt-3 text-[11px] leading-relaxed text-ink-muted">
+          Nothing that changes how a figure should be read is in here. Caveats, refusals,
+          confidence intervals and the population a figure covers stay on the page.
+        </p>
+      </Drawer>
     </>
   );
 }

@@ -170,7 +170,7 @@ export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }
                   <span>{group.label}</span>
                   {!disabled && (
                     <IconChevron
-                      className={`h-4 w-4 transition-transform ${isOpen ? "" : "-rotate-90"}`}
+                      className={`h-4 w-4 transition-transform duration-200 ease-in-out ${isOpen ? "" : "-rotate-90"}`}
                     />
                   )}
                 </button>

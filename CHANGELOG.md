@@ -2,12 +2,118 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.10.0`** — the version and commit render in the app header on every
+**Current: `v0.11.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.11.0 — the interface answers the press, and the drawers arrive from somewhere
+
+Four and a half thousand lines of components carried **sixteen transitions**,
+every one of them a bare Tailwind default — 150ms on an ease-in-out curve. That
+curve starts slow, and the moment it starts slow is the moment the reader is
+watching most closely, so every state change in the product landed a beat behind
+the click that caused it. Nothing had a press state. The three drawers appeared
+at full size instantly and vanished the same way.
+
+None of that is a bug a check can catch. It is the difference between an
+artefact that reads as a product and one that reads as a prototype, and this
+build is shown to buyers.
+
+The vocabulary comes from [emilkowalski/skills](https://github.com/emilkowalski/skills),
+installed under `.claude/skills` so the next session works from the same rules
+rather than re-deriving them.
+
+### Three curves and five durations, defined once
+
+`--ease-out` for arriving and leaving, `--ease-in-out` for moving on screen,
+`--ease-drawer` for the sheets. They live in `@theme`, so `var(--ease-out)` in
+hand-written CSS and the `ease-out` utility in a className are the same curve —
+declaring them twice is how a design system ends up with two vocabularies that
+drift, and the drift is invisible until somebody screenshots both.
+
+**Exits are faster than enters** everywhere. The reader has already decided; the
+system is getting out of the way.
+
+### Nothing a reader touches forty times a shift animates
+
+The frequency rule is the whole of the restraint. The sidebar, the period
+picker, the report tabs and every chart get press feedback and nothing else.
+**No chart animates.** Data a reader is trying to act on does not move for
+style, and an entrance animation on a functional graph is a tax charged on every
+visit to a page people open all day.
+
+### One drawer, where there were three
+
+The explain drawer, the check register and the guest detail each had their own
+copy of the scrim, the panel, the escape handler and the scroll lock — and had
+already drifted into three different close behaviours. There is now one
+`Drawer`, and the scrim click restores focus to the trigger like the other two
+paths always did. Tab is trapped inside a panel that has been claiming
+`aria-modal` for months without it.
+
+They enter from the right over 320ms and leave the same edge over 200ms.
+**Enter and exit share a path**, so a panel never tells the reader it went
+somewhere other than where it came from.
+
+The panels are not kept mounted to do it. Every closed drawer's prose would
+otherwise land in the prerendered HTML that `npm run test:layout` slices to
+prove two blocks are adjacent — a closed drawer inside one of those slices would
+break assertions that have nothing to do with drawers.
+
+### Popovers grow from the control that opened them
+
+All five had `transform-origin: center`, so each grew out of its own middle and
+left the reader to infer which control it belonged to. Nothing starts from
+`scale(0)`; nothing in the world appears from nothing.
+
+The info popovers now wait 250ms on hover and open instantly on click or focus.
+Four tiles across a report header carry four of them, and with no delay, moving
+the pointer across that row popped three panels open on the way past — the
+interface reacting to a movement never aimed at it.
+
+### Elevation is two weights, and tracking is a function of size
+
+A 200px column menu and a 740px period picker both cast `shadow-lg`, so nothing
+on screen said which was the bigger thing. `--shadow-pop` for menus and
+tooltips, `--shadow-panel` for surfaces that cover a real part of the page, and
+a third for the drawers, which are the only things spanning the viewport.
+
+Every one of fifteen type sizes ran at the font's default letter-spacing. **A
+single tracking value is wrong somewhere by definition** — letters read too far
+apart as they grow and too tight as they shrink. The table runs from −0.025em at
+30px to +0.014em at 9px, applied by size rather than by editing 462 call sites,
+with a named scale in `@theme` for new work that declares size, leading and
+tracking as one decision.
+
+### The divider under the header is drawn on evidence now
+
+It was a 1px rule whether or not there was anything beneath to divide. A
+zero-height sticky sentinel fades a soft edge in over the first 24px of scroll,
+so the separation appears exactly when content starts passing under the chrome.
+CSS scroll-driven, so no scroll listener and no client boundary on a page that
+is otherwise entirely server-rendered.
+
+### Reduced motion means gentler, not nothing
+
+Movement drops; the fades and colour changes that tell a reader the state
+changed at all stay. `prefers-reduced-transparency` makes the scrim solid and
+`prefers-contrast: more` gives floating surfaces a defined border.
+
+### One regression, caught before it shipped
+
+The first version of the press rule was unlayered. Unlayered CSS beats every
+Tailwind utility regardless of specificity, so it had silently killed
+`transition-colors` on every button in the product — the exact class of defect
+this build exists to argue against, introduced by the change meant to fix it. It
+is in `@layer base` with the colour longhands alongside `transform`, and the
+nine now-redundant utilities are gone.
+
+All 1,769 assertions in `npm run check` pass unchanged.
 
 ---
 

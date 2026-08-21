@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconSearch, IconX } from "@/components/shell/Icons";
 import { Card, EmptyState, Pill } from "@/components/ui/Primitives";
 import { GuestDrawer } from "./GuestDrawer";
 import { SaveToList } from "@/components/ui/SaveToList";
+import { useOverlayState } from "@/components/ui/Drawer";
 import { SEGMENT_LABEL, count, money, pct, recencyShort } from "@/lib/metrics";
 import type { Guest, Guests, Items, Org } from "@/lib/types";
 import { unpackGuests } from "@/lib/guest-columns";
@@ -183,6 +184,15 @@ export function GuestGrid({
   const open = view.guest ? (filtered.find((g) => g.id === view.guest) ?? null) : null;
   const index = open ? filtered.findIndex((g) => g.id === open.id) : -1;
 
+  // The drawer moves like every other drawer in the product, which means it has
+  // to still be on screen while it leaves. `open` is derived from the URL and
+  // goes null on the click that closes it, so the person is held for the length
+  // of the exit — otherwise the panel slides out empty.
+  const overlay = useOverlayState(Boolean(open));
+  const last = useRef<Guest | null>(null);
+  if (open) last.current = open;
+  const showing = open ?? last.current;
+
   const visible = COLUMNS.filter((c) => c.fixed || !hidden.has(c.key));
 
   // The SUM row is over **the whole filtered population**, not the page. A total
@@ -235,7 +245,7 @@ export function GuestGrid({
                 {hidden.size > 0 && <span className="ml-1.5 text-ink-muted">({visible.length})</span>}
               </button>
               {pickerOpen && (
-                <div className="absolute top-full right-0 z-30 mt-1 w-[200px] rounded-xl border border-line bg-surface-raised p-2 shadow-lg">
+                <div className="absolute top-full right-0 z-30 mt-1 w-[200px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
                   {COLUMNS.map((c) => (
                     <button
                       key={c.key}
@@ -249,7 +259,7 @@ export function GuestGrid({
                           return next;
                         })
                       }
-                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
+                      className={`press-none flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
                         c.fixed ? "opacity-45" : "text-ink-secondary hover:bg-surface-hover"
                       }`}
                     >
@@ -383,9 +393,13 @@ export function GuestGrid({
         )}
       </Card>
 
-      {open && (
+      {/* The drawer stays mounted for the length of its exit, so it needs the
+          person it was showing to survive one render past the click that closed
+          it. `open` comes from the URL and is null the instant that happens. */}
+      {overlay.mounted && showing && (
         <GuestDrawer
-          guest={open}
+          guest={showing}
+          state={overlay.state}
           org={org}
           items={items}
           tab={view.tab}

@@ -127,7 +127,10 @@ export function PeriodMenu({
   const selectable = rows.filter((r) => r.selectable).length;
 
   return (
-    <div className="absolute left-0 z-30 mt-1.5 w-[740px] max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-surface-raised shadow-lg">
+    <div
+      data-pop=""
+      className="absolute left-0 z-30 mt-1.5 w-[740px] max-w-[calc(100vw-2rem)] origin-top-left rounded-xl border border-line bg-surface-raised shadow-panel"
+    >
             {/* One scroll area rather than one per column: two independently
                 scrolling halves put the reason for a refusal and the refusal
                 itself at different heights, which is the one pairing this panel

@@ -33,6 +33,7 @@ type Tab = "who" | "noticed" | "behave";
  */
 export function GuestDrawer({
   guest: g, org, items, unmasked, crossVenueShare, tab, onTab, onClose, onPrev, onNext,
+  state = "open",
 }: {
   guest: Guest;
   org: Org;
@@ -44,11 +45,31 @@ export function GuestDrawer({
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
+  /**
+   * Which end of the enter/exit transition this is playing.
+   *
+   * Owned by the grid rather than by this component, because the grid is what
+   * knows the drawer is closing — the guest it was showing has already left the
+   * URL by then, and this component needs one last render with the old person
+   * still in it to slide out with.
+   */
+  state?: "open" | "closed";
 }) {
   return (
     <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Close" onClick={onClose} className="flex-1 bg-black/25" />
-      <aside className="flex w-[520px] max-w-full flex-col overflow-y-auto border-l border-line bg-surface-raised">
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        data-overlay-scrim=""
+        data-state={state}
+        className="press-none flex-1 bg-black/25"
+      />
+      <aside
+        data-overlay-panel=""
+        data-state={state}
+        className="flex w-[520px] max-w-full flex-col overflow-y-auto border-l border-line bg-surface-raised"
+      >
         <header className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
             <div className="flex items-center gap-2">

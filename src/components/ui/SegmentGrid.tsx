@@ -321,10 +321,15 @@ export function SegmentGrid({
             className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-surface-hover"
           >
             Columns
-            <IconChevron className={`h-3.5 w-3.5 transition-transform ${picking ? "rotate-180" : ""}`} />
+            <IconChevron
+              className={`h-3.5 w-3.5 transition-transform duration-200 ease-in-out ${picking ? "rotate-180" : ""}`}
+            />
           </button>
           {picking && (
-            <div className="absolute right-0 z-20 mt-1 w-[280px] rounded-lg border border-line-strong bg-surface-raised p-2 shadow-lg">
+            <div
+              data-pop=""
+              className="absolute right-0 z-20 mt-1 w-[280px] origin-top-right rounded-lg border border-line-strong bg-surface-raised p-2 shadow-pop"
+            >
               {available.map((c) => (
                 <label
                   key={c.key}
@@ -500,7 +505,7 @@ function Segmented<T extends string>({
             disabled={o.disabled}
             aria-pressed={value === o.key}
             onClick={() => onChange(o.key)}
-            className={`rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors ${
+            className={`rounded-md px-2.5 py-1 text-[12px] font-medium ${
               value === o.key
                 ? "bg-accent-soft text-accent"
                 : o.disabled

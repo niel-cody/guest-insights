@@ -38,8 +38,16 @@ export function Disclosure({
         <p className="mt-1 max-w-[100ch] text-[13px] leading-relaxed text-ink-secondary">{result}</p>
       </div>
       <details open={defaultOpen} className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-2.5 text-[13px] font-medium text-accent marker:hidden hover:bg-surface-hover">
-          <span className="transition-transform group-open:rotate-90">›</span>
+        <summary className="press-none flex cursor-pointer list-none items-center gap-2 px-5 py-2.5 text-[13px] font-medium text-accent marker:hidden hover:bg-surface-hover">
+          {/* A full-width row scaling 3% on press reads as the layout twitching
+              rather than as a control answering, so the row takes a ground
+              change instead and the marker carries the state. */}
+          <span
+            className="inline-block transition-transform duration-200 ease-in-out group-open:rotate-90"
+            aria-hidden
+          >
+            ›
+          </span>
           <span className="group-open:hidden">Show the working</span>
           <span className="hidden group-open:inline">Hide the working</span>
         </summary>
