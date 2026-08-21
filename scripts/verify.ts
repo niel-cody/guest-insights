@@ -134,6 +134,11 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void | false> = {
     a.distinctPar = 20000; a.txns = 40000;
     b.distinctPar = 200; b.txns = 39000;
   },
+  /* A till configured to prompt for a party size on a counter sale. Every
+     per-cover rate in the product silently changes meaning and no page says so. */
+  "covers.onlyOnSeatedOrders": (f) => {
+    f.snap.coverage.totals.ordersWithCovers = f.snap.coverage.totals.seatedWithCovers + 25;
+  },
   // The extract silently drops a venue's orders.
   "source.orderCountParity": (f) => {
     f.snap.coverage.totals.orders = Math.round(f.snap.coverage.totals.orders * 0.55);
@@ -223,9 +228,15 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void | false> = {
   },
   // A per-cover comparison whose two sides record party size at wildly
   // different rates, published without saying so.
+  /* A "controlled" comparison restricting members to the top 38% of their
+     seated orders while retaining 97% of everyone else's, without saying so. */
   "estimate.coverBasisMissingness": (f) => {
-    f.snap.members.coverBasis.member.coverage = 0.38;
-    f.snap.members.coverBasis.nonMember.coverage = 0.97;
+    const cb = f.snap.members.coverBasis;
+    // Nothing to corrupt where no seated trade exists: no per-cover comparison
+    // is drawn there, so there is no missingness to be informative about.
+    if (cb.member.ordersSeated === 0 || cb.nonMember.ordersSeated === 0) return false;
+    cb.member.seatedCoverage = 0.38;
+    cb.nonMember.seatedCoverage = 0.97;
   },
   // A till keying a code into the quantity field, which is what produced the
   // 4,654,648 line — reaching a row the product actually counts.
@@ -249,8 +260,20 @@ const CORRUPTIONS: Record<string, (f: Fixture) => void | false> = {
   },
   // A growth claim outliving the window it was built on. The months shrink and
   // the claim is carried forward from the longer extract.
+  /**
+   * A claim carried forward from a longer extract than the one on screen.
+   *
+   * The fixture used to hardcode "growth", which is a no-op on any window that
+   * legitimately claims growth — and Coffee Guru's twenty-one-month member
+   * window does. A corruption that lands on the value already there proves
+   * nothing, and it went unnoticed until a window long enough to expose it
+   * existed.
+   *
+   * Picks whichever level the window does *not* hold, so it overstates on a
+   * short window and understates on a long one. Either direction is the defect.
+   */
   "window.claimMatchesMonths": (f) => {
-    f.snap.org.cardTier.claim = "growth";
+    f.snap.org.cardTier.claim = f.snap.org.cardTier.claim === "growth" ? "none" : "growth";
   },
   // The placeholder wearing a card's clothes: a month whose references are
   // almost all the literal string 'N/A', which every non-null count scores at

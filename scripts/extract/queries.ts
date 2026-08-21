@@ -128,6 +128,8 @@ SELECT
   COUNT_IF(TIER = 'unattributed') AS UNATTRIBUTED_ORDERS,
   SUM(IFF(TIER = 'unattributed', TOTAL_PRICE, 0)) AS UNATTRIBUTED_REVENUE,
   COUNT_IF(COVERS IS NOT NULL) AS ORDERS_WITH_COVERS,
+  COUNT_IF(TABLE_REF IS NOT NULL) AS ORDERS_SEATED,
+  COUNT_IF(TABLE_REF IS NOT NULL AND COVERS IS NOT NULL) AS SEATED_WITH_COVERS,
   SUM(COVERS) AS COVERS
 FROM base
 GROUP BY STORE_ID
@@ -211,6 +213,9 @@ SELECT
   IFF(TIER = 'member', TRUE, FALSE) AS IS_MEMBER,
   COUNT(*) AS ORDERS,
   COUNT_IF(COVERS IS NOT NULL) AS ORDERS_WITH_COVERS,
+  /* Seated orders are the only ones a party size was ever owed on. */
+  COUNT_IF(TABLE_REF IS NOT NULL) AS ORDERS_SEATED,
+  COUNT_IF(TABLE_REF IS NOT NULL AND COVERS IS NOT NULL) AS SEATED_WITH_COVERS,
   SUM(IFF(COVERS IS NOT NULL, TOTAL_PRICE, 0)) AS REVENUE_WITH_COVERS,
   SUM(COVERS) AS COVERS,
   AVG(IFF(COVERS IS NOT NULL, TOTAL_PRICE, NULL)) AS AVG_ORDER_WITH_COVERS,
@@ -753,6 +758,8 @@ SELECT
   COUNT_IF(TIER = 'card') AS CARD_ORDERS,
   COUNT_IF(TIER = 'member' AND SCANNED) AS SCANNED_ORDERS,
   COUNT_IF(COVERS IS NOT NULL) AS ORDERS_WITH_COVERS,
+  COUNT_IF(TABLE_REF IS NOT NULL) AS ORDERS_SEATED,
+  COUNT_IF(TABLE_REF IS NOT NULL AND COVERS IS NOT NULL) AS SEATED_WITH_COVERS,
   COUNT(DISTINCT D) AS TRADING_DAYS,
   SUM(TOTAL_DISCOUNT) AS DISCOUNT
 FROM base
@@ -1068,15 +1075,31 @@ SELECT
  *    117 of 118" through the back door. Now `history.length === visits` by
  *    construction, and the venue ribbon in §7.3 gets the venue per visit it
  *    needs rather than one venue per day.
- * 2. **The window is 92 days**, so the ceiling per guest is bounded by the
- *    calendar rather than by their enthusiasm. `limit` survives as a backstop
- *    against a pathological row, and `RETURNED` is emitted so a check can assert
+ * 2. **The ceiling per guest is bounded by the calendar**, not by their
+ *    enthusiasm, so `limit` is a backstop against a pathological row rather
+ *    than a real constraint — and `RETURNED` is emitted so a check can assert
  *    that nobody actually hit it.
+ *
+ *    That reasoning was written when every window was 92 days, and the constant
+ *    it produced — 400 — was comfortably above any 92-day ceiling. Member
+ *    windows run twenty-one months, and a daily coffee drinker over that
+ *    stretch makes 581 visits. The backstop quietly became a binding cap: thirty
+ *    Coffee Guru guests were truncated, and the day grid draws a blank where a
+ *    real visit was.
+ *
+ *    So the limit is derived from the window it is taken over. Two visits a day
+ *    every day for the whole window is already beyond anything real, and it
+ *    keeps the backstop doing the job it was written for.
  *
  * Dates are emitted as an offset in days from the window start, because an ISO
  * date is ten characters and an offset is two.
  */
-export function visitHistoryQuery({ orgId, w, pairs, cardMonths }: Args, limit = 400) {
+export function visitHistoryQuery(
+  { orgId, w, pairs, cardMonths }: Args,
+  /** Days in the analysis window. The cap is derived from it, never fixed. */
+  windowDays: number,
+) {
+  const limit = Math.max(400, windowDays * 2);
   return `WITH ${basePrelude(orgId, w, pairs, cardMonths)},
 ${PEOPLE},
 v AS (

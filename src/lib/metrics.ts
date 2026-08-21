@@ -271,7 +271,10 @@ export function valueClaims(m: Members, org: Org): ValueClaim[] {
       basis: `${windowShort(w)} · per visit · ${count(member.visits + nonMember.visits)} visits`,
       refusal: null,
       note:
-        org.serviceModel === "table"
+        /* Was `serviceModel === "table"`, a label somebody typed. Derived now:
+           where most trade is served at a table, a visit is a table and the
+           per-visit comparison is measuring party size as much as spend. */
+        org.seatedShare > 0.5
           ? "This is the figure that gets loyalty programmes cut. It is also the wrong denominator for a table-service business: a visit is a table, and members are not booking the same size table."
           : "This is the figure that gets loyalty programmes cut, and on its own it is true. It is not the whole answer.",
     },

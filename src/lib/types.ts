@@ -84,7 +84,29 @@ export type Org = {
   id: string;
   name: string;
   vertical: "cafe" | "restaurant";
-  serviceModel: "counter" | "table";
+  /**
+   * The share of this window's orders served at a table.
+   *
+   * ── This replaced `serviceModel: "counter" | "table"` ──────────────────
+   *
+   * That was a label somebody typed into a config file, and it was making
+   * decisions the data should have been making. Coffee Guru was declared
+   * "counter", which routed it away from every per-cover measurement — while
+   * its Jamison venue rang 6,224 dine-in orders against 55 takeaway, all
+   * recording a party size, and Vincentia and Wagga Wagga did the same.
+   * **A configuration string was denying a merchant a measurement its own data
+   * supports.**
+   *
+   * Service model is also not a property of a merchant. It is a property of an
+   * order: the same venue sells a takeaway coffee and seats a table for six
+   * within a minute of each other, and one of those has covers.
+   *
+   * So the binary is gone and this is derived per window. Nothing branches on
+   * it — it is prose input, for the sentence that explains why a per-visit
+   * comparison reads oddly at a business where a visit is a table. The
+   * measurement rules key off `seated` counts directly.
+   */
+  seatedShare: number;
   labels: { visit: string; visits: string; guest: string; guests: string };
   window: AnalysisWindow;
   discoveryWindow: { start: string; end: string };
@@ -137,6 +159,9 @@ export type CoverageTotals = {
   unattributedOrders: number;
   unattributedRevenue: number;
   ordersWithCovers: number;
+  /** Orders served at a table. Covers are expected on these and nowhere else. */
+  ordersSeated: number;
+  seatedWithCovers: number;
   covers: number;
 };
 
@@ -324,8 +349,27 @@ export type ValueSide = {
 export type CoverBasis = {
   orders: number;
   ordersWithCovers: number;
-  /** Share of this group's orders that record a party size. */
+  /**
+   * Share of this group's orders that record a party size.
+   *
+   * Over **every** order, seated or not, which is why it reads at 20% for a
+   * business whose seated orders record covers almost perfectly. Kept because
+   * two surfaces still quote it as the raw fact; `seatedCoverage` below is the
+   * one any judgement is made on.
+   */
   coverage: number;
+  /** Orders served at a table — the only ones a party size was owed on. */
+  ordersSeated: number;
+  seatedWithCovers: number;
+  /**
+   * `seatedWithCovers / ordersSeated`. The discipline figure.
+   *
+   * This is the number that separates "this venue does takeaway" from "this
+   * venue is not asking how many people are at the table". The first is not a
+   * data problem and never was; the second costs an answer, and until the
+   * denominator was restricted to seated orders the two were indistinguishable.
+   */
+  seatedCoverage: number;
   covers: number;
   revenueWithCovers: number;
   spendPerCover: number | null;
@@ -512,6 +556,9 @@ export type VenueMonth = {
   cardOrders: number;
   scannedOrders: number;
   ordersWithCovers: number;
+  /** Seated orders and the ones among them that recorded a party size. */
+  ordersSeated: number;
+  seatedWithCovers: number;
   tradingDays: number;
   discount: number;
 };
@@ -813,6 +860,10 @@ export type TeamPerson = {
   items: number;
   covers: number;
   ordersWithCovers: number;
+  /** Orders served at a table. The denominator every per-cover rate uses. */
+  ordersSeated: number;
+  seatedNet: number;
+  seatedItems: number;
   days: number;
   discount: number;
   // The decomposition. Revenue per cover = items per cover × average item value.

@@ -109,7 +109,7 @@ async function main() {
       isPlaceholder ||
       /\/(behaviour|guests)$/.test(name) ||
       /\/team\/(performance|margin)$/.test(name) ||
-      /\/admin\/people-mapping$/.test(name);
+      /\/admin\/(people-mapping|data-health)$/.test(name);
 
     console.log(`\n${name}`);
 
@@ -641,7 +641,7 @@ async function main() {
         "overview", "behaviour", "guests", "loyalty-spend", "loyalty-redemption",
         "team/performance", "team/margin",
         "team/staff-scorecard", "team/attendance",
-        "admin/people-mapping",
+        "admin/people-mapping", "admin/data-health",
         "retention",
       ];
       const strays = unique.filter((h) => !known.includes(h));

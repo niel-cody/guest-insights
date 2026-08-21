@@ -10,7 +10,7 @@
  * problem does.
  */
 import type { Coverage, Members, Org } from "./types";
-import { pct } from "./metrics";
+import { count, pct } from "./metrics";
 
 export type Finding = {
   id: string;
@@ -30,39 +30,97 @@ export function qualityFindings(
   const out: Finding[] = [];
   const t = coverage.totals;
 
-  // ── party size ────────────────────────────────────────────────────────────
+  /**
+   * ── Party size, judged where it was actually owed ────────────────────────
+   *
+   * The rule, and it holds across every venue in this dataset without
+   * exception: **a party size is expected where a table was attached, and
+   * nowhere else.** A takeaway coffee has no covers to record. Every Takeaway,
+   * Pickup and Delivery order at all three organisations carries no table and
+   * no party size; every Dine In order carries a table.
+   *
+   * Judging against *all* orders is what this used to do, and it produced two
+   * wrong answers at once. Coffee Guru read 20% and was waved through as
+   * "expected for counter service" — while its Brookwater venue rang 7,184
+   * seated orders and recorded a party size on none of them, which is a real
+   * gap costing a real answer. Meanwhile Jamison, Vincentia and Wagga Wagga
+   * were recording covers on essentially every seated order and getting no
+   * credit for it, because the organisation carried a `serviceModel: "counter"`
+   * label that routed the whole merchant away from per-cover analysis.
+   *
+   * One denominator change separates a business model from a data problem.
+   */
   const cb = members.coverBasis;
+  const seated = cb.member.ordersSeated + cb.nonMember.ordersSeated;
+  const seatedWithCovers = cb.member.seatedWithCovers + cb.nonMember.seatedWithCovers;
+  const seatedCoverage = seated ? seatedWithCovers / seated : 0;
   const identified = cb.member.orders + cb.nonMember.orders;
-  const withCovers = cb.member.ordersWithCovers + cb.nonMember.ordersWithCovers;
-  const coversShare = identified ? withCovers / identified : 0;
+  const seatedShare = identified ? seated / identified : 0;
 
-  if (org.serviceModel === "table" && coversShare < 0.9) {
+  /**
+   * The venues that are actually missing it, named.
+   *
+   * An organisation-level share hides the shape: one venue at 0% and eleven at
+   * 100% averages to something that looks like a mild, general sloppiness
+   * nobody owns. Naming the venue makes it a thirty-second fix at one terminal
+   * rather than a policy conversation.
+   */
+  const offenders = coverage.byVenue
+    .filter((v) => v.ordersSeated >= 200 && v.seatedWithCovers / v.ordersSeated < 0.9)
+    .map((v) => ({
+      name: v.storeName,
+      share: v.seatedWithCovers / v.ordersSeated,
+      seated: v.ordersSeated,
+    }))
+    .sort((a, b) => a.share - b.share);
+
+  if (seated > 0 && seatedCoverage < 0.9) {
     out.push({
       id: "covers",
-      severity: coversShare < 0.5 ? "blocking" : "material",
-      title: `Party size is missing on ${pct(1 - coversShare, 0)} of orders`,
+      severity: seatedCoverage < 0.5 ? "blocking" : "material",
+      title:
+        offenders.length === 1
+          ? `${offenders[0].name} is not recording party size on its seated orders`
+          : `Party size is missing on ${pct(1 - seatedCoverage, 0)} of seated orders`,
       detail:
-        `This is a table-service business, so every order should carry a cover count. ` +
-        `It is recorded on ${pct(coversShare, 0)}. Staff skipping the guest-count prompt is the ` +
-        `usual cause, and it is a thirty-second fix at the terminal.`,
+        `${pct(seatedShare, 0)} of identified trade here is served at a table, and a party size ` +
+        `is recorded on ${pct(seatedCoverage, 0)} of it. Takeaway is excluded — it has no covers ` +
+        `to record and never did.` +
+        (offenders.length
+          ? ` ${offenders
+              .slice(0, 4)
+              .map((o) => `${o.name} records it on ${pct(o.share, 0)} of ${count(o.seated)} seated orders`)
+              .join("; ")}.` +
+            (offenders.length > 4 ? ` And ${offenders.length - 4} more.` : "") +
+            ` Staff skipping the guest-count prompt is the usual cause, and it is a ` +
+            `thirty-second fix at those terminals.`
+          : ""),
       unlocks:
         `Whether members are genuinely worth more per head, or simply arrive in smaller groups. ` +
-        `Party size sits on ${pct(cb.member.coverage, 0)} of member orders against ${pct(cb.nonMember.coverage, 0)} of everyone else's, ` +
-        `and the member orders that record it average ${Math.round(cb.member.avgOrderWithCovers / Math.max(cb.member.avgOrderWithoutCovers, 1) * 10) / 10}× those that do not — ` +
-        `so the missing half is not missing at random and the comparison cannot be published at all.`,
+        `Party size sits on ${pct(cb.member.seatedCoverage, 0)} of members' seated orders against ` +
+        `${pct(cb.nonMember.seatedCoverage, 0)} of everyone else's, and the member orders that record it ` +
+        `average ${Math.round((cb.member.avgOrderWithCovers / Math.max(cb.member.avgOrderWithoutCovers, 1)) * 10) / 10}× those that do not — ` +
+        `so the missing share is not missing at random and the comparison cannot be published at all.`,
       owner: "Venue",
     });
   }
 
-  if (org.serviceModel === "counter" && coversShare > 0.05 && coversShare < 0.9) {
+  /**
+   * A business with almost no seated trade is not missing anything.
+   *
+   * Reported as a minor finding rather than silently, because the absence of
+   * per-cover figures on such a page is otherwise unexplained — and an operator
+   * who cannot see why a section is missing assumes it is broken.
+   */
+  if (seated > 0 && seatedShare < 0.05) {
     out.push({
       id: "covers-counter",
       severity: "minor",
-      title: `Party size is recorded on ${pct(coversShare, 0)} of orders and is always one`,
+      title: `${pct(seatedShare, 0)} of orders here are served at a table`,
       detail:
-        "For counter service that is expected, and it is why per-person value comparisons " +
-        "here rest on item mix rather than on covers.",
-      unlocks: "Nothing further — this is the correct state for counter service.",
+        "Almost everything is takeaway, which carries no party size by nature. Per-head " +
+        "comparisons on this page therefore rest on item mix rather than on covers.",
+      unlocks: "Nothing further — this is the correct state for a counter business.",
       owner: "Venue",
     });
   }

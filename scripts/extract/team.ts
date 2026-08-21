@@ -67,11 +67,35 @@ function orderBase(orgId: string, w: Window) {
     AND TOTAL_PRICE > 0`;
 }
 
-/** One row per POS identity. The id is the key; the name is a display attribute. */
+/**
+ * One row per POS identity, keyed on **who the sale belonged to**.
+ *
+ * ── It is `ASSIGNED_TO_ID`, and it used to be `CREATED_BY_ID` ──────────────
+ *
+ * `CREATED_BY_ID` names whoever opened the order. `ASSIGNED_TO_ID` names the
+ * person it was assigned to — the server who owns the table. They disagree on
+ * 1.5% of orders at a counter business, 16% at one restaurant and 58% at
+ * another, because a host or a manager opens a table and the section's server
+ * works it.
+ *
+ * Every rate on the Performance report — net per cover, items per cover,
+ * average item value — was therefore being attached to the wrong human being on
+ * a sixth of one merchant's trade and more than half of another's. That is the
+ * same defect as ranking on net sales, one level down: **a figure that measures
+ * who opens orders and is read as a measure of who sells.**
+ *
+ * The column is populated on every completed order at all three organisations
+ * and draws from the same identity pool — one id at each appears as an assignee
+ * and never as a creator, which is inside the noise the spine already reports.
+ *
+ * A blank assignee name is a shared terminal, a kiosk or a training login.
+ * `SHARED_LOGIN` already classifies those as not-a-person and holds them out of
+ * every rate; here they simply arrive with no name, exactly as they did before.
+ */
 export function posStaffQuery(orgId: string, w: Window) {
   return `SELECT
-  CREATED_BY_ID AS POS_ID,
-  MAX_BY(CREATED_BY_NAME, CREATED_AT_TZ) AS POS_NAME,
+  ASSIGNED_TO_ID AS POS_ID,
+  MAX_BY(ASSIGNED_TO_NAME, CREATED_AT_TZ) AS POS_NAME,
   MAX_BY(STORE_ID, CREATED_AT_TZ) AS STORE_ID,
   COUNT(DISTINCT STORE_ID) AS STORES,
   COUNT(*) AS ORDERS,
@@ -79,18 +103,30 @@ export function posStaffQuery(orgId: string, w: Window) {
   SUM(ITEMS_COUNT) AS ITEMS,
   SUM(COALESCE(NULLIF(TABLE_GUEST_COUNT, 0), 0)) AS COVERS,
   COUNT_IF(NULLIF(TABLE_GUEST_COUNT, 0) IS NOT NULL) AS ORDERS_WITH_COVERS,
+  /*
+    Seated orders — the only ones a party size was ever owed on.
+
+    Per-cover rates are struck over these rather than over every order, because
+    a server's takeaway coffees have no covers to divide by and dragging them
+    into the denominator understates the rate of anyone who works a counter
+    shift. It is the same restriction the covers framework applies everywhere
+    else, expressed per person.
+  */
+  COUNT_IF(NULLIF(TRIM(TABLE_NAME), '') IS NOT NULL) AS ORDERS_SEATED,
+  SUM(IFF(NULLIF(TRIM(TABLE_NAME), '') IS NOT NULL, TOTAL_PRICE - COALESCE(TOTAL_TAX, 0), 0)) AS SEATED_NET,
+  SUM(IFF(NULLIF(TRIM(TABLE_NAME), '') IS NOT NULL, ITEMS_COUNT, 0)) AS SEATED_ITEMS,
   SUM(COALESCE(TOTAL_DISCOUNT, 0)) AS DISCOUNT,
   COUNT(DISTINCT CREATED_AT_TZ::DATE) AS DAYS,
   COUNT_IF(TOTAL_COST_PRICE > 0) AS ORDERS_WITH_COST
 FROM ${ORDERS}
-WHERE ${orderBase(orgId, w)}
+WHERE ${orderBase(orgId, w)} AND ASSIGNED_TO_ID IS NOT NULL
 GROUP BY 1`;
 }
 
 /** Per identity, per weekday, per daypart. Question 2: are they better at different times? */
 export function posStaffGrainQuery(orgId: string, w: Window) {
   return `SELECT
-  CREATED_BY_ID AS POS_ID,
+  ASSIGNED_TO_ID AS POS_ID,
   DAYOFWEEK(CREATED_AT_TZ) AS DOW,
   ${daypartCase("CREATED_AT_TZ")} AS DAYPART,
   COUNT(*) AS ORDERS,
@@ -98,7 +134,7 @@ export function posStaffGrainQuery(orgId: string, w: Window) {
   SUM(ITEMS_COUNT) AS ITEMS,
   SUM(COALESCE(NULLIF(TABLE_GUEST_COUNT, 0), 0)) AS COVERS
 FROM ${ORDERS}
-WHERE ${orderBase(orgId, w)}
+WHERE ${orderBase(orgId, w)} AND ASSIGNED_TO_ID IS NOT NULL
 GROUP BY 1, 2, 3`;
 }
 

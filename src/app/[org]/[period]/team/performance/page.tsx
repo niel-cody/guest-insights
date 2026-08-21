@@ -228,12 +228,17 @@ export default async function TeamPerformancePage({
                 }
                 made={
                   <p>
-                    Both terms are computed on the same covers: orders that recorded a party size,{" "}
+                    Both terms are computed on the same covers, and both are struck over{" "}
+                    <strong>seated trade only</strong> — orders served at a table, which are the
+                    only orders a party size was ever owed on. A party size is recorded on{" "}
                     {pct(
                       team.people.reduce((a, p) => a + p.ordersWithCovers, 0) /
-                        Math.max(1, team.people.reduce((a, p) => a + p.orders, 0)),
+                        Math.max(1, team.people.reduce((a, p) => a + p.ordersSeated, 0)),
                     )}{" "}
-                    of trade here. Neither term is modelled and neither is adjusted — they multiply
+                    of the seated orders here. Takeaway is excluded rather than counted as a cover
+                    that was missed: dragging it into the denominator would charge whoever works the
+                    counter shift for trade that has no covers to divide by, which measures the
+                    roster again. Neither term is modelled and neither is adjusted — they multiply
                     back to net per cover exactly.
                   </p>
                 }

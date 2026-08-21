@@ -53,6 +53,28 @@ export function ordersCte(orgId: string, w: Window) {
     CREATED_AT_TZ::DATE AS D,
     TOTAL_PRICE, ITEMS_COUNT, COALESCE(TOTAL_DISCOUNT, 0) AS TOTAL_DISCOUNT,
     NULLIF(TABLE_GUEST_COUNT, 0) AS COVERS,
+    /*
+      Whether this order was served at a table.
+    
+      The covers framework rests on this one column. Across three organisations
+      and twenty-five venues the rule holds without exception: every Takeaway,
+      Pickup and Delivery order carries no table and no party size, and every
+      Dine In order carries a table. **A party size is therefore expected where
+      a table is attached and nowhere else** — a takeaway coffee has no covers
+      to record and never did.
+    
+      This replaces asking whether the *organisation* is table service, which is
+      a property of a merchant and not of an order. Coffee Guru is configured
+      "counter" and its Jamison venue rings 6,224 dine-in orders against 55
+      takeaway, all recording covers. The label was denying it a measurement its
+      data supports.
+    
+      Read off the table reference rather than off ORDER_TYPE_NAME, because the
+      type is a merchant-configurable string — three organisations already spell
+      their four types identically, and the fourth will not. Backticks are also
+      unavailable in here: this comment lives inside a template literal.
+    */
+    NULLIF(TRIM(TABLE_NAME), '') AS TABLE_REF,
     NULLIF(SALES_CHANNEL_NAME, '') AS CHANNEL,
     ORDER_TYPE_NAME,
     NULLIF(CUSTOMER_ID, '') AS MEMBER_ID,

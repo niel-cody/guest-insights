@@ -85,6 +85,40 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
 
   // ── the five critical checks ──────────────────────────────────────────────
 
+  /**
+   * Covers are recorded where a table was attached, and only there.
+   *
+   * This is the assumption the whole covers framework rests on, so it is
+   * asserted rather than trusted. Every per-cover rate in the product — the
+   * member basket comparison, the Performance decomposition, the venue
+   * discipline finding — divides by a number that only means something if a
+   * party size and a table travel together.
+   *
+   * It held across three organisations and twenty-five venues when it was
+   * measured: every Takeaway, Pickup and Delivery order carried neither, every
+   * Dine In order carried a table. But it is a property of how merchants
+   * configure their tills, not a law, and the fourth organisation is the one
+   * that will break it. **If covers start appearing on unseated orders, every
+   * per-cover figure quietly changes meaning and nothing else on the page
+   * would say so.**
+   *
+   * Asserted as an inequality rather than an identity: a seated order with no
+   * party size is the ordinary discipline gap this build reports as a quality
+   * finding, and is not this check's business. What must not happen is covers
+   * on orders that were never seated.
+   */
+  const unseatedWithCovers = t.ordersWithCovers - t.seatedWithCovers;
+  checks.push(ok(
+    "covers.onlyOnSeatedOrders",
+    "A party size is recorded only on orders served at a table.",
+    "Covers appearing on takeaway. Every per-cover rate in the product divides by a number that assumes a table, and a till configured to prompt for party size on a counter sale would change what all of them mean while every page went on looking correct.",
+    unseatedWithCovers === 0,
+    unseatedWithCovers === 0
+      ? `${count(t.seatedWithCovers)} of ${count(t.ordersSeated)} seated orders record one, and no unseated order does`
+      : `${count(unseatedWithCovers)} unseated orders carry a party size`,
+  ));
+
+
   // 1. Card capture. The failure that started all of this.
   const admitted = org.cardTier.quality.filter((q) => org.cardTier.months.includes(q.month));
   const worstToken = admitted.reduce((a, q) => Math.max(a, q.maxTokenShare), 0);
@@ -543,15 +577,34 @@ export function runChecks(snap: Snapshot, guests: GuestRows | null): Check[] {
     ));
   }
 
+  /**
+   * Struck on seated orders, which is the only denominator that means anything.
+   *
+   * Over every order this fired at all three organisations permanently and told
+   * the reader nothing: at a café that sells mostly takeaway it measured the
+   * takeaway share and reported it as a covers problem. A warning that fires on
+   * every page of every organisation forever is not a warning, it is furniture,
+   * and the reader stops seeing it — which is expensive here, because this one
+   * governs whether a per-cover comparison may be published at all.
+   *
+   * Restricted to seated trade it says the thing it was written to say: of the
+   * orders that were owed a party size, how many recorded one, and is the
+   * missing share missing at random. Where a venue is genuinely not asking, it
+   * still fires — and now it means something when it does.
+   */
   const cb = members.coverBasis;
   const missingnessGap = cb.member.avgOrderWithCovers / Math.max(cb.member.avgOrderWithoutCovers, 1);
+  const seatedBoth = cb.member.ordersSeated > 0 && cb.nonMember.ordersSeated > 0;
   checks.push(ok(
     "estimate.coverBasisMissingness",
-    "A per-cover comparison declares how much of each group's trade records a party size, and flags when the missingness is informative.",
+    "A per-cover comparison declares how much of each group's seated trade records a party size, and flags when the missingness is informative.",
     "A 'controlled' comparison restricting members to the top 38% of their orders while retaining 97% of card orders, without saying so.",
-    cb.member.coverage > 0.9 && cb.nonMember.coverage > 0.9,
-    `party size recorded on ${(cb.member.coverage * 100).toFixed(0)}% of member orders and ${(cb.nonMember.coverage * 100).toFixed(0)}% of non-member orders · ` +
-      `member orders that record it average ${missingnessGap.toFixed(1)}× those that do not`,
+    !seatedBoth || (cb.member.seatedCoverage > 0.9 && cb.nonMember.seatedCoverage > 0.9),
+    seatedBoth
+      ? `party size recorded on ${(cb.member.seatedCoverage * 100).toFixed(0)}% of members' seated orders and ` +
+        `${(cb.nonMember.seatedCoverage * 100).toFixed(0)}% of everyone else's · ` +
+        `member orders that record it average ${missingnessGap.toFixed(1)}× those that do not`
+      : "no seated trade in this window — no per-cover comparison is drawn",
     "warning",
   ));
 

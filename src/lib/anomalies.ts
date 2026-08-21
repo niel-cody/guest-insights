@@ -124,8 +124,22 @@ const METRICS: Metric[] = [
   {
     key: "covers-rate",
     minEffect: 0.15,
-    label: "party size recorded",
-    get: (v) => (v.orders ? v.ordersWithCovers / v.orders : null),
+    label: "party size recorded on seated orders",
+    /**
+     * Seated orders are the denominator, not every order.
+     *
+     * Over all orders this measured the venue's takeaway share and called it a
+     * covers problem — so a café that happened to seat more people looked like
+     * a discipline outlier against its own group, and the one venue genuinely
+     * recording nothing was buried inside a spread that was mostly business
+     * mix. Restricted to seated trade it finds the real thing: Brookwater rings
+     * 7,184 seated orders and records a party size on none of them, against
+     * sister venues at essentially 100%.
+     *
+     * Null where a venue seats almost nothing, so a takeaway kiosk is not
+     * compared against a dining room on a measure that does not apply to it.
+     */
+    get: (v) => (v.ordersSeated >= 200 ? v.seatedWithCovers / v.ordersSeated : null),
     format: (n) => pct(n, 1),
     direction: "below",
     minOrders: 200,

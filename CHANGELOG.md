@@ -2,12 +2,103 @@
 
 Where this build is, and how it got here.
 
-**Current: `v0.12.0`** — the version and commit render in the app header on every
+**Current: `v0.13.0`** — the version and commit render in the app header on every
 screen, so a screenshot can always be traced back to the tree that produced it.
 
 Entries are newest first. Each one says what changed and, where it matters, what
 was wrong before — a changelog that only lists additions cannot be used to work
 out why a number moved.
+
+---
+
+## v0.13.0 — covers are judged where they were owed, and the sale belongs to whoever made it
+
+Two changes that were outstanding, and a third the first two dragged into view.
+
+### Party size is judged against seated orders, not every order
+
+**The rule, and it holds across three organisations and twenty-five venues
+without exception: a party size is expected where a table was attached, and
+nowhere else.** Every Takeaway, Pickup and Delivery order carries no table and
+no covers; every Dine In order carries a table. A takeaway coffee has no covers
+to record and never did.
+
+Judging against all orders produced two wrong answers at once. Coffee Guru read
+20% and was waved through as expected for counter service — while Brookwater
+rang 7,184 seated orders in this window and recorded a party size on **none** of
+them. It last recorded one in **January 2025**: eighteen months and roughly
+thirty-seven thousand seated orders, invisible, because the number was mostly
+measuring takeaway share.
+
+The same denominator now governs the quality findings, the venue anomaly
+detector, the missingness warning and every per-cover rate on the Performance
+report. `covers.onlyOnSeatedOrders` asserts the premise itself — a till
+configured to prompt for party size on a counter sale would change what every
+per-cover figure means while every page went on looking correct.
+
+### `serviceModel` is gone
+
+It was a label somebody typed into a config file, and it was making measurement
+decisions the data should have made. Coffee Guru was declared `"counter"`, which
+routed the whole merchant away from per-cover analysis — while Jamison rang
+6,224 dine-in orders against 55 takeaway, all recording covers, and Vincentia
+and Wagga Wagga did the same. **A configuration string was denying a merchant a
+measurement its own data supports.**
+
+Service model is a property of an order, not of a merchant: the same venue sells
+a takeaway coffee and seats a table for six a minute apart. `Org.seatedShare` is
+derived per window instead — Meat Flour Wine 94%, Amalfi 77%, Coffee Guru 32% —
+and nothing branches on it. The measurement rules key off seated counts directly.
+
+### The sale belongs to whoever it was assigned to
+
+Every per-person rate — net per cover, items per cover, average item value —
+was computed per `CREATED_BY_ID`, which names whoever *opened* the order.
+`ASSIGNED_TO_ID` names whose sale it is. They disagree on 16% of Meat Flour
+Wine's orders and 58% of Amalfi's, because a host or manager opens a table and
+the section's server works it.
+
+So a sixth of one merchant's league table and more than half of another's was
+attached to the wrong human being. **That is the same defect as ranking on net
+sales, one level down: a figure that measures who opens orders, read as a
+measure of who sells.** Meat Flour Wine's identity spine moves from 53 POS
+identities to 50 and its rated table reorders; anyone comparing against an
+older screenshot should expect that.
+
+Per-cover rates are struck over seated trade only, for the matching reason.
+Dividing a server's whole net by their covers charges them for takeaway that
+has no covers to divide by, and it does it unevenly — the more counter work
+somebody picks up, the worse their per-cover rate looks. That is the roster
+wearing a skill label again, arrived at from a third direction.
+
+### Two engines that rendered nowhere now have a page
+
+`qualityFindings` and `detectAnomalies` have been built, maintained and covered
+by checks for the life of this build, and their only consumer was `TrustPanel`
+— which left Overview when the trust material moved and was never rehoused.
+Shipping the covers finding into a component nothing renders would have been the
+same defect one level up.
+
+**Admin › Data Health.** It sits beside People Mapping because both are work
+queues rather than reports. A caveat on a figure has to travel with the figure,
+and they all still do — the coverage chip, the check register, the spine chip,
+the labour note. "Brookwater stopped recording party size in January 2025" is
+not a caveat on a reading; it is a job for somebody who is not reading a chart
+at all.
+
+### And two defects the full extract exposed
+
+`visitHistoryQuery` capped each guest at 400 rows. Its own docblock explained
+why that was safe — *the window is 92 days, so the ceiling is bounded by the
+calendar* — which was true when every window was 92 days. Member windows run
+twenty-one months, and a daily coffee drinker over that stretch makes 581
+visits. Thirty Coffee Guru guests were truncated and the day grid would have
+drawn blanks where real visits happened. The cap derives from the window now.
+
+`window.claimMatchesMonths` corrupted the claim to `"growth"` — a no-op on any
+window that legitimately claims growth, which the twenty-one-month member window
+does. A fixture that lands on the value already there proves nothing, and it
+went unnoticed until a window long enough to expose it existed.
 
 ---
 

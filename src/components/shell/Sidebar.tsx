@@ -110,15 +110,25 @@ const TEAM = [
 ] as const;
 
 /**
- * Admin. Where the things that are configured rather than read live.
+ * Admin. Where the things you act on live, as opposed to the things you read.
  *
- * One item so far. It is a real group rather than an inert rail icon because
- * People Mapping is a real screen a manager acts on, and parking it under a
- * heading that leads nowhere else is how a section becomes a drawer nobody
- * opens.
+ * Both items are work queues rather than reports. People Mapping is the
+ * identity join a manager works through; Data Health is what the till is not
+ * capturing and what each gap costs an answer.
+ *
+ * Data Health is here rather than inside a report for the same reason People
+ * Mapping is. A caveat on a figure has to travel with the figure — the coverage
+ * chip, the check register, the spine chip and the labour note all do. "This
+ * venue stopped recording party size in February 2025" is not a caveat on a
+ * reading; it is a job for somebody who is not reading a chart at all.
+ *
+ * Its two engines had been built, maintained and covered by checks while
+ * rendering nowhere: their only consumer was `TrustPanel`, which left Overview
+ * and was never rehoused.
  */
 const ADMIN = [
   { label: "People Mapping", href: "admin/people-mapping", placeholder: false },
+  { label: "Data Health", href: "admin/data-health", placeholder: false },
 ] as const;
 
 const GROUPS: {

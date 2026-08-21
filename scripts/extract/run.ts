@@ -126,20 +126,6 @@ function periodId(w: { start: string; end: string }): string {
  */
 const MIN_LINES_FOR_INDEX = 200;
 
-/**
- * A backstop, not a cap. §7.3.
- *
- * The old value was 60, and the drawer printed *"the timeline is capped; the
- * total above is not"* underneath it. §7.3 replaces the dated list with a 7×14
- * day grid, and a grid cannot carry a truncated series — a blank cell would read
- * as "did not come" when it meant "we stopped sending".
- *
- * The window is 92 days and the history grain is person-day-venue, so the real
- * ceiling is set by the calendar rather than by anybody's enthusiasm. This sits
- * far above it purely so a pathological row cannot blow up the file, and a check
- * asserts that no guest actually reaches it.
- */
-const VISIT_HISTORY_CAP = 400;
 
 /** The month in progress. Nothing partial is ever counted as a usable month. */
 const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
@@ -646,6 +632,12 @@ async function extractPeriod(
     query<Row>(Q.segmentBehaviourQuery(calArgs)),
   ]);
 
+  /** Days in the analysis window. Several queries size themselves from it. */
+  const windowDays = Math.round(
+    (Date.parse(`${w.end}T00:00:00Z`) - Date.parse(`${w.start}T00:00:00Z`)) / 86400000,
+  ) + 1;
+
+
   // Items last: they are the largest join in the extract, and everything above
   // is independent of them, so a failure here does not cost the rest of the run.
   console.log("  items, categories, baskets…");
@@ -655,7 +647,7 @@ async function extractPeriod(
       query<Row>(Q.productDictQuery(args)),
       query<Row>(Q.guestItemsQuery(args)),
       query<Row>(Q.itemIntegrityQuery(args)),
-      query<Row>(Q.visitHistoryQuery(args, VISIT_HISTORY_CAP)),
+      query<Row>(Q.visitHistoryQuery(args, windowDays)),
       query<Row>(Q.itemPriceMonthlyQuery(args)),
     ]);
 
@@ -691,7 +683,9 @@ async function extractPeriod(
     scannedOrders: num(r.SCANNED_ORDERS), scannedRevenue: num(r.SCANNED_REVENUE),
     cardOrders: num(r.CARD_ORDERS), cardRevenue: num(r.CARD_REVENUE),
     unattributedOrders: num(r.UNATTRIBUTED_ORDERS), unattributedRevenue: num(r.UNATTRIBUTED_REVENUE),
-    ordersWithCovers: num(r.ORDERS_WITH_COVERS), covers: num(r.COVERS),
+    ordersWithCovers: num(r.ORDERS_WITH_COVERS),
+    ordersSeated: num(r.ORDERS_SEATED), seatedWithCovers: num(r.SEATED_WITH_COVERS),
+    covers: num(r.COVERS),
   }));
 
   const totals = cov.reduce((a, c) => {
@@ -700,13 +694,10 @@ async function extractPeriod(
   }, {
     orders: 0, revenue: 0, memberOrders: 0, memberRevenue: 0, scannedOrders: 0, scannedRevenue: 0,
     cardOrders: 0, cardRevenue: 0, unattributedOrders: 0, unattributedRevenue: 0,
-    ordersWithCovers: 0, covers: 0,
+    ordersWithCovers: 0, ordersSeated: 0, seatedWithCovers: 0, covers: 0,
   });
 
   // ── the member value model ────────────────────────────────────────────────
-  const windowDays = Math.round(
-    (Date.parse(`${w.end}T00:00:00Z`) - Date.parse(`${w.start}T00:00:00Z`)) / 86400000,
-  ) + 1;
 
   const side = (isMember: boolean) => {
     const r = memberValue.find((x) => String(x.IS_MEMBER).toLowerCase() === String(isMember));
@@ -818,6 +809,12 @@ async function extractPeriod(
     return {
       orders: num(r?.ORDERS), ordersWithCovers: num(r?.ORDERS_WITH_COVERS),
       coverage: num(r?.ORDERS) ? r4(num(r?.ORDERS_WITH_COVERS) / num(r?.ORDERS)) : 0,
+      ordersSeated: num(r?.ORDERS_SEATED),
+      seatedWithCovers: num(r?.SEATED_WITH_COVERS),
+      // The discipline figure: a party size on the orders that were owed one.
+      seatedCoverage: num(r?.ORDERS_SEATED)
+        ? r4(num(r?.SEATED_WITH_COVERS) / num(r?.ORDERS_SEATED))
+        : 0,
       covers, revenueWithCovers: num(r?.REVENUE_WITH_COVERS),
       spendPerCover: covers ? r2(num(r?.REVENUE_WITH_COVERS) / covers) : null,
       avgOrderWithCovers: r2(num(r?.AVG_ORDER_WITH_COVERS)),
@@ -1131,7 +1128,17 @@ async function extractPeriod(
   });
 
   write(org.slug, period, "org", {
-    ...org, window: { ...w, days: windowDays }, discoveryWindow: discovery,
+    ...org,
+    /**
+     * Derived, never declared. See `Org.seatedShare` for why the config label
+     * this replaces was doing harm.
+     *
+     * Struck over all completed trade rather than identified trade only,
+     * because it answers "what kind of business is this" and an unrecognised
+     * takeaway coffee is as much a fact about the business as a recognised one.
+     */
+    seatedShare: totals.orders ? r4(totals.ordersSeated / totals.orders) : 0,
+    window: { ...w, days: windowDays }, discoveryWindow: discovery,
     /**
      * Which identity spine this snapshot was built on. Read by every surface
      * that would otherwise print a card figure of zero as a finding.
@@ -1229,6 +1236,7 @@ async function extractPeriod(
     orders: num(r.ORDERS), revenue: num(r.REVENUE), memberOrders: num(r.MEMBER_ORDERS),
     memberRevenue: num(r.MEMBER_REVENUE), cardOrders: num(r.CARD_ORDERS),
     scannedOrders: num(r.SCANNED_ORDERS), ordersWithCovers: num(r.ORDERS_WITH_COVERS),
+    ordersSeated: num(r.ORDERS_SEATED), seatedWithCovers: num(r.SEATED_WITH_COVERS),
     tradingDays: num(r.TRADING_DAYS), discount: num(r.DISCOUNT),
   })));
 
@@ -1932,11 +1940,25 @@ async function extractTeam(
       section: lab ? T.sectionOf(topDept) : "—",
       orders, net: r2(net), items: r2(items), covers,
       ordersWithCovers: num(r.ORDERS_WITH_COVERS),
+      ordersSeated: num(r.ORDERS_SEATED),
+      seatedNet: r2(num(r.SEATED_NET)),
+      seatedItems: num(r.SEATED_ITEMS),
       days: num(r.DAYS),
       discount: r2(num(r.DISCOUNT)),
-      itemsPerCover: div(items, covers),
+      /**
+       * The per-cover rates are struck over seated trade only.
+       *
+       * A server who works a lunch counter shift and a dinner section has
+       * takeaway orders in their total that were never owed a party size.
+       * Dividing their whole net by their covers charges them for trade that
+       * has no covers to divide by, and it does it unevenly — the more takeaway
+       * somebody rings, the worse their per-cover rate looks. That is a roster
+       * fact wearing a skill label, which is the defect this report exists to
+       * refuse, arrived at from a third direction.
+       */
+      itemsPerCover: div(num(r.SEATED_ITEMS), covers),
       avgItemValue: div(net, items),
-      netPerCover: div(net, covers),
+      netPerCover: div(num(r.SEATED_NET), covers),
       netPerOrder: div(net, orders),
       coversPerOrder: div(covers, num(r.ORDERS_WITH_COVERS)),
       hours: lab ? r2(lab.hours) : null,
@@ -1969,7 +1991,8 @@ async function extractTeam(
       employmentType: e ? ((String(e.TYPE) === "Salaried" ? "Salaried" : "Waged") as "Salaried" | "Waged") : null,
       department: topDept,
       section: T.sectionOf(topDept),
-      orders: 0, net: 0, items: 0, covers: 0, ordersWithCovers: 0, days: 0, discount: 0,
+      orders: 0, net: 0, items: 0, covers: 0, ordersWithCovers: 0,
+      ordersSeated: 0, seatedNet: 0, seatedItems: 0, days: 0, discount: 0,
       itemsPerCover: null, avgItemValue: null, netPerCover: null, netPerOrder: null, coversPerOrder: null,
       hours: r2(lab.hours), cost: r2(lab.cost), penaltyHours: r2(lab.penaltyHours), shifts: lab.shifts,
       netPerHour: null, coversPerHour: null, costPerHour: lab.hours > 0 ? div(lab.cost, lab.hours) : null,

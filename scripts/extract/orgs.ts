@@ -17,9 +17,21 @@ export type OrgConfig = {
   id: string;
   name: string;
   vertical: "cafe" | "restaurant";
-  /** Counter service records no party size; table service does. It changes which
-   *  questions the data can answer, so it is a first-class property, not a note. */
-  serviceModel: "counter" | "table";
+  /**
+   * `serviceModel: "counter" | "table"` used to live here and is deliberately
+   * gone.
+   *
+   * It was a label somebody typed, and it was making measurement decisions the
+   * data should have made. Coffee Guru was declared "counter", which routed the
+   * whole merchant away from per-cover analysis — while three of its venues
+   * rang overwhelmingly dine-in trade and recorded a party size on essentially
+   * every seated order.
+   *
+   * Service model is a property of an *order*, not of a merchant: the same
+   * venue sells a takeaway coffee and seats a table for six a minute apart.
+   * `Org.seatedShare` is derived per window from the orders themselves, and the
+   * covers rules key off seated counts directly.
+   */
   labels: { visit: string; visits: string; guest: string; guests: string };
 };
 
@@ -29,7 +41,6 @@ export const ORGS: OrgConfig[] = [
     id: "01HZPS1KTK78BC50NPH7TBYMYF",
     name: "Coffee Guru",
     vertical: "cafe",
-    serviceModel: "counter",
     labels: { visit: "visit", visits: "visits", guest: "guest", guests: "guests" },
   },
   {
@@ -37,31 +48,27 @@ export const ORGS: OrgConfig[] = [
     id: "01JQ7QED4TAZTQS085NTV84C8T",
     name: "Meat Flour Wine",
     vertical: "restaurant",
-    serviceModel: "table",
     labels: { visit: "visit", visits: "visits", guest: "guest", guests: "guests" },
   },
   /**
    * Amalfi. Two venues, both dine-in, and only one of them keys a party size.
    *
-   * `Cinque Terre` records covers on 10,412 of 10,717 orders and averages $127
-   * an order. `Amalfi` records them on **five of 16,397** and averages $42, yet
-   * carries a table name on two thirds of its orders — so it is table service
-   * that does not key covers, not a counter.
+   * `Cinque Terre` records covers on 10,412 of its 10,448 seated orders and
+   * averages $127 an order. `Amalfi` records them on **five of 10,521** and
+   * averages $42, while carrying a table name on two thirds of its trade — so
+   * it is table service that does not key covers, not a counter.
    *
-   * `serviceModel: "table"` is therefore right for the group and wrong for half
-   * its trade, and that is a real finding rather than a configuration problem:
-   * `quality.ts` already refuses a table-service organisation whose covers
-   * share falls below 90%, and it will fire here. The per-cover metrics that
-   * carry the Performance report cannot be computed for the Amalfi venue, and
-   * the honest output is a refusal naming the venue, not a per-order fallback
-   * quietly substituted for a per-cover figure.
+   * That distinction used to be unsayable. An organisation carried one
+   * `serviceModel` label, so a group whose venues differ got one answer for
+   * both and the label was wrong for half its trade either way. Covers are now
+   * judged per venue against seated orders, so this reads as what it is: one
+   * venue with a thirty-second fix at the terminal, and one doing it right.
    */
   {
     slug: "amalfi",
     id: "01KGEGQH67746QW76T3JMN5G9H",
     name: "Amalfi",
     vertical: "restaurant",
-    serviceModel: "table",
     labels: { visit: "visit", visits: "visits", guest: "guest", guests: "guests" },
   },
 ];
