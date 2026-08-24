@@ -259,6 +259,36 @@ function informationArchitecture() {
     check(`"${label}" keys off its own route`, key === item.href);
   }
 
+  /**
+   * The built and stand-in surfaces are all present, under the right section.
+   *
+   * These used to read the rendered sidebar. Every section is closed by default
+   * now, so that assertion passed or failed on which page happened to be
+   * prerendered rather than on whether the item exists — the third time this
+   * suite has learned that a nav assertion against collapsed markup is vacuous.
+   */
+  for (const [label, section] of [
+    ["Overview", "Guests"], ["Behaviour", "Guests"], ["Retention and Churn", "Guests"],
+    ["Individuals", "Guests"], ["Loyalty Spend", "Guests"], ["Loyalty Redemption", "Guests"],
+    ["Performance", "Team"], ["Margin", "Team"],
+    ["Staff Scorecard", "Team"], ["Attendance", "Team"],
+    ["People Mapping", "Platform"], ["Data Health", "Platform"], ["Feedback", "Platform"],
+  ] as [string, string][]) {
+    check(`"${label}" is in ${section}`, placed.get(label)?.includes(section) === true,
+      `found under ${placed.get(label)?.join(", ") ?? "nothing"}`);
+  }
+
+  /**
+   * Guests is a section, and nothing inside it is also called Guests.
+   *
+   * "Guests › Guests" reads as a mistake even when it is not, and the item has
+   * the better name anyway: Individuals is the only surface in the section that
+   * goes down to the person. The route is unchanged, so this is asserted on the
+   * label — an href test would pass on exactly the build this is meant to catch.
+   */
+  check("no item inside the Guests section is also called Guests",
+    !byLabel.get("Guests")?.items.some((i) => i.label === "Guests"));
+
   check("there are exactly eight subjects", SECTIONS.length === 8);
   check("the subjects are in the agreed order",
     SECTIONS.map((g) => g.label).join(" | ") ===
@@ -267,15 +297,19 @@ function informationArchitecture() {
     UTILITY.label === "Platform" && !SECTIONS.some((g) => g.label === "Platform"));
 
   /**
-   * Only the two sections with built surfaces open by default.
+   * Nothing starts open.
    *
-   * With thirty-five listed reports in the nav, a group that defaults open
-   * pushes everything below it off the screen. Team and Guests hold the six
-   * surfaces this build is asking you to judge; everything else is a map, and a
-   * map can be folded.
+   * Team and Guests used to, and two open groups among nine closed ones read as
+   * an inconsistent nav rather than as emphasis. The nine headers seen together
+   * are the thing under review, and thirty-five listed reports spilling out of
+   * two of them buries exactly that.
+   *
+   * The section holding the *current page* still expands — that is a response
+   * to where the reader is, not a default, and it is handled in `Sidebar`
+   * rather than here.
    */
-  check("only the sections with built work start open",
-    all.filter((g) => g.open).map((g) => g.label).join(", ") === "Team, Guests");
+  check("no section starts open", all.every((g) => !g.open),
+    `${all.filter((g) => g.open).map((g) => g.label).join(", ")} still opens by default`);
 }
 
 
@@ -946,12 +980,11 @@ async function main() {
         stepped.length === 0,
         `${stepped.length} stepped description(s)`);
 
-      for (const item of [
-        "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Individuals",
-        "Performance", "Margin", "Staff Scorecard", "Attendance",
-      ]) {
-        check(`the sidebar carries "${item}"`, html.includes(item));
-      }
+      /* The item labels are asserted against `nav.ts` in
+         `informationArchitecture`, not here. Every section is closed by default
+         now, so a collapsed group renders no items and an assertion reading the
+         HTML for them passes or fails on which page happened to be prerendered
+         rather than on whether the item exists. */
 
       /**
        * ── The session lives in the rail, and nowhere else ─────────────────
@@ -1063,23 +1096,6 @@ async function main() {
         "People is still a Team nav item");
 
       /**
-       * Guests is a section, and nothing inside it is also called Guests.
-       *
-       * "Guests › Guests" reads as a mistake even when it is not, and the item
-       * has a better name anyway: Individuals is the only surface in the
-       * section that goes down to the person. The route is unchanged, so this
-       * is asserted on the label rather than the href — an href test would pass
-       * on exactly the build this is meant to catch.
-       */
-      const guestsIdx = sectionNav.indexOf(">Guests<");
-      const guestsBlock = between(sectionNav, guestsIdx + 1, sectionNav.indexOf(">Finance<"));
-      check("no item inside the Guests section is also called Guests",
-        guestsBlock !== "" && !/>\s*Guests\s*</.test(guestsBlock),
-        "Guests › Guests");
-      check("the individual-level report is called Individuals",
-        guestsBlock.includes(">Individuals<"));
-
-      /**
        * Every nav item resolves to a route the build actually produced.
        *
        * The old assertion listed the five Customers items and rejected a sixth,
@@ -1097,7 +1113,7 @@ async function main() {
         "overview", "behaviour", "guests", "loyalty-spend", "loyalty-redemption",
         "team/performance", "team/margin",
         "team/staff-scorecard", "team/attendance",
-        "admin/people-mapping", "admin/data-health",
+        "admin/people-mapping", "admin/data-health", "admin/feedback",
         "retention",
       ];
       const strays = unique.filter((h) => !known.includes(h));

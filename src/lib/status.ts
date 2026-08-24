@@ -50,6 +50,29 @@ export const STATUS_TONE: Record<ChipState, "quiet" | "accent" | "warning" | "go
   done: "quiet",
 };
 
+/**
+ * The dot's colour, and why it is not simply `STATUS_TONE`.
+ *
+ * A chip carries its own label, so colour there is reinforcement and three of
+ * the six can share a neutral without anything being lost. **A dot has no
+ * label**, so colour is the entire signal and every state has to be
+ * distinguishable from every other one at eight pixels.
+ *
+ * The pair that would otherwise collide is `todo` and `done` — both are quiet,
+ * neither wants attention. They are separated by fill rather than hue: `todo`
+ * is a hollow ring, because nothing has happened to it yet, and `done` is
+ * solid. That reads correctly even to someone who cannot tell the two greys
+ * apart, which is the point.
+ */
+export const STATUS_DOT: Record<ChipState, { color: string; hollow?: boolean }> = {
+  todo: { color: "var(--ink-muted)", hollow: true },
+  existing: { color: "var(--ink-muted)", hollow: true },
+  in_progress: { color: "var(--accent)" },
+  reviewing: { color: "var(--warning)" },
+  approved: { color: "var(--good)" },
+  done: { color: "var(--ink-secondary)" },
+};
+
 export function isStatus(v: unknown): v is Status {
   return typeof v === "string" && (STATUSES as readonly string[]).includes(v);
 }

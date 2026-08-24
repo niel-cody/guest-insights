@@ -77,6 +77,10 @@ export function PageHeader({
         <div className="flex items-baseline gap-3">
           <h1 className="text-[19px] font-semibold text-ink">{title}</h1>
           <span className="text-[13px] text-ink-muted">{section}</span>
+          {/* How far this page has got, as one dot. Part of what the page *is*,
+              beside its name and its section — not another caveat on what it
+              says, which is what the right-hand cluster carries. */}
+          {surface && <StatusControl surface={surface} />}
           <BuildStamp />
         </div>
         {/* ── The recognition chip is scoped to what it describes ─────────────
@@ -98,10 +102,9 @@ export function PageHeader({
               figure. Identity is in the account menu; the organisation whose
               figures these are is under the Insights heading, where it is
               visible without a click. */}
-          {/* State, then the way to say something about it — in that order,
-              because "this page is in review" is the context that stops
-              somebody filing careful notes against a half-built surface. */}
-          {surface && <StatusControl surface={surface} />}
+          {/* The way to say something. The page's *state* is not here — it sits
+              beside the title, because this cluster is about the figures and
+              that is about the build. */}
           {surface && <Feedback surface={surface} orgSlug={org.slug} period={period.id} />}
           {actions}
           {/* C-4. This was `<CheckBadge href="#checks" />` and `#checks` did not

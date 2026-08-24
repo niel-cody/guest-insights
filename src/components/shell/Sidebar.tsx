@@ -158,10 +158,23 @@ export function Sidebar({
   orgName: string;
 }) {
   const pathname = usePathname();
-  const [open, setOpen] = useState<Record<string, boolean>>({ Team: true, Guests: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const base = `/${orgSlug}/${period}`;
   const board = useBoard();
+
+  /**
+   * Every section starts closed — except the one you are currently inside.
+   *
+   * "Closed by default" describes the state with no context. The page you have
+   * open is context: most readers arrive on a deep link rather than through the
+   * nav, and a sidebar that cannot show where they are is a sidebar they have
+   * to operate before it tells them anything. This opens exactly one group,
+   * only when a link inside it matches the current route, and a click still
+   * overrides it either way.
+   */
+  const holdsCurrentPage = (group: Section) =>
+    group.items.some((i) => i.href && pathname === `${base}/${i.href}`);
 
   /**
    * What a nav item's chip should read.
@@ -255,8 +268,8 @@ export function Sidebar({
               group={group}
               base={base}
               pathname={pathname}
-              isOpen={open[group.label] ?? group.open ?? false}
-              onToggle={() => toggle(group.label, group.open ?? false)}
+              isOpen={open[group.label] ?? group.open ?? holdsCurrentPage(group)}
+              onToggle={() => toggle(group.label, group.open ?? holdsCurrentPage(group))}
               stateOf={stateOf}
             />
           ))}
@@ -269,8 +282,8 @@ export function Sidebar({
             group={UTILITY}
             base={base}
             pathname={pathname}
-            isOpen={open[UTILITY.label] ?? false}
-            onToggle={() => toggle(UTILITY.label, false)}
+            isOpen={open[UTILITY.label] ?? holdsCurrentPage(UTILITY)}
+            onToggle={() => toggle(UTILITY.label, holdsCurrentPage(UTILITY))}
             stateOf={stateOf}
           />
         </div>

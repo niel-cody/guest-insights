@@ -341,7 +341,16 @@ const EXCEPTIONS: readonly Item[] = [
 export type Section = {
   label: string;
   question: string;
-  /** Whether the group starts expanded. Only the two with built surfaces do. */
+  /**
+   * Whether the group starts expanded. **Nothing does.**
+   *
+   * Team and Guests used to, on the argument that they hold the surfaces this
+   * build is asking you to judge. With thirty-five live reports now listed
+   * beside them, two open groups among nine closed ones read as an inconsistent
+   * nav rather than as emphasis — and the nine section headers, seen together,
+   * are the thing actually under review. The field is kept because a future
+   * section may earn it; none does today.
+   */
   open?: boolean;
   items: readonly Item[];
 };
@@ -353,8 +362,8 @@ export const SECTIONS: Section[] = [
      which is the finding, not a gap in this list. */
   { label: "Inventory", question: "What do I hold, what did it cost, where is it leaking?", items: [] },
   { label: "Service", question: "How well did we deliver it?", items: SERVICE },
-  { label: "Team", question: "Who did it, and what did it cost to do?", open: true, items: TEAM },
-  { label: "Guests", question: "Who did we serve, are they coming back?", open: true, items: GUESTS },
+  { label: "Team", question: "Who did it, and what did it cost to do?", items: TEAM },
+  { label: "Guests", question: "Who did we serve, are they coming back?", items: GUESTS },
   { label: "Finance", question: "Did the money arrive, does it reconcile?", items: FINANCE },
   { label: "Exceptions", question: "Should this have happened?", items: EXCEPTIONS },
 ];

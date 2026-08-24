@@ -2,39 +2,80 @@
 
 import { useState, useTransition } from "react";
 import { updateStatus } from "@/app/board-actions";
-import { STATUSES, STATUS_LABEL, type Status } from "@/lib/status";
-import { IconChevron } from "./Icons";
-import { StatusChip } from "./StatusChip";
+import { STATUSES, STATUS_DOT, STATUS_LABEL, type Status } from "@/lib/status";
 import { refreshBoard, useBoard } from "./useBoard";
 
 /**
- * Where this page has got to, and the way to move it.
+ * Where this page has got to: one dot, beside the title.
  *
- * ── It renders for staff only, and that is presentation ────────────────────
+ * ── It was a chip, and the chip was in the way ─────────────────────────────
  *
- * The rule lives in `updateStatus`, which re-checks the session on every call.
- * A Server Action is a public POST reachable by its own id without ever loading
- * the page that draws its button, so hiding this control is a courtesy to the
- * reader rather than a boundary. Anything relying on the button being absent is
- * relying on the wrong thing.
+ * It shipped as a bordered pill reading `State · Reviewing ⌄`, in the header's
+ * right-hand cluster beside the check register and the coverage chip. Two
+ * things were wrong with that.
  *
- * ── A viewer sees the state, and cannot move it ────────────────────────────
+ * **It was loud for what it is.** Those neighbours qualify the *figures* — they
+ * are the difference between a number you can quote and one you cannot, and
+ * they earn their weight. This is a note about how far *we* have got building
+ * the page, which is scaffolding: real, worth showing, and not something that
+ * should compete with the report for a reader's attention every time they land.
  *
- * Deliberately not hidden entirely from a merchant reviewer. "This page is in
- * review" is exactly the context that stops somebody filing careful notes
- * against a surface that is half-built, which is the cheapest kind of wasted
- * feedback there is.
+ * **It was in the wrong cluster.** The right-hand group is about the data. The
+ * page's own build state belongs with the page's own identity, so it sits next
+ * to the title and the section label instead, where it reads as part of what
+ * this page *is* rather than as another caveat on what it says.
+ *
+ * ── A dot means colour is the whole signal ─────────────────────────────────
+ *
+ * There is no label to fall back on, so the states have to be distinguishable
+ * at eight pixels — see `STATUS_DOT` for why `todo` and `done` are separated by
+ * fill rather than hue. The label is still reachable: it is the accessible name
+ * and the tooltip, so a screen reader gets a sentence rather than a bullet, and
+ * anybody unsure hovers once.
+ *
+ * ── The rule is still server-side ──────────────────────────────────────────
+ *
+ * A viewer gets a dot with no menu. That is presentation — `updateStatus`
+ * re-checks the session on every call, because a Server Action is a public POST
+ * reachable by its own id without ever loading the page that draws this.
  */
+function Dot({ state }: { state: Status }) {
+  const { color, hollow } = STATUS_DOT[state];
+  return (
+    <span
+      data-status-dot={state}
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
+      style={
+        hollow
+          ? { border: `1.5px solid ${color}`, background: "transparent" }
+          : { background: color }
+      }
+    />
+  );
+}
+
 export function StatusControl({ surface }: { surface: string }) {
   const board = useBoard();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const current: Status = board.statuses[surface]?.status ?? "todo";
+  const label = `State: ${STATUS_LABEL[current]}`;
 
+  /**
+   * A viewer sees nothing at all on `todo`.
+   *
+   * Deliberately not a grey dot on every page they open. "Nobody has moved this
+   * yet" is information for whoever is doing the moving; to a merchant reviewer
+   * it is a permanent unexplained mark. The states that *do* say something to
+   * them — in progress, reviewing — still show, because knowing a page is
+   * half-built is what stops somebody filing careful notes against it.
+   */
   if (!board.staff) {
-    // Silent on `todo`, like every chip: a surface nobody has moved has nothing
-    // to say, and a permanent "To do" on every page is a permanent apology.
-    return current === "todo" ? null : <StatusChip state={current} />;
+    return current === "todo" ? null : (
+      <span title={label} aria-label={label} className="inline-flex items-center">
+        <Dot state={current} />
+      </span>
+    );
   }
 
   function set(next: Status) {
@@ -46,41 +87,48 @@ export function StatusControl({ surface }: { surface: string }) {
       const res = await updateStatus(form);
       if (!res.ok) setError(res.error ?? "That did not save.");
       // Refetch either way. On success every chip in the nav moves with this
-      // one; on failure the control snaps back to what is actually stored
-      // rather than showing an optimistic value that never landed.
+      // one; on failure it snaps back to what is actually stored rather than
+      // sitting on an optimistic value that never landed.
       await refreshBoard();
     });
   }
 
   return (
-    <details className="relative">
+    <details className="relative inline-flex">
       <summary
-        className={`flex cursor-pointer list-none items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[12px] font-medium marker:hidden hover:bg-surface-hover ${
-          pending ? "opacity-60" : ""
+        title={label}
+        aria-label={label}
+        className={`flex cursor-pointer list-none items-center rounded-full p-1 marker:hidden hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
+          pending ? "opacity-50" : ""
         }`}
-        title="Where this page has got to"
       >
-        <span className="text-ink-muted">State</span>
-        <span className="text-ink">{STATUS_LABEL[current]}</span>
-        <IconChevron className="h-3.5 w-3.5 text-ink-muted" />
+        <Dot state={current} />
       </summary>
-      <div className="absolute top-full right-0 z-30 mt-1 w-[190px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
+
+      <div className="absolute top-full left-0 z-30 mt-1 w-[190px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
+        <p className="px-2.5 pt-1 pb-1.5 text-[11px] tracking-wide text-ink-muted uppercase">
+          Page state
+        </p>
         {STATUSES.map((s) => (
           <button
             key={s}
             type="button"
             onClick={() => set(s)}
-            className={`block w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
               s === current
                 ? "bg-accent-soft font-semibold text-accent"
                 : "text-ink-secondary hover:bg-surface-hover"
             }`}
           >
+            <Dot state={s} />
             {STATUS_LABEL[s]}
           </button>
         ))}
         {error && (
-          <p className="mt-1 border-t border-line px-2.5 pt-2 text-[12px]" style={{ color: "var(--critical)" }}>
+          <p
+            className="mt-1 border-t border-line px-2.5 pt-2 text-[12px]"
+            style={{ color: "var(--critical)" }}
+          >
             {error}
           </p>
         )}
