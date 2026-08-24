@@ -50,15 +50,6 @@ function Group({
   onToggle: () => void;
 }) {
   const empty = group.items.length === 0;
-  /**
-   * Whether this build has anything of its own in here.
-   *
-   * A section can be full of items and still have nothing to review — Finance
-   * lists eight live reports and this POC has built none of them. That is the
-   * state the question line is for, so it keys off *built* surfaces rather than
-   * off item count.
-   */
-  const nothingBuilt = !group.items.some((i) => i.href && !i.placeholder);
 
   return (
     <div>
@@ -67,7 +58,7 @@ function Group({
         disabled={empty}
         title={group.question}
         onClick={onToggle}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium ${
+        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 pt-2 pb-0.5 text-left text-[13px] font-medium ${
           empty ? "cursor-default text-ink-muted" : "text-ink hover:bg-surface-hover"
         }`}
       >
@@ -79,15 +70,30 @@ function Group({
         )}
       </button>
 
-      {/* A section with nothing built says what it is for, whether or not it
-          lists live reports. Otherwise it is indistinguishable from one nobody
-          has thought about — and that stays true when it is collapsed, which is
-          how most of these will be seen. */}
-      {nothingBuilt && (
-        <p className="mb-1 ml-2.5 px-3 text-[11px] leading-snug text-ink-muted opacity-70">
-          {group.question}
-        </p>
-      )}
+      {/**
+        * Every section says what it is for, and the alignment is load-bearing.
+        *
+        * ── Two things were wrong, and they compounded ──────────────────────
+        *
+        * The line was **indented further right than its own header** — ten
+        * pixels for the header, twenty-two for the line under it — so each pair
+        * staircased down and to the right instead of reading as one block. Nav
+        * indentation means *containment*: items sit inside their section, which
+        * is why they are indented. A section's own description is not inside
+        * itself. It is now flush with the header it belongs to, and the only
+        * indented things in the nav are the things a section contains.
+        *
+        * It also only rendered where nothing was built, which left Team, Guests
+        * and Platform bare while the six around them carried a line. Nine
+        * headers, six with a subheading, at uneven vertical intervals — the
+        * ragged rhythm read as a rendering fault rather than a distinction, and
+        * the distinction it was drawing was one no reader could have named. A
+        * section that is exempt from saying what it is for is a section whose
+        * name has to carry the whole job, and "Platform" does not.
+        */}
+      <p data-section-note="" className="mb-2.5 px-2.5 text-[11px] leading-snug text-ink-muted">
+        {group.question}
+      </p>
 
       {isOpen &&
         group.items.map((item) => {

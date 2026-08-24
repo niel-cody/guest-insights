@@ -818,22 +818,54 @@ async function main() {
       }
 
       /**
-       * An empty section states the question it exists to answer.
+       * ── Every section states what it is for, and none is exempt ─────────
        *
-       * This is the half of the move that can ship looking fine: eight headers
-       * render, six of them are grey, and nothing on screen distinguishes "not
-       * built yet" from "nobody has thought about this". The question is what
-       * makes the difference legible.
+       * This started as an assertion about *empty* sections only, which was the
+       * bug: six of nine headers carried a line and three did not, at uneven
+       * vertical intervals, and the ragged rhythm read as a rendering fault
+       * rather than a distinction. It is asserted across all nine now, because
+       * the property that matters is the consistency, not the presence.
+       *
+       * Sourced from the nav data rather than typed out again here — a literal
+       * list would be a second copy of the wording, and the copy is what goes
+       * stale when somebody rewords a question in `nav.ts`.
        */
-      for (const question of [
-        "What did we sell?",
-        "What do I hold, what did it cost, where is it leaking?",
-        "How well did we deliver it?",
-        "Did the money arrive, does it reconcile?",
-        "Should this have happened?",
-      ]) {
-        check(`an empty section states its question: "${question}"`, html.includes(question));
+      /**
+       * Read from the rendered `<p data-section-note>`, never from `html`.
+       *
+       * A plain `html.includes(question)` passes on the *tooltip*: the header
+       * carries the same string in a `title` attribute, so the assertion stayed
+       * green on a build where three of the nine lines were not rendered at
+       * all. That is the exact defect this is meant to catch, and the first
+       * version of it could not. The marker attribute is what makes the check
+       * about the thing on screen.
+       */
+      const notes = [...html.matchAll(/<p data-section-note=""[^>]*>([^<]*)<\/p>/g)].map((m) => m[1]);
+      for (const g of [...SECTIONS, UTILITY]) {
+        const want = g.question.replace(/&/g, "&amp;").replace(/'/g, "&#x27;");
+        check(`the ${g.label} section states what it is for`, notes.includes(want),
+          `"${g.question}" is not rendered as a section note`);
       }
+      check("every section has a note and no section has two",
+        notes.length === SECTIONS.length + 1,
+        `${notes.length} notes for ${SECTIONS.length + 1} sections`);
+
+      /**
+       * A section's own description is flush with its header, never indented.
+       *
+       * Indentation in a nav means containment — items sit inside their
+       * section, which is the only reason they are indented. A section's
+       * description is not inside itself, and indenting it staircased every
+       * header/description pair down and to the right. Asserted on the class
+       * list because that is where the defect lives: `ml-2.5 px-3` under a
+       * header padded `px-2.5` is a twelve-pixel step with nothing meaning it.
+       */
+      const stepped = [...html.matchAll(/<p class="([^"]*text-\[11px\][^"]*)"/g)]
+        .map((m) => m[1])
+        .filter((c) => c.includes("ml-") || c.includes("px-3"));
+      check("no section description is indented past its own header",
+        stepped.length === 0,
+        `${stepped.length} stepped description(s)`);
 
       for (const item of [
         "Overview", "Loyalty Spend", "Loyalty Redemption", "Behaviour", "Individuals",
