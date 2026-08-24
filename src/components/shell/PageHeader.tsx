@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { spineState } from "@/lib/window";
 import { CoverageChip } from "@/components/ui/CoverageChip";
 import { ChecksDrawer } from "@/components/ui/ChecksDrawer";
-import { SessionChip } from "@/components/shell/SessionChip";
 import { FilterBar } from "@/components/shell/FilterBar";
 import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
@@ -81,9 +80,14 @@ export function PageHeader({
             it says so, and the wall inside the page carries the member-tier
             figure where the member-tier content starts. */}
         <div className="flex items-center gap-2">
-          {/* Which of the three audiences this session belongs to. Three
-              audiences read pages that differ only in their figures. */}
-          <SessionChip />
+          {/* ── The session chip left this header ───────────────────────
+              Sign out moved to the foot of the rail, which left a chip saying
+              only "Signed in as Oolio (internal)" beside a menu on the mark
+              saying the same words. Two copies of one fact, and the header's
+              copy sat among coverage and check chips whose job is to qualify a
+              figure. Identity is in the account menu; the organisation whose
+              figures these are is under the Insights heading, where it is
+              visible without a click. */}
           {actions}
           {/* C-4. This was `<CheckBadge href="#checks" />` and `#checks` did not
               exist on any page — the anchor's host section was removed from

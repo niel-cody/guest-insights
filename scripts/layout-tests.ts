@@ -875,6 +875,27 @@ async function main() {
       }
 
       /**
+       * ── The session lives in the rail, and nowhere else ─────────────────
+       *
+       * The organisation control was in the filter bar and sign out was in the
+       * page header. Both are asserted *gone from where they were* as well as
+       * present where they went, because a half-done move is the state that
+       * ships looking fine — two organisation controls that disagree, or a
+       * sign-out button in each of two places.
+       *
+       * The rail's own contents render for every session, but the account menu
+       * and sign out are gated on the scope cookie, which a prerender does not
+       * have. So what is asserted here is the absence, plus the mark that is
+       * always drawn; the menu's contents are a client concern.
+       */
+      check("the filter bar carries no Organisation control",
+        !/>\s*Organisation\s*</.test(html),
+        "a navigation control is still sitting in a row of filters");
+      check("the page header carries no Sign out",
+        !html.includes(">Sign out<"),
+        "an account action is still among the chips that qualify figures");
+
+      /**
        * Home is a link and not a group.
        *
        * It has no children by definition — it is the state you land in — and a

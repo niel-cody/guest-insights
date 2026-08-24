@@ -8,6 +8,7 @@ import {
   IconTag, IconTeam, IconUsers,
 } from "./Icons";
 import { SECTIONS, UTILITY, type Section } from "@/lib/nav";
+import { AccountMenu, SignOut } from "./AccountMenu";
 
 /**
  * The Oolio Insights shell: a fixed icon rail beside a section navigator.
@@ -148,7 +149,13 @@ function Group({
   );
 }
 
-export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }) {
+export function Sidebar({
+  orgSlug, period, orgName,
+}: {
+  orgSlug: string;
+  period: string;
+  orgName: string;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState<Record<string, boolean>>({ Team: true, Guests: true });
 
@@ -166,9 +173,9 @@ export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }
         className="flex w-[68px] shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-3"
         aria-label="Oolio Insights sits inside this product. Only Insights is part of this proof of concept."
       >
-        <div className="mb-3 grid h-9 w-9 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white">
-          N
-        </div>
+        {/* The mark is the account control now. Everything below it is inert
+            context; this is the one thing in the rail that does something. */}
+        <AccountMenu />
         {RAIL.map(({ label, icon: Icon, active }) => (
           <div
             key={label}
@@ -182,13 +189,29 @@ export function Sidebar({ orgSlug, period }: { orgSlug: string; period: string }
             <span className="leading-none">{label}</span>
           </div>
         ))}
+
+        {/* `mt-auto` inside `SignOut` pins this to the foot of the column,
+            away from the organisation switcher at the top. */}
+        <SignOut />
       </div>
 
       {/* section nav */}
       <nav className="flex w-[268px] shrink-0 flex-col border-r border-line bg-surface">
-        <div className="flex items-center gap-2 px-4 pt-4 pb-3">
-          <IconChart className="text-ink" />
-          <span className="text-[15px] font-semibold">Insights</span>
+        <div className="px-4 pt-4 pb-3">
+          <div className="flex items-center gap-2">
+            <IconChart className="text-ink" />
+            <span className="text-[15px] font-semibold">Insights</span>
+          </div>
+          {/* Whose figures these are, stated without a click.
+              The organisation control moved to the account menu on the mark,
+              and a switcher is not a label: it says what you *could* look at,
+              only incidentally what you are looking at. This is the label half,
+              and it is the half that matters while reading — every number on
+              every page belongs to this organisation and nothing else on screen
+              says so. */}
+          <p className="mt-1 truncate text-[12px] text-ink-muted" title={orgName}>
+            {orgName}
+          </p>
         </div>
 
         {/* The search box that used to sit here searched nothing. Removed rather

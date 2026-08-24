@@ -26,4 +26,5 @@ export const IconAlert = (p: P) => (<svg {...base} {...p}><path d="M12 4 2.5 20h
 export const IconCheck = (p: P) => (<svg {...base} {...p}><path d="m4 12 5 5L20 6" /></svg>);
 export const IconPrint = (p: P) => (<svg {...base} {...p}><path d="M6 9V3h12v6" /><rect x="3" y="9" width="18" height="8" rx="2" /><path d="M6 17h12v4H6z" /></svg>);
 export const IconMail = (p: P) => (<svg {...base} {...p}><rect x="2.5" y="5" width="19" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>);
+export const IconExit = (p: P) => (<svg {...base} {...p}><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 8 6 12l4 4M6 12h9" /></svg>);
 export const IconArrow = (p: P) => (<svg {...base} {...p}><path d="M5 12h14M13 6l6 6-6 6" /></svg>);

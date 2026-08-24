@@ -32,7 +32,7 @@ export default async function OrgLayout({
   return (
     <div className="flex h-screen overflow-hidden bg-surface-sunken">
       <Instrumentation />
-      <Sidebar orgSlug={org.slug} period={period} />
+      <Sidebar orgSlug={org.slug} period={period} orgName={org.name} />
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Above the surface, not inside it: a member window changes the
             population every figure below is computed over, and no figure says

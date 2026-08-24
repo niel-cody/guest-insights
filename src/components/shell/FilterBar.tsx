@@ -7,7 +7,6 @@ import type { Period, Periods } from "@/lib/periods";
 import type { Org } from "@/lib/types";
 import { SEGMENT_LABEL, dayLabel } from "@/lib/metrics";
 import { TIER_LABEL } from "@/lib/lexicon";
-import { useScope } from "@/lib/use-scope";
 import {
   activeFilters, cleared, isFiltered, parseView, toQuery,
   type SearchParams, type View,
@@ -205,15 +204,14 @@ export function FilterBar({
           </button>
         )}
 
-        {/* Always rendered. It used to be gated on the build-time organisation
-            count, which is a fact about the dataset rather than about this
-            session — and "there is more than one customer" is itself something
-            a customer should not learn from their own report. `OrgSwitch`
-            decides for itself whether it is a control or a label, from the
-            session. */}
-        <span className="ml-auto text-[13px] text-ink-muted">
-          <OrgSwitch org={org} />
-        </span>
+        {/* ── The organisation control left this bar ─────────────────────
+            It is not a filter. Locations, Customers and Segment narrow the
+            population *inside* one organisation's data; the organisation
+            replaces the dataset and navigates to a different URL. A navigation
+            control in a row of filters teaches the reader that everything in
+            the row is the same kind of thing, and the one that is not is the
+            one that changes every figure on the page. It is in the rail now,
+            on the product mark, with the rest of the session. */}
       </div>
 
       {/* What the reader is actually looking at, spelled out. A filtered report
@@ -364,65 +362,5 @@ function Locations({
         )}
       </div>
     </details>
-  );
-}
-
-/**
- * The organisation switcher, built from the session rather than from the build.
- *
- * ── The leak this closes ───────────────────────────────────────────────────
- *
- * It used to render an `<option>` for **every** organisation in the dataset,
- * server-side, and hide the ones you were not entitled to after hydration. The
- * pages are prerendered, so the other customer's *name* was sitting in the
- * static HTML of a page the first customer could read — `view-source` on a Meat
- * Flour Wine report disclosed that Coffee Guru is also a customer.
- *
- * Nobody's figures leaked. A customer list did, which is its own kind of
- * confidential, and it is exactly the sort of thing that ends a lighthouse
- * relationship badly.
- *
- * So the prerendered HTML now contains **only the organisation whose page this
- * is**. Any others this session may open are added after mount, from the scope
- * cookie the sign-in issued. A session entitled to one org therefore never
- * receives the name of another by any route.
- *
- * ── Still not the control ──────────────────────────────────────────────────
- *
- * `proxy.ts` compares the requested org against the signed session on every
- * request and refuses. This component decides what is *offered*, never what is
- * *allowed*.
- */
-function OrgSwitch({ org }: { org: Org }) {
-  const router = useRouter();
-  const scope = useScope();
-
-  // Before the cookie is read, and for a single-org session, this is a label
-  // rather than a control. A `<select>` with one option is a control that
-  // cannot do anything, and this bar has a rule against those.
-  const options = scope?.orgs ?? [];
-  if (options.length <= 1) {
-    return (
-      <span className="flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-[13px]">
-        <span className="text-ink-muted">Organisation</span>
-        <span className="font-medium text-ink">{org.name}</span>
-      </span>
-    );
-  }
-
-  return (
-    <label className="relative flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-[13px] focus-within:border-accent">
-      <span className="text-ink-muted">Organisation</span>
-      <select
-        value={org.slug}
-        onChange={(e) => router.push(`/${e.target.value}`)}
-        className="cursor-pointer appearance-none bg-transparent pr-5 font-medium text-ink outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.slug} value={o.slug}>{o.name}</option>
-        ))}
-      </select>
-      <IconChevron className="pointer-events-none absolute right-2 h-4 w-4 text-ink-muted" />
-    </label>
   );
 }
