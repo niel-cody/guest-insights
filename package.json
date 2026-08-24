@@ -18,9 +18,11 @@
     "test:gate": "tsx scripts/gate-tests.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "next": "16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "server-only": "^0.0.1",
     "snowflake-sdk": "^3.1.0"
   },
   "devDependencies": {

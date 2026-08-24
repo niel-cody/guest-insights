@@ -73,6 +73,7 @@ export default async function TeamPeoplePage({
       period={current}
       title="People Mapping"
       section="Platform"
+      surface="admin/people-mapping"
       checks={checks.length ? checks : undefined}
     />
   );

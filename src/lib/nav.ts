@@ -211,6 +211,10 @@ const TEAM: readonly Item[] = [
 const PLATFORM: readonly Item[] = [
   { label: "People Mapping", href: "admin/people-mapping" },
   { label: "Data Health", href: "admin/data-health" },
+  /* The inbox. In Platform because it is a thing you work through rather than
+     a thing you read, which is the same test that put the other two here. It
+     is staff-only and 404s for a merchant grant — see the page. */
+  { label: "Feedback", href: "admin/feedback" },
   /* Today's Admin section, whole. Saved and Scheduled Reports are promoted out
      of Settings, because a saved view is a first-class object and burying it in
      a settings screen is why nobody has one. */
@@ -361,3 +365,28 @@ export const UTILITY: Section = {
   question: "Delivery, planning inputs, governance.",
   items: PLATFORM,
 };
+
+/**
+ * The key a surface is stored under on the board.
+ *
+ * Built surfaces key off their route, which is already unique and already the
+ * thing a link points at. Listed reports have no route, so they key off a slug
+ * of their label — and the slug is derived rather than hand-written because a
+ * second hand-maintained list of thirty-five identifiers is a second list to
+ * get out of step with the first.
+ *
+ * The consequence to know about: **renaming a listed report loses its status.**
+ * That is the right trade at this size. The alternative is a permanent opaque
+ * id on every row, which is the correct answer for a product and overkill for a
+ * nav whose whole purpose is to be argued about and rearranged.
+ */
+export function surfaceKey(item: Item): string {
+  return item.href ?? item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Every surface in the nav, in order, for the board and its tests. */
+export function allSurfaces(): { key: string; label: string; section: string; item: Item }[] {
+  return [...SECTIONS, UTILITY].flatMap((g) =>
+    g.items.map((item) => ({ key: surfaceKey(item), label: item.label, section: g.label, item })),
+  );
+}

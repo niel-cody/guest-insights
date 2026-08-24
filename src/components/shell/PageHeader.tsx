@@ -3,6 +3,8 @@ import { spineState } from "@/lib/window";
 import { CoverageChip } from "@/components/ui/CoverageChip";
 import { ChecksDrawer } from "@/components/ui/ChecksDrawer";
 import { FilterBar } from "@/components/shell/FilterBar";
+import { StatusControl } from "@/components/shell/StatusControl";
+import { Feedback } from "@/components/shell/Feedback";
 import type { Period, Periods } from "@/lib/periods";
 import type { CoverageState } from "@/lib/metrics";
 import type { Check } from "@/lib/checks";
@@ -23,7 +25,7 @@ import type { Org } from "@/lib/types";
  */
 export function PageHeader({
   org, title, section, coverage, filters, actions, periods, period, checks,
-  coverageScope = "card", population = true,
+  coverageScope = "card", population = true, surface,
 }: {
   org: Org;
   title: string;
@@ -60,6 +62,14 @@ export function PageHeader({
    * False only on Home, which is a landing state rather than a report.
    */
   population?: boolean;
+  /**
+   * The board key for this page, matching `surfaceKey` in `nav.ts`.
+   *
+   * Optional, and its absence is meaningful rather than lazy: a surface with no
+   * key is one nobody is tracking the state of and nobody can leave feedback
+   * on. Every report passes one.
+   */
+  surface?: string;
 }) {
   return (
     <header className="shrink-0 border-b border-line bg-surface">
@@ -88,6 +98,11 @@ export function PageHeader({
               figure. Identity is in the account menu; the organisation whose
               figures these are is under the Insights heading, where it is
               visible without a click. */}
+          {/* State, then the way to say something about it — in that order,
+              because "this page is in review" is the context that stops
+              somebody filing careful notes against a half-built surface. */}
+          {surface && <StatusControl surface={surface} />}
+          {surface && <Feedback surface={surface} orgSlug={org.slug} period={period.id} />}
           {actions}
           {/* C-4. This was `<CheckBadge href="#checks" />` and `#checks` did not
               exist on any page — the anchor's host section was removed from

@@ -7,7 +7,10 @@ import {
   IconBriefcase, IconChart, IconChevron, IconDollar, IconGear, IconHome,
   IconTag, IconTeam, IconUsers,
 } from "./Icons";
-import { SECTIONS, UTILITY, type Section } from "@/lib/nav";
+import { SECTIONS, UTILITY, surfaceKey, type Item, type Section } from "@/lib/nav";
+import { StatusChip } from "./StatusChip";
+import { useBoard } from "./useBoard";
+import type { ChipState } from "@/lib/status";
 import { AccountMenu, SignOut } from "./AccountMenu";
 
 /**
@@ -42,13 +45,14 @@ const RAIL = [
  * anything above re-renders.
  */
 function Group({
-  group, base, pathname, isOpen, onToggle,
+  group, base, pathname, isOpen, onToggle, stateOf,
 }: {
   group: Section;
   base: string;
   pathname: string;
   isOpen: boolean;
   onToggle: () => void;
+  stateOf: (item: Item) => ChipState;
 }) {
   const empty = group.items.length === 0;
 
@@ -113,9 +117,10 @@ function Group({
               <span
                 key={item.label}
                 title="Ships in Oolio Insights today. Not part of this proof of concept — listed so you can judge where it lands."
-                className="ml-2.5 block cursor-default rounded-lg px-3 py-2 text-[13px] text-ink-muted opacity-60"
+                className="ml-2.5 flex cursor-default items-center justify-between gap-2 rounded-lg px-3 py-2 text-[13px] text-ink-muted opacity-60"
               >
-                {item.label}
+                <span>{item.label}</span>
+                <StatusChip state={stateOf(item)} />
               </span>
             );
           }
@@ -133,15 +138,11 @@ function Group({
                   : "text-ink-secondary hover:bg-surface-hover"
               }`}
             >
-              <span>{item.label}</span>
-              {/* Marked in the nav, not only on the page. A reviewer deciding
-                  what to click should already know which of these this build
-                  does not own. */}
-              {item.placeholder && (
-                <span className="rounded-full border border-line px-1.5 py-px text-[10px] font-medium tracking-wide text-ink-muted uppercase">
-                  existing
-                </span>
-              )}
+              <span className="truncate">{item.label}</span>
+              {/* The hand-rolled EXISTING badge became a value in the status
+                  vocabulary. Two chips on some items and one on others would
+                  have made a reader decide which of the two to believe. */}
+              <StatusChip state={stateOf(item)} />
             </Link>
           );
         })}
@@ -160,6 +161,18 @@ export function Sidebar({
   const [open, setOpen] = useState<Record<string, boolean>>({ Team: true, Guests: true });
 
   const base = `/${orgSlug}/${period}`;
+  const board = useBoard();
+
+  /**
+   * What a nav item's chip should read.
+   *
+   * `existing` wins over anything on the board. Loyalty Spend ships in
+   * production and this build is not touching it, and that is a fact about the
+   * report rather than a state somebody could have moved — so it is fixed in
+   * code and the board cannot contradict it.
+   */
+  const stateOf = (item: Item): ChipState =>
+    item.placeholder ? "existing" : board.statuses[surfaceKey(item)]?.status ?? "todo";
 
   /** `fallback` is the group's own default, so the first click inverts what the
       reader is actually looking at rather than what the map happens to omit. */
@@ -244,6 +257,7 @@ export function Sidebar({
               pathname={pathname}
               isOpen={open[group.label] ?? group.open ?? false}
               onToggle={() => toggle(group.label, group.open ?? false)}
+              stateOf={stateOf}
             />
           ))}
 
@@ -257,6 +271,7 @@ export function Sidebar({
             pathname={pathname}
             isOpen={open[UTILITY.label] ?? false}
             onToggle={() => toggle(UTILITY.label, false)}
+            stateOf={stateOf}
           />
         </div>
       </nav>

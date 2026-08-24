@@ -61,6 +61,7 @@ export default async function TeamMarginPage({
       period={current}
       title="Margin"
       section="Team"
+      surface="team/margin"
       checks={checks.length ? checks : undefined}
       actions={team ? <SpineChip team={team} orgSlug={slug} period={period} /> : undefined}
     />

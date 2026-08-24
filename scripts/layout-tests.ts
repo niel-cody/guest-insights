@@ -19,8 +19,9 @@
  * screen by a future edit without this failing first.
  */
 import { readFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { SECTIONS, UTILITY } from "../src/lib/nav";
+import { SECTIONS, UTILITY, allSurfaces } from "../src/lib/nav";
 
 const OUT = join(import.meta.dirname, "..", ".next", "server", "app");
 
@@ -36,11 +37,15 @@ function check(name: string, pass: boolean, detail = "") {
 }
 
 /** Every prerendered HTML file under the app output. */
-async function pages(dir: string, acc: string[] = []): Promise<string[]> {
+async function pages(
+  dir: string,
+  exts: string[] = [".html"],
+  acc: string[] = [],
+): Promise<string[]> {
   for (const e of await readdir(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) await pages(p, acc);
-    else if (e.name.endsWith(".html")) acc.push(p);
+    if (e.isDirectory()) await pages(p, exts, acc);
+    else if (exts.some((x) => e.name.endsWith(x))) acc.push(p);
   }
   return acc;
 }
@@ -237,6 +242,23 @@ function informationArchitecture() {
   check("Inventory is empty, because nothing ships for it today",
     byLabel.get("Inventory")?.items.length === 0);
 
+  /**
+   * Every linked nav item resolves to a route that exists on disk.
+   *
+   * The DOM-based version of this check reads hrefs out of the rendered HTML,
+   * which means it only ever sees the two sections that are open by default —
+   * a typo in a Platform href sails past it, because Platform is collapsed and
+   * emits nothing. Checked against the filesystem instead, so it covers every
+   * item whether or not anybody expanded its section.
+   */
+  for (const { key, label, item } of allSurfaces()) {
+    if (!item.href) continue;
+    const dir = join(import.meta.dirname, "..", "src", "app", "[org]", "[period]", item.href);
+    check(`"${label}" points at a route that exists`, existsSync(join(dir, "page.tsx")),
+      `no page at src/app/[org]/[period]/${item.href}`);
+    check(`"${label}" keys off its own route`, key === item.href);
+  }
+
   check("there are exactly eight subjects", SECTIONS.length === 8);
   check("the subjects are in the agreed order",
     SECTIONS.map((g) => g.label).join(" | ") ===
@@ -256,8 +278,65 @@ function informationArchitecture() {
     all.filter((g) => g.open).map((g) => g.label).join(", ") === "Team, Guests");
 }
 
+
+/**
+ * ═══ Nothing from the board reaches the browser ════════════════════════════
+ *
+ * **This repository is public**, and `SUPABASE_SERVICE_ROLE_KEY` bypasses row
+ * level security completely. One `import` from a `"use client"` file — even an
+ * indirect one, through a type or a helper — would inline it into a chunk that
+ * is served to anybody who loads a page, and the failure is silent: the build
+ * succeeds, the site works, and the key is on the internet.
+ *
+ * `src/lib/board.ts` imports `server-only`, which turns that into a build
+ * error. This asserts the outcome rather than the guard, because the guard is
+ * one deleted line away from being absent and nothing else would notice.
+ *
+ * The Supabase URL and the publishable key are checked too. Neither is a
+ * secret — RLS grants `anon` nothing on any table — but their presence in a
+ * chunk means a client component started talking to the database directly,
+ * which is a design change that should be made deliberately rather than
+ * discovered later.
+ */
+async function noSecretsInClientBundle() {
+  console.log("\nclient bundle");
+  const dir = join(import.meta.dirname, "..", ".next", "static");
+  let files: string[];
+  try {
+    files = await pages(dir, [".js", ".css", ".map"]);
+  } catch {
+    check("the client bundle was found", false, "no .next/static — run `npm run build` first");
+    return;
+  }
+
+  const banned = [
+    ["SUPABASE_SERVICE_ROLE_KEY", "the service-role variable name"],
+    ["service_role", "a service-role token"],
+    ["sb_publishable", "a Supabase publishable key"],
+    ["supabase.co", "a Supabase project URL"],
+  ] as const;
+
+  const hits = new Map<string, string[]>();
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+    for (const [needle] of banned) {
+      if (text.includes(needle)) {
+        hits.set(needle, [...(hits.get(needle) ?? []), file.replace(dir, "")]);
+      }
+    }
+  }
+
+  for (const [needle, what] of banned) {
+    const found = hits.get(needle);
+    check(`the client bundle carries no ${what}`, !found,
+      found ? `found in ${found.slice(0, 3).join(", ")}` : "");
+  }
+  check("the client bundle was scanned", files.length > 0, `${files.length} files`);
+}
+
 async function main() {
   informationArchitecture();
+  await noSecretsInClientBundle();
 
   ORGS = await orgIdentities();
   let files: string[];

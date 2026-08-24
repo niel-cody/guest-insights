@@ -64,6 +64,7 @@ export default async function TeamPerformancePage({
       period={current}
       title="Performance"
       section="Team"
+      surface="team/performance"
       checks={checks.length ? checks : undefined}
       actions={team ? <SpineChip team={team} orgSlug={slug} period={period} /> : undefined}
     />

@@ -59,6 +59,7 @@ export default async function GuestsPage({
         period={current}
         title="Individuals"
         section="Guests"
+        surface="guests"
         coverage={cov}
         // §7.1's report-specific filters — value band and daypart — render
         // inside the shared bar rather than beside it. There is not a second
