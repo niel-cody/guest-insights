@@ -386,8 +386,14 @@ npm install && npm run dev
 ```
 
 The app reads pre-extracted JSON from `data/` and makes no warehouse calls at
-request time. Fully static, deploys to Vercel with no environment variables and no
-database.
+request time. Every report is prerendered.
+
+Two things sit beside the reports and neither can affect them. The **access
+gate** needs `SITE_ACCESS` and `SESSION_SECRET`, and refuses to serve anything
+without them — see `.env.example`. The **board** — surface status and feedback —
+needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and degrades quietly to
+"To do" everywhere when they are absent. `docs/SETUP.md` has the steps for the
+second.
 
 ### Refreshing from Snowflake
 
