@@ -20,6 +20,7 @@
  */
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { SECTIONS, UTILITY } from "../src/lib/nav";
 
 const OUT = join(import.meta.dirname, "..", ".next", "server", "app");
 
@@ -85,7 +86,179 @@ let ORGS: { slug: string; name: string; venues: string[] }[] = [];
 /** So the skipped-venue note prints once per org rather than once per page. */
 const ambiguousLogged = new Set<string>();
 
+/**
+ * ═══ The information architecture, asserted as data ═══════════════════════
+ *
+ * These run once rather than per page, and they read `src/lib/nav.ts` rather
+ * than the built HTML. **That is not a convenience, it is the only way they can
+ * be true.** Six of the nine groups are collapsed by default and a collapsed
+ * group renders no items at all, so "Taxes appears under Finance" asserted
+ * against the DOM passes on a build where Taxes has been deleted. A test that
+ * cannot fail is worse than no test, and a whole suite of them reading a
+ * sidebar is how a nav quietly loses half its contents.
+ *
+ * The source of truth for the left column is the 29 July 2026 teardown, which
+ * enumerated all thirty-six live routes from the navigation DOM rather than
+ * from memory.
+ */
+function informationArchitecture() {
+  console.log("\ninformation architecture");
+
+  const all = [...SECTIONS, UTILITY];
+  const byLabel = new Map(all.map((g) => [g.label, g]));
+  const placed = new Map<string, string[]>();
+  for (const g of all) {
+    for (const i of g.items) {
+      placed.set(i.label, [...(placed.get(i.label) ?? []), g.label]);
+    }
+  }
+
+  /**
+   * Every live report, and the subject it was placed under.
+   *
+   * Thirty-five rows for thirty-six live routes, because Adjustments is split
+   * across two. The two reports missing from this table are asserted as
+   * deliberate absences below — they are decisions, not gaps.
+   */
+  const LIVE: [report: string, section: string][] = [
+    // Today's Sales section held fourteen reports. Seven of them are Sales.
+    ["Trading Monitor", "Sales"],
+    ["Sales Summary", "Sales"],
+    ["Revenue Performance", "Sales"],
+    ["Sales Trends", "Sales"],
+    ["Stores Overview", "Sales"],
+    ["Hourly Sales", "Sales"],
+    ["Sales Feed", "Sales"],
+    ["Products", "Menu & Product"],
+    ["Categories", "Menu & Product"],
+    ["Reporting Group", "Menu & Product"],
+    ["Option Groups", "Menu & Product"],
+    ["Taxes", "Finance"],
+    ["Promotions & offers", "Guests"],
+    ["Comps & adjustments", "Exceptions"],
+    // Today's Payments section, whole.
+    ["Payments", "Finance"],
+    ["Settlements", "Finance"],
+    ["Transfers", "Finance"],
+    ["Terminal Summary", "Finance"],
+    ["Transactions", "Finance"],
+    // Today's Operations section, which filed a kitchen bump time beside a bank
+    // reconciliation. That they shared a section is the clearest single
+    // argument for the split.
+    ["Shift Summaries", "Finance"],
+    ["Reconciliation", "Finance"],
+    ["KDS Metric", "Service"],
+    ["Tables & Sections", "Service"],
+    ["Voids", "Exceptions"],
+    ["Refunds", "Exceptions"],
+    // Today's Staff section.
+    ["Staff Scorecard", "Team"],
+    ["Users", "Team"],
+    ["Attendance", "Team"],
+    // Today's Customers section, less the Customer Report this build replaces.
+    ["Loyalty Spend", "Guests"],
+    ["Loyalty Redemption", "Guests"],
+    // Today's Admin section.
+    ["Saved Reports", "Platform"],
+    ["Scheduled Reports", "Platform"],
+    ["Forecasting & Planning", "Platform"],
+    ["Dates & Times", "Platform"],
+    ["Forecasting Settings", "Platform"],
+  ];
+
+  for (const [report, section] of LIVE) {
+    const where = placed.get(report);
+    check(`"${report}" is placed under ${section}`,
+      where !== undefined && where.includes(section),
+      where ? `found under ${where.join(", ")}` : "not in the nav at all");
+  }
+
+  /**
+   * A report with nothing behind it is never a link.
+   *
+   * Three states — built, stand-in, listed — and only the first two have a
+   * surface. A listed report that acquires an href is a reviewer clicking
+   * through to a 404, or worse to a page rendering figures nobody maintains,
+   * which is the failure `Placeholder` exists to avoid and the reason there are
+   * four stand-ins rather than thirty-five.
+   */
+  const STANDINS = ["Loyalty Spend", "Loyalty Redemption", "Staff Scorecard", "Attendance"];
+  for (const [report] of LIVE) {
+    if (STANDINS.includes(report)) continue;
+    const item = all.flatMap((g) => g.items).find((i) => i.label === report);
+    check(`"${report}" is listed, not linked`, item !== undefined && item.href === undefined,
+      "a report with nothing behind it has an href");
+  }
+  for (const report of STANDINS) {
+    const item = all.flatMap((g) => g.items).find((i) => i.label === report);
+    check(`"${report}" is a marked stand-in`,
+      item !== undefined && item.href !== undefined && item.placeholder === true,
+      "a stand-in lost its page or its label");
+  }
+
+  /**
+   * Devices is not a report under this model.
+   *
+   * It is the order fact with the row set to a till, which makes it a Group and
+   * a Filter — the same test that collapsed Stores Overview and Hourly Sales
+   * into Sales. A nav item for it would re-import exactly what the eight
+   * subjects exist to remove, so its absence is asserted rather than left to be
+   * quietly reversed.
+   */
+  check("Devices is not a nav item", !placed.has("Devices"));
+
+  /**
+   * Customer Report is the report this build replaces, so it is the one live
+   * report deliberately left off. Listing it as something to POC later would
+   * misstate what is happening to it.
+   */
+  check("Customer Report is not a nav item", !placed.has("Customer Report"));
+
+  /**
+   * Adjustments is listed twice, and the split is the placement decision.
+   *
+   * One report answers "did this offer work" and "should this have happened"
+   * off one source. Those are a Guests question and an Exceptions question, and
+   * a single item for both is how comped value ends up visible only to whoever
+   * went looking for promotions.
+   */
+  check("both halves of Adjustments are placed, in different sections",
+    placed.get("Promotions & offers")?.[0] === "Guests" &&
+    placed.get("Comps & adjustments")?.[0] === "Exceptions");
+
+  /**
+   * Inventory is the only subject with nothing in it, and that is the finding.
+   *
+   * Oolio ships no stock reporting today. A section rendering empty is the
+   * product telling the truth about a gap, so an Inventory that quietly gains
+   * items means somebody mapped a report into it that does not answer its
+   * question.
+   */
+  check("Inventory is empty, because nothing ships for it today",
+    byLabel.get("Inventory")?.items.length === 0);
+
+  check("there are exactly eight subjects", SECTIONS.length === 8);
+  check("the subjects are in the agreed order",
+    SECTIONS.map((g) => g.label).join(" | ") ===
+      "Sales | Menu & Product | Inventory | Service | Team | Guests | Finance | Exceptions");
+  check("Platform is the utility drawer, not a subject",
+    UTILITY.label === "Platform" && !SECTIONS.some((g) => g.label === "Platform"));
+
+  /**
+   * Only the two sections with built surfaces open by default.
+   *
+   * With thirty-five listed reports in the nav, a group that defaults open
+   * pushes everything below it off the screen. Team and Guests hold the six
+   * surfaces this build is asking you to judge; everything else is a map, and a
+   * map can be folded.
+   */
+  check("only the sections with built work start open",
+    all.filter((g) => g.open).map((g) => g.label).join(", ") === "Team, Guests");
+}
+
 async function main() {
+  informationArchitecture();
+
   ORGS = await orgIdentities();
   let files: string[];
   try {
