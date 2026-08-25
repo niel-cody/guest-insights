@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { updateStatus } from "@/app/board-actions";
 import { STATUSES, STATUS_DOT, STATUS_LABEL, type Status } from "@/lib/status";
 import { refreshBoard, useBoard } from "./useBoard";
+import { Popover } from "@/components/ui/Popover";
 
 /**
  * Where this page has got to: one dot, beside the title.
@@ -32,6 +33,13 @@ import { refreshBoard, useBoard } from "./useBoard";
  * fill rather than hue. The label is still reachable: it is the accessible name
  * and the tooltip, so a screen reader gets a sentence rather than a bullet, and
  * anybody unsure hovers once.
+ *
+ * ── It dismisses when you leave it ─────────────────────────────────────────
+ *
+ * It did not, at first. This was a bare `<details>`, which handles open state
+ * and nothing else — no light dismiss, no Escape — so the menu stayed open
+ * through clicks on the report behind it and through navigation. See `Popover`,
+ * which now carries that for all three floating menus in the shell.
  *
  * ── The rule is still server-side ──────────────────────────────────────────
  *
@@ -94,45 +102,45 @@ export function StatusControl({ surface }: { surface: string }) {
   }
 
   return (
-    <details className="relative inline-flex">
-      <summary
-        title={label}
-        aria-label={label}
-        className={`flex cursor-pointer list-none items-center rounded-full p-1 marker:hidden hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none ${
-          pending ? "opacity-50" : ""
-        }`}
-      >
-        <Dot state={current} />
-      </summary>
-
-      <div className="absolute top-full left-0 z-30 mt-1 w-[190px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
-        <p className="px-2.5 pt-1 pb-1.5 text-[11px] tracking-wide text-ink-muted uppercase">
-          Page state
+    <Popover
+      label={label}
+      className="relative inline-flex"
+      closeOnSelect
+      summary={
+        <span
+          className={`rounded-full p-1 hover:bg-surface-hover ${pending ? "opacity-50" : ""}`}
+        >
+          <Dot state={current} />
+        </span>
+      }
+      panelClassName="absolute top-full left-0 z-30 mt-1 w-[190px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop"
+    >
+      <p className="px-2.5 pt-1 pb-1.5 text-[11px] tracking-wide text-ink-muted uppercase">
+        Page state
+      </p>
+      {STATUSES.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => set(s)}
+          className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
+            s === current
+              ? "bg-accent-soft font-semibold text-accent"
+              : "text-ink-secondary hover:bg-surface-hover"
+          }`}
+        >
+          <Dot state={s} />
+          {STATUS_LABEL[s]}
+        </button>
+      ))}
+      {error && (
+        <p
+          className="mt-1 border-t border-line px-2.5 pt-2 text-[12px]"
+          style={{ color: "var(--critical)" }}
+        >
+          {error}
         </p>
-        {STATUSES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => set(s)}
-            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] ${
-              s === current
-                ? "bg-accent-soft font-semibold text-accent"
-                : "text-ink-secondary hover:bg-surface-hover"
-            }`}
-          >
-            <Dot state={s} />
-            {STATUS_LABEL[s]}
-          </button>
-        ))}
-        {error && (
-          <p
-            className="mt-1 border-t border-line px-2.5 pt-2 text-[12px]"
-            style={{ color: "var(--critical)" }}
-          >
-            {error}
-          </p>
-        )}
-      </div>
-    </details>
+      )}
+    </Popover>
   );
 }

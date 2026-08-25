@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { signOut } from "@/app/login/actions";
 import { useScope } from "@/lib/use-scope";
 import { IconExit } from "./Icons";
+import { Popover } from "@/components/ui/Popover";
 
 /**
  * The session, in the rail: who you are, which organisation, and the way out.
@@ -26,12 +27,13 @@ import { IconExit } from "./Icons";
  * rail, which is the only part of the shell that does not change when you
  * navigate.
  *
- * ── `<details>` rather than a popover with an effect ───────────────────────
+ * ── It shipped unable to close, and that comment was wrong ─────────────────
  *
- * Same mechanism as `Locations` in the filter bar: the browser handles the open
- * state, Escape, and the click that closes it. A hand-rolled popover here would
- * be a `useEffect`, a document listener and a ref, to reproduce behaviour that
- * already exists and is already keyboard-accessible.
+ * This said the browser "handles the open state, Escape, and the click that
+ * closes it". `<details>` handles the first and neither of the other two: there
+ * is no light dismiss in the element, so this menu stayed open until you
+ * clicked the mark again. `Popover` carries that behaviour now, for this and
+ * the two other floating menus in the shell.
  */
 export function AccountMenu() {
   const router = useRouter();
@@ -56,57 +58,58 @@ export function AccountMenu() {
   }
 
   return (
-    <details className="relative mb-3">
-      <summary
-        title={`Signed in as ${scope.label}`}
-        className="grid h-9 w-9 cursor-pointer list-none place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white marker:hidden focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-      >
-        N
-      </summary>
-
-      <div className="absolute top-0 left-full z-40 ml-2 w-[240px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
-        {/* Who, before which. Three passwords go to two merchants and to
-            Oolio, and those three read pages that differ only in the figures on
-            them — a reviewer who does not know which they are looking at cannot
-            give useful feedback about it, or quotes a number back believing it
-            is theirs. */}
-        <div className="px-2.5 pt-1.5 pb-2">
-          <p className="text-[11px] tracking-wide text-ink-muted uppercase">Signed in as</p>
-          <p className="mt-0.5 text-[13px] font-semibold text-ink">{scope.label}</p>
-        </div>
-
-        <div className="border-t border-line pt-2">
-          {/* One organisation is a label, not a control. A menu with a single
-              option is a control that cannot do anything, and this shell has a
-              rule against those. */}
-          {orgs.length <= 1 ? (
-            <p className="px-2.5 py-1.5 text-[13px] text-ink-secondary">
-              {orgs[0]?.name ?? "One organisation"}
-            </p>
-          ) : (
-            <>
-              <p className="px-2.5 pb-1 text-[11px] tracking-wide text-ink-muted uppercase">
-                Organisation
-              </p>
-              {orgs.map((o) => (
-                <button
-                  key={o.slug}
-                  type="button"
-                  /* To the org root, not to the current path with the slug
-                     swapped. Periods are per-organisation, so carrying this
-                     one across lands on a window the other org may not have —
-                     the org index resolves its own most recent run. */
-                  onClick={() => router.push(`/${o.slug}`)}
-                  className="block w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary hover:bg-surface-hover"
-                >
-                  {o.name}
-                </button>
-              ))}
-            </>
-          )}
-        </div>
+    <Popover
+      label={`Signed in as ${scope.label}`}
+      className="relative mb-3"
+      closeOnSelect
+      summary={
+        <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white">
+          N
+        </span>
+      }
+      panelClassName="absolute top-0 left-full z-40 ml-2 w-[240px] rounded-xl border border-line bg-surface-raised p-2 shadow-pop"
+    >
+      {/* Who, before which. Three passwords go to two merchants and to Oolio,
+          and those three read pages that differ only in the figures on them — a
+          reviewer who does not know which they are looking at cannot give
+          useful feedback about it, or quotes a number back believing it is
+          theirs. */}
+      <div className="px-2.5 pt-1.5 pb-2">
+        <p className="text-[11px] tracking-wide text-ink-muted uppercase">Signed in as</p>
+        <p className="mt-0.5 text-[13px] font-semibold text-ink">{scope.label}</p>
       </div>
-    </details>
+
+      <div className="border-t border-line pt-2">
+        {/* One organisation is a label, not a control. A menu with a single
+            option is a control that cannot do anything, and this shell has a
+            rule against those. */}
+        {orgs.length <= 1 ? (
+          <p className="px-2.5 py-1.5 text-[13px] text-ink-secondary">
+            {orgs[0]?.name ?? "One organisation"}
+          </p>
+        ) : (
+          <>
+            <p className="px-2.5 pb-1 text-[11px] tracking-wide text-ink-muted uppercase">
+              Organisation
+            </p>
+            {orgs.map((o) => (
+              <button
+                key={o.slug}
+                type="button"
+                /* To the org root, not to the current path with the slug
+                   swapped. Periods are per-organisation, so carrying this one
+                   across lands on a window the other org may not have — the org
+                   index resolves its own most recent run. */
+                onClick={() => router.push(`/${o.slug}`)}
+                className="block w-full rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary hover:bg-surface-hover"
+              >
+                {o.name}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    </Popover>
   );
 }
 

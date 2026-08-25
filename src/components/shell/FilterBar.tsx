@@ -3,6 +3,7 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PeriodPicker } from "@/components/ui/PeriodPicker";
+import { Popover } from "@/components/ui/Popover";
 import type { Period, Periods } from "@/lib/periods";
 import type { Org } from "@/lib/types";
 import { SEGMENT_LABEL, dayLabel } from "@/lib/metrics";
@@ -319,13 +320,21 @@ function Locations({
       : `${selected.length} locations`;
 
   return (
-    <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-[13px] marker:hidden hover:bg-surface-hover">
-        <span className="text-ink-muted">Locations</span>
-        <span className="font-medium text-ink">{label}</span>
-        <IconChevron className="h-4 w-4 text-ink-muted" />
-      </summary>
-      <div className="absolute top-full left-0 z-30 mt-1 max-h-[320px] w-[280px] overflow-y-auto rounded-xl border border-line bg-surface-raised p-2 shadow-pop">
+    /* `closeOnSelect` is deliberately off: this is a multi-select and the whole
+       point is ticking several. It still light-dismisses on an outside click
+       and on Escape, which it did not before — see `Popover`. */
+    <Popover
+      className="relative"
+      summary={
+        <span className="flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-[13px] hover:bg-surface-hover">
+          <span className="text-ink-muted">Locations</span>
+          <span className="font-medium text-ink">{label}</span>
+          <IconChevron className="h-4 w-4 text-ink-muted" />
+        </span>
+      }
+      panelClassName="absolute top-full left-0 z-30 mt-1 max-h-[320px] w-[280px] overflow-y-auto rounded-xl border border-line bg-surface-raised p-2 shadow-pop"
+    >
+      <>
         <button
           type="button"
           onClick={() => onChange([])}
@@ -360,7 +369,7 @@ function Locations({
             This scope follows you to Overview, Behaviour and Guests, and survives a reload.
           </p>
         )}
-      </div>
-    </details>
+      </>
+    </Popover>
   );
 }
